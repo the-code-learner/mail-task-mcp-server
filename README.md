@@ -4,7 +4,7 @@
 
 Postmaster MCP is a self-contained Model Context Protocol server that connects MCP-capable AI clients to one or more IMAP/SMTP mailboxes while keeping credentials, task state, recipient policies, analytics and operational data on your own server.
 
-The public v8.6 Portainer stack includes the application source directly inside a single Docker Compose YAML file. No separate application image or source checkout is required to start it.
+The public v8.7 Portainer stack includes the application source directly inside a single Docker Compose YAML file. No separate application image or source checkout is required to start it.
 
 > Original project by **the-code-learner**.  
 > Licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
@@ -31,11 +31,15 @@ The email account credentials remain on the server and are not returned through 
 
 The scheduler is intentionally **registry-only**: it stores tasks and schedule metadata but does not run jobs or send messages by itself. An AI client can inspect due tasks, reason about what should happen, perform the appropriate MCP actions and then mark the task as handled.
 
+In v8.7, the same account-level open-tracking policy is also applied to replies. A client can still opt out or opt in for an individual send/reply using `track_opens`.
+
 ---
 
-## v8.6 capabilities
+## v8.7 capabilities
 
 The included stack exposes **54 MCP tools**.
+
+v8.7 adds open tracking to threaded replies using the same per-recipient analytics engine already used by tracked sends. The per-account `tracking_default` now applies consistently to both `send_email` and `reply_email`, while either operation can explicitly override it for a single message.
 
 ### System and account management
 
@@ -121,7 +125,7 @@ delete_job
 get_job_history
 ```
 
-`approve_job` is retained for compatibility, but the v8.6 task registry does not autonomously execute tasks.
+`approve_job` is retained for compatibility, but the v8.7 task registry does not autonomously execute tasks.
 
 ---
 
@@ -148,7 +152,7 @@ Stacks
 Paste the complete contents of:
 
 ```text
-postmaster-mcp-v8.6-portainer.yml
+postmaster-mcp.yml
 ```
 
 and deploy the stack.
@@ -395,9 +399,41 @@ For dynamic AMP endpoints, configure a real public base URL before use.
 
 # Per-recipient open analytics
 
-Open tracking is opt-in.
+Open tracking is disabled by default for newly configured accounts and can be enabled as an account default or overridden per message.
 
-For tracked multi-recipient sends, v8.6 can create individualized deliveries with distinct tracking tokens while preserving the visible To/Cc headers.
+The account setting:
+
+```text
+Track opens by default (send + reply)
+```
+
+applies to both:
+
+```text
+send_email
+reply_email
+```
+
+The MCP parameters use the following behavior:
+
+```text
+track_opens: null   -> use the account default
+track_opens: true   -> force tracking for this message
+track_opens: false  -> disable tracking for this message
+```
+
+For tracked multi-recipient sends and replies, v8.7 uses one SMTP envelope per recipient with a distinct tracking token while preserving the original visible `To` / `Cc` headers on every copy. `Bcc` recipients remain hidden.
+
+Tracked replies also preserve the threading headers:
+
+```text
+In-Reply-To
+References
+```
+
+so enabling analytics does not intentionally break normal mail threading or Reply-All context.
+
+Before a tracked or AMP delivery creates campaign rows, the server validates that a public base URL is configured. This prevents analytics records from being created when tracking cannot produce a usable public pixel URL.
 
 The tracker records image-load events such as:
 
@@ -557,7 +593,7 @@ LEGACY_EMAIL_ADDRESS: ''
 LEGACY_EMAIL_PASSWORD: ''
 ```
 
-For normal v8.6 use, configure accounts in the WebGUI instead.
+For normal v8.7 use, configure accounts in the WebGUI instead.
 
 ---
 
@@ -596,7 +632,7 @@ A minimal public repository can be:
 ```text
 postmaster-mcp/
 ├── README.md
-├── postmaster-mcp-v8.6-portainer.yml
+├── postmaster-mcp.yml
 ├── LICENSE
 ├── NOTICE
 └── .gitignore
