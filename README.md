@@ -1,111 +1,378 @@
 # Postmaster MCP
 
-**A self-hosted MCP server for secure AI-assisted email management and persistent task workflows.**
+**Self-hosted MCP server for AI-assisted email management and persistent task workflows.**
 
-Postmaster MCP is a self-hosted [Model Context Protocol](https://modelcontextprotocol.io/) server that gives authorized AI clients structured access to email accounts and persistent task management.
+Postmaster MCP is a self-contained Model Context Protocol server that connects MCP-capable AI clients to one or more IMAP/SMTP mailboxes while keeping credentials, task state, recipient policies, analytics and operational data on your own server.
 
-It is designed to let an AI client safely work with real mailboxes through MCP tools while keeping credentials, server-side state, task scheduling, permissions, and audit information under the control of the self-hosted server.
+The public v8.6 Portainer stack includes the application source directly inside a single Docker Compose YAML file. No separate application image or source checkout is required to start it.
 
-The project combines:
-
-- IMAP mailbox access
-- SMTP email delivery
-- message search and retrieval
-- drafts, replies and forwarding
-- HTML email
-- AMP email
-- attachment handling
-- spam management
-- multiple email accounts
-- persistent task registration
-- conditional follow-ups
-- AI-driven scheduled workflows
-- explicit write operations
-- human-in-the-loop approval patterns
-- audit-friendly structured actions
+> Original project by **the-code-learner**.  
+> Licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
 
 ---
 
-## Why Postmaster MCP?
+## What it does
 
-Most email integrations expose a mailbox directly to a single application or automation system.
-
-Postmaster MCP takes a different approach:
+Postmaster MCP combines four main components:
 
 ```text
-Email provider
-      |
-      v
- IMAP / SMTP
-      |
-      v
+MCP clients
+    |
+    v
 Postmaster MCP
-      |
-      v
-Model Context Protocol
-      |
-      +------ AI Client A
-      |
-      +------ AI Client B
-      |
-      +------ Other MCP-compatible clients
+    |
+    +-- Multi-account IMAP/SMTP mail operations
+    +-- Persistent task registry
+    +-- Web administration dashboard
+    +-- AMP / per-recipient open analytics
 ```
 
-The email provider remains independent from the AI provider.
+The email account credentials remain on the server and are not returned through MCP tools.
 
-The MCP server acts as the controlled interface between them.
-
-This means the same self-hosted mailbox infrastructure can be used by different MCP-compatible AI clients without exposing raw credentials to every client.
+The scheduler is intentionally **registry-only**: it stores tasks and schedule metadata but does not run jobs or send messages by itself. An AI client can inspect due tasks, reason about what should happen, perform the appropriate MCP actions and then mark the task as handled.
 
 ---
 
-# Core Features
+## v8.6 capabilities
 
-## Email
+The included stack exposes **54 MCP tools**.
 
-Postmaster MCP can expose structured operations for:
+### System and account management
 
 ```text
-list mailboxes
-search messages
-read messages
-read threads
-download attachments
-create drafts
-send messages
-reply
-reply-all
-forward
-archive
-move messages
-delete messages
-mark read / unread
-mark spam / not spam
-manage labels or folders
+build_status
+list_email_accounts
+test_email_account
+amp_account_status
+set_amp_account_state
+validate_amp_email
 ```
 
-Exact capabilities depend on the configured backend and permissions.
+### Mailbox and message access
+
+```text
+mailbox_status
+list_mailboxes
+search_emails
+get_email
+list_known_contacts
+list_email_attachments
+get_email_attachment
+read_email_attachment
+```
+
+### Recipient safety policy
+
+```text
+email_security_status
+recipient_authorization_status
+list_authorized_recipients
+list_authorized_domains
+authorize_domain
+revoke_domain
+authorize_recipient
+revoke_recipient
+```
+
+### Tracking and analytics
+
+```text
+tracking_status
+list_tracking_campaigns
+get_tracking_campaign
+list_tracking_deliveries
+list_open_events
+```
+
+### Email write operations
+
+```text
+send_email
+reply_email
+create_draft
+create_reply_draft
+move_email
+mark_not_spam
+mark_as_spam
+set_email_seen
+```
+
+### Persistent task registry
+
+```text
+scheduler_status
+create_owner
+list_owners
+create_project
+list_projects
+create_execution_profile
+list_execution_profiles
+preview_schedule
+create_job
+list_jobs
+list_due_jobs
+get_job
+update_job
+pause_job
+resume_job
+approve_job
+complete_job
+delete_job
+get_job_history
+```
+
+`approve_job` is retained for compatibility, but the v8.6 task registry does not autonomously execute tasks.
 
 ---
 
-## HTML Email
+# Quick start with Portainer
 
-Messages can be sent as multipart email with both plain-text and HTML versions.
+## Requirements
 
-Example:
+- Docker / Portainer
+- Internet access during the first container start so Python dependencies can be installed
+- an IMAP/SMTP email account if you want to use the mail features
+
+The stack can start **without any mailbox configured**.
+
+## 1. Create a stack
+
+In Portainer:
+
+```text
+Stacks
+-> Add stack
+-> Web editor
+```
+
+Paste the complete contents of:
+
+```text
+postmaster-mcp-v8.6-portainer.yml
+```
+
+and deploy the stack.
+
+The stack publishes:
+
+```text
+host port 8787 -> container port 8000
+```
+
+## 2. Open the dashboard
+
+On a trusted local network, open:
+
+```text
+http://YOUR_SERVER_IP:8787/
+```
+
+The container starts even when no mail account exists. The dashboard will show that no account is configured and allows you to add one from the **Accounts** tab.
+
+## 3. Add an email account
+
+From the dashboard, provide:
+
+```text
+Account ID
+Label
+Email / From address
+
+IMAP host
+IMAP port
+IMAP security
+IMAP username
+IMAP password
+
+SMTP host
+SMTP port
+SMTP security
+SMTP username
+SMTP password
+
+Inbox mailbox
+Sent mailbox
+Draft mailbox
+Junk / Spam mailbox
+```
+
+Passwords are encrypted before being stored in the persistent account database.
+
+The relevant persistent files are:
+
+```text
+/data/mail_accounts.db
+/data/mail_accounts.key
+```
+
+Do not lose `mail_accounts.key`: existing encrypted mailbox credentials cannot be decrypted without the matching key.
+
+---
+
+# Portainer stack design
+
+The public distribution is intentionally a **single YAML file**.
+
+It contains:
+
+```text
+Docker service definition
+runtime environment
+persistent volumes
+startup command
+health check
+server.py
+mail_bridge.py
+scheduler_engine.py
+mail_extensions.py
+account_store.py
+email_analytics.py
+```
+
+The Python modules are embedded using Compose `configs:` entries.
+
+At first start the container creates a Python virtual environment in the persistent `mcp_venv` volume and installs:
+
+```text
+mcp
+croniter
+tzdata
+pypdf
+cryptography
+```
+
+Application state is stored in the persistent `mcp_data` volume mounted at:
+
+```text
+/data
+```
+
+---
+
+# Persistent data
+
+The stack uses separate SQLite databases and key files.
+
+```text
+/data/scheduler.db
+/data/mail_policy.db
+/data/mail_accounts.db
+/data/mail_accounts.key
+/data/email_analytics.db
+/data/email_analytics.key
+```
+
+The Docker volumes are:
+
+```text
+mcp_venv
+mcp_data
+```
+
+Back up `mcp_data` if you want to preserve accounts, task state, recipient policy and analytics across migrations or host failures.
+
+---
+
+# Task registry model
+
+Postmaster MCP does **not** run scheduled tasks autonomously.
+
+```text
+Task registry
+    |
+    | stores due date / recurrence / context
+    v
+MCP-capable AI client
+    |
+    | reads due task
+    | evaluates current context
+    | performs explicit MCP actions
+    v
+Postmaster MCP
+    |
+    +-- email
+    +-- mailbox operations
+    +-- task completion/history
+```
+
+This makes conditional tasks possible, for example:
+
+```text
+Follow up only if no reply has arrived.
+
+Review Junk and restore only genuine false positives.
+
+Check unread mail and summarize messages that require attention.
+```
+
+The server remains the persistent source of task state, while the AI client provides the reasoning.
+
+The public stack seeds a generic owner and project only:
+
+```text
+owner: default
+project: default
+```
+
+They contain no personal information and can be replaced or supplemented through MCP.
+
+---
+
+# Recipient safety
+
+Automated sending uses a recipient authorization policy.
+
+The public stack ships with:
+
+```text
+SEND_RECIPIENT_ALLOWLIST: ''
+ALLOW_PREVIOUS_SENT_RECIPIENTS: 'true'
+```
+
+No private recipient or company allowlist is included.
+
+Recipients can be authorized explicitly by exact address or domain using the MCP tools or dashboard policy controls. Historical Sent recipients may also be accepted when that behavior is enabled.
+
+Draft creation intentionally permits new/unlisted recipients so a human can review a draft before an actual send.
+
+---
+
+# Multi-account email
+
+Multiple IMAP/SMTP accounts can be stored in the encrypted account database.
+
+Each mailbox operation accepts an optional:
+
+```text
+account_id
+```
+
+If omitted, the configured default account is used.
+
+This allows one MCP server to manage multiple mail identities while keeping the credentials server-side.
+
+---
+
+# HTML email
+
+Postmaster MCP supports plain-text and HTML email.
+
+A normal multipart message can contain:
 
 ```text
 text/plain
 text/html
 ```
 
-This allows normal email clients to display formatted content while retaining a plain-text fallback.
+Attachments can also be added to sends and drafts.
 
 ---
 
-## AMP Email
+# AMP for Email
 
-Postmaster MCP can optionally generate multipart AMP messages using the standard MIME structure:
+AMP is an **optional per-account capability**.
+
+When an AMP body is supplied, the sender produces the MIME alternatives in this order:
 
 ```text
 text/plain
@@ -113,638 +380,259 @@ text/x-amp-html
 text/html
 ```
 
-This allows compatible email clients to display interactive AMP content while preserving standard HTML and plain-text fallbacks.
+The server includes:
 
-AMP support is optional and does not affect standard email functionality.
+- per-account AMP enable/test/registration state
+- local AMP preflight checks
+- dashboard guidance for Gmail AMP registration
+- recipient-scoped dynamic AMP status URLs
 
----
+Normal plain/HTML email continues to work when AMP is disabled.
 
-## Attachments
-
-The server can support both sending and retrieving attachments.
-
-Typical workflows include:
-
-```text
-AI reads an email
-      |
-      v
-detects attachment
-      |
-      v
-retrieves attachment metadata or file
-      |
-      v
-AI evaluates the content
-```
-
-and:
-
-```text
-AI prepares email
-      |
-      +-- body
-      +-- HTML
-      +-- optional AMP
-      +-- attachment
-      |
-      v
-Postmaster MCP
-      |
-      v
-SMTP provider
-```
+For dynamic AMP endpoints, configure a real public base URL before use.
 
 ---
 
-# Persistent Task Registry
+# Per-recipient open analytics
 
-Postmaster MCP includes a persistent task registry for workflows that need to survive individual AI conversations.
+Open tracking is opt-in.
 
-Examples:
+For tracked multi-recipient sends, v8.6 can create individualized deliveries with distinct tracking tokens while preserving the visible To/Cc headers.
+
+The tracker records image-load events such as:
 
 ```text
-Check the inbox every 6 hours
-
-Review Spam every 48 hours
-
-Follow up with a contact next Tuesday
-
-Check whether someone replied before sending a follow-up
-
-Revisit a conversation in three months
-
-Remind the AI to inspect a mailbox after a deadline
+recipient
+timestamp
+country code reported by the edge proxy
+parsed browser / OS
+user agent
+source / confidence
+HMAC client fingerprint
 ```
 
-Tasks are stored persistently on the server.
+It does **not** intentionally store the raw client IP address.
+
+An open event is only telemetry from an external image request. It is not proof that a human actually read a message: image proxies, scanners, prefetching and image blocking can affect the result.
 
 ---
 
-## The Scheduler Does Not Need to Be the Agent
+# Public URL configuration
 
-A core design principle of Postmaster MCP is the separation between:
-
-```text
-task storage
-```
-
-and:
-
-```text
-task execution
-```
-
-The server can behave as a persistent **task registry** rather than an autonomous agent.
-
-For example:
-
-```text
-Persistent Task Registry
-        |
-        | due tasks
-        v
-   AI Client
-        |
-        | reasoning
-        v
-Postmaster MCP tools
-        |
-        v
- Email / other actions
-```
-
-The task registry determines **what is due**.
-
-The AI determines **what should actually be done**.
-
-This is particularly useful for tasks such as:
-
-```text
-"Follow up only if no reply was received."
-
-"Move the message out of Spam only if it is clearly legitimate."
-
-"Review unread messages and summarize only important ones."
-
-"Send another message only if the previous conversation requires it."
-```
-
-These workflows require context and reasoning that a traditional cron job cannot reliably provide.
-
----
-
-# Example Task
-
-A registered task might contain:
-
-```json
-{
-  "title": "Check inbox",
-  "action_type": "action_required",
-  "schedule_type": "interval",
-  "schedule_value": "21600",
-  "payload": {
-    "mailbox": "INBOX",
-    "filter": "unread_only",
-    "action": "review_and_summarize"
-  }
-}
-```
-
-When the task becomes due, an authorized AI client can:
-
-1. retrieve the task;
-2. inspect the mailbox;
-3. reason about the messages;
-4. perform the appropriate MCP actions;
-5. report the result;
-6. mark the task as handled.
-
----
-
-# Task Types
-
-Possible task categories include:
-
-```text
-reminder
-action_required
-mailbox_review
-spam_review
-follow_up
-conditional_follow_up
-contact_check
-periodic_summary
-```
-
-The task model is intentionally generic so additional workflows can be built on top of it.
-
----
-
-# Multi-Account Support
-
-Postmaster MCP can be designed to manage multiple email identities.
-
-Example:
-
-```text
-accounts/
-├── account-primary
-├── account-support
-└── account-project
-```
-
-Credentials remain server-side.
-
-AI clients operate using account identifiers rather than receiving raw passwords or SMTP credentials.
-
----
-
-# Security Model
-
-The server should be treated as a privileged interface to email infrastructure.
-
-Security should therefore be enforced by the server rather than relying only on prompts.
-
-Recommended principles:
-
-```text
-credentials stay server-side
-explicit write actions
-least-privilege permissions
-auditable operations
-separate account identities
-human approval where appropriate
-secret redaction
-secure transport
-restricted network exposure
-```
-
----
-
-## Read vs Write Operations
-
-Operations should clearly distinguish between read-only and write actions.
-
-Examples:
-
-### Read-only
-
-```text
-search_email
-read_email
-list_mailboxes
-download_attachment
-list_tasks
-list_due_tasks
-get_task_history
-```
-
-### Write actions
-
-```text
-send_email
-create_draft
-move_email
-delete_email
-mark_spam
-mark_not_spam
-complete_task
-create_task
-update_task
-```
-
-Clients can use this distinction when applying permission or approval policies.
-
----
-
-# Human-in-the-Loop
-
-Sensitive operations can require explicit approval.
-
-Examples:
-
-```text
-send a new external email
-delete messages
-send a bulk message
-modify a sensitive task
-perform an irreversible operation
-```
-
-Read-only inspection and low-risk operations can be handled separately.
-
-The exact approval policy is deployment-specific.
-
----
-
-# Suggested Architecture
-
-```text
-                    Internet
-                       |
-                       v
-                Secure Gateway
-                       |
-                       v
-               Postmaster MCP
-                       |
-          +------------+------------+
-          |            |            |
-          v            v            v
-        IMAP          SMTP      Task Registry
-          |            |            |
-          v            v            v
-       Mailbox       Delivery      SQLite
-```
-
-Optional components:
-
-```text
-reverse proxy
-Cloudflare Tunnel
-Cloudflare Access
-OAuth
-Web dashboard
-scheduler UI
-audit log
-multi-account configuration
-```
-
----
-
-# Example Deployment
-
-A typical self-hosted deployment might look like:
-
-```text
-Debian / Ubuntu server
-        |
-        +-- Postmaster MCP
-        |
-        +-- SQLite
-        |
-        +-- IMAP / SMTP connection
-        |
-        +-- reverse proxy or secure tunnel
-```
-
-No inbound mail server is required if Postmaster MCP is connecting to an existing IMAP/SMTP provider.
-
----
-
-# Configuration
-
-Configuration should be provided through environment variables or external configuration files.
-
-Example:
+The anonymous stack intentionally ships with:
 
 ```yaml
-server:
-  host: 127.0.0.1
-  port: 8000
-
-accounts:
-  - id: account-primary
-    imap_host: imap.example.com
-    smtp_host: smtp.example.com
+PUBLIC_MCP_HOST: ''
+PUBLIC_EMAIL_BASE_URL: ''
 ```
 
-Secrets should **not** be committed to Git.
+This is enough for the container and local WebGUI to start.
 
-Use environment variables or an external secrets mechanism for:
+Before using the MCP remotely through a hostname, set:
 
-```text
-passwords
-OAuth tokens
-API tokens
-private keys
-SMTP credentials
-IMAP credentials
+```yaml
+PUBLIC_MCP_HOST: mcp.example.com
 ```
+
+For AMP dynamic endpoints or open tracking, set either that host or a complete base URL:
+
+```yaml
+PUBLIC_EMAIL_BASE_URL: https://mcp.example.com
+```
+
+These values are deployment-specific and therefore are not hard-coded in the public repository.
 
 ---
 
-# Repository Safety
+# Security model
 
-This repository is intended to be public.
+The application is designed to sit behind an external access layer.
 
-The project follows a **public-by-design** rule:
+The stack itself does **not** provide a complete public-facing login system for the dashboard. Do not expose port `8787` directly to the public Internet without a trusted access layer.
 
-> If it is committed, it must be safe to publish.
-
-Do not commit:
+A typical deployment is:
 
 ```text
-.env
-credentials
-email passwords
-OAuth tokens
-API keys
-private keys
-real mailbox exports
-personal email addresses
+Internet
+    |
+    v
+Cloudflare Access / trusted reverse proxy
+    |
+    v
+Postmaster MCP :8000
+```
+
+The original deployment model uses Cloudflare Access externally.
+
+Recommended rules:
+
+- protect `/` and `/mcp` behind authenticated access;
+- keep mailbox credentials only in the encrypted server-side account store;
+- back up the encryption key together with the corresponding database;
+- review recipient authorization before enabling automated sending;
+- avoid exposing the raw Docker port publicly.
+
+## AMP and tracking exception
+
+Mail clients cannot complete an interactive dashboard login when loading an AMP XHR endpoint or tracking pixel.
+
+If you enable those features, narrowly scoped routes such as:
+
+```text
+/api/amp/*
+/track/open/*
+```
+
+must be reachable by the receiving mail client. Configure your reverse proxy/access policy accordingly. The endpoint tokens are scoped and unguessable, but exposing these routes is still a deployment decision you should review carefully.
+
+---
+
+# MCP endpoint
+
+The MCP endpoint is:
+
+```text
+/mcp
+```
+
+For example, after configuring a public hostname:
+
+```text
+https://mcp.example.com/mcp
+```
+
+The MCP transport is Streamable HTTP and runs stateless HTTP responses while using the MCP session manager internally.
+
+---
+
+# Dashboard
+
+The WebGUI is served from:
+
+```text
+/
+```
+
+It provides views for:
+
+```text
+Overview
+Accounts
+AMP
+Tracking
+Authorized domains
+Authorized recipients
+Tasks
+```
+
+The dashboard and MCP endpoint share the same application server and container port.
+
+---
+
+# Configuration values in the public YAML
+
+The included defaults are intentionally non-personal.
+
+Important values include:
+
+```yaml
+TZ: UTC
+ENABLE_SEND: 'true'
+SEND_RECIPIENT_ALLOWLIST: ''
+ALLOW_PREVIOUS_SENT_RECIPIENTS: 'true'
+MCP_HOST: 0.0.0.0
+MCP_PORT: '8000'
+PUBLIC_MCP_HOST: ''
+PUBLIC_EMAIL_BASE_URL: ''
+DEFAULT_OWNER_ID: default
+DEFAULT_OWNER_NAME: Default User
+SEED_DEFAULT_PROJECT: 'true'
+ALLOW_AUTOMATIC_EMAIL_JOBS: 'false'
+```
+
+Legacy single-account environment migration variables exist only for compatibility and are blank by default:
+
+```yaml
+LEGACY_EMAIL_ADDRESS: ''
+LEGACY_EMAIL_PASSWORD: ''
+```
+
+For normal v8.6 use, configure accounts in the WebGUI instead.
+
+---
+
+# Health check
+
+The stack contains a Docker health check that verifies that the application accepts TCP connections on:
+
+```text
+127.0.0.1:8000
+```
+
+The first start may take longer because the virtual environment and Python dependencies are installed before the server launches.
+
+---
+
+# Updating
+
+Because the application source is embedded directly in the Compose YAML, updating the public distribution means replacing the stack YAML with the newer version and redeploying.
+
+Persistent state remains in the named volumes unless those volumes are explicitly deleted.
+
+Before a major update, back up:
+
+```text
+mcp_data
+```
+
+or at minimum the contents of `/data`.
+
+---
+
+# Repository structure
+
+A minimal public repository can be:
+
+```text
+postmaster-mcp/
+├── README.md
+├── postmaster-mcp-v8.6-portainer.yml
+├── LICENSE
+├── NOTICE
+└── .gitignore
+```
+
+The YAML contains the deployable application itself.
+
+No real mailbox address, password, private hostname, private domain allowlist or personal project data should be committed.
+
+---
+
+# Privacy-safe public distribution
+
+The public stack replaces deployment-specific values with generic defaults and placeholders.
+
+It does not contain:
+
+```text
+personal email accounts
+mailbox passwords
 private domains
-production configuration
-mail contents
-task databases
-logs containing personal data
+personal names
+private recipient allowlists
+private task/project names
+private Cloudflare hostnames
 ```
 
-Use placeholders such as:
-
-```text
-user@example.com
-imap.example.com
-smtp.example.com
-account-primary
-```
-
----
-
-# Example `.env.example`
-
-```env
-MCP_HOST=127.0.0.1
-MCP_PORT=8000
-
-IMAP_HOST=imap.example.com
-IMAP_PORT=993
-
-SMTP_HOST=smtp.example.com
-SMTP_PORT=465
-
-EMAIL_USERNAME=user@example.com
-
-# Never put real secrets in this file.
-EMAIL_PASSWORD=CHANGE_ME
-```
-
----
-
-# Development Philosophy
-
-Postmaster MCP aims to keep the MCP interface:
-
-```text
-structured
-predictable
-auditable
-provider-independent
-AI-provider-independent
-```
-
-The server should expose capabilities.
-
-The AI client should provide reasoning.
-
-For example:
-
-```text
-MCP:
-"Here are the unread emails."
-
-AI:
-"This message is important."
-
-MCP:
-"Here is the tool for moving it."
-
-AI:
-"Move it to Inbox."
-
-MCP:
-"Done."
-```
-
-The MCP server is not intended to become a second autonomous AI agent.
-
----
-
-# Provider Independence
-
-Postmaster MCP is not intended to depend on a specific email provider.
-
-The architecture should work with any provider offering compatible:
-
-```text
-IMAP
-SMTP
-```
-
-Similarly, the server should not depend on one particular AI vendor.
-
-Any compatible MCP client can potentially use the same server.
-
----
-
-# Use Cases
-
-Examples include:
-
-### Personal email assistant
-
-```text
-review unread mail
-summarize important messages
-prepare drafts
-surface messages requiring action
-```
-
-### Follow-up management
-
-```text
-register follow-up
-wait for deadline
-check conversation
-send only if needed
-```
-
-### Support mailbox
-
-```text
-inspect incoming requests
-categorize messages
-prepare responses
-track unresolved conversations
-```
-
-### Spam review
-
-```text
-periodically inspect Spam
-identify false positives
-restore legitimate messages
-report what changed
-```
-
-### Project mailbox
-
-```text
-manage a dedicated project address
-track external conversations
-schedule follow-ups
-retain persistent task state
-```
-
----
-
-# Example Workflow
-
-```text
-Incoming message
-      |
-      v
-Postmaster MCP
-      |
-      v
-AI reads message
-      |
-      +-- no action
-      |
-      +-- draft response
-      |
-      +-- register follow-up
-              |
-              v
-       Persistent Task
-              |
-          three days
-              |
-              v
-        AI checks thread
-              |
-        +-----+------+
-        |            |
-      reply       no reply
-        |            |
-      done       follow up
-```
-
----
-
-# Non-Goals
-
-Postmaster MCP is not intended to be:
-
-```text
-a complete email provider
-a replacement for IMAP/SMTP
-an autonomous spam classifier
-a general-purpose AI agent
-a CRM
-a marketing automation platform
-```
-
-Those systems can instead be integrated around the MCP server.
-
----
-
-# Roadmap
-
-Potential future features include:
-
-- [ ] Web administration dashboard
-- [ ] account management UI
-- [ ] task registry UI
-- [ ] permissions dashboard
-- [ ] audit log viewer
-- [ ] OAuth-based account authentication
-- [ ] additional email providers
-- [ ] improved attachment handling
-- [ ] richer HTML composition
-- [ ] AMP email components
-- [ ] message templates
-- [ ] contact integration
-- [ ] task dependencies
-- [ ] task history visualization
-- [ ] multi-user access
-- [ ] scoped MCP permissions
-- [ ] import/export configuration
-- [ ] Docker deployment
-- [ ] automated secret scanning
-- [ ] test mail server environment
-
----
-
-# Contributing
-
-Contributions are welcome.
-
-When modifying the project:
-
-1. create a dedicated branch;
-2. keep changes focused;
-3. add or update tests where appropriate;
-4. document new MCP capabilities;
-5. never commit credentials or personal mailbox data;
-6. clearly indicate modifications to existing source files where required by the license.
-
-Example branch names:
-
-```text
-feature/task-registry
-feature/amp-email
-fix/imap-folder-handling
-docs/deployment
-```
+Technical public addresses required by standards or documentation may remain, such as Google's official AMP registration address.
 
 ---
 
 # License
 
-Licensed under the **Apache License 2.0**.
+Postmaster MCP is licensed under the **Apache License 2.0**.
 
-You may:
-
-- use the software;
-- modify it;
-- redistribute it;
-- use it commercially;
-- include it in other projects.
-
-Redistributions and derivative works must comply with the attribution and notice requirements of the Apache License 2.0.
+You may use, modify and redistribute the software, including commercially, subject to the license terms.
 
 See:
 
@@ -753,33 +641,20 @@ LICENSE
 NOTICE
 ```
 
-for details.
+for the complete terms and attribution notices.
 
 ---
 
 # Attribution
 
-Original project by **The-code-learner**.
+**Original project by the-code-learner.**
 
-Please preserve the attribution notices contained in the `NOTICE` file when redistributing this software or derivative works, in accordance with the Apache License 2.0.
+Please preserve the attribution notices contained in `NOTICE` when redistributing the software or derivative works in accordance with the Apache License 2.0.
 
 ---
 
 # Disclaimer
 
-This software can perform operations on real email accounts.
+This software can read, move and send real email and can persist access credentials for configured mailboxes.
 
-Use it carefully.
-
-Before deploying it against important mailboxes:
-
-```text
-review permissions
-configure backups
-test write operations
-restrict network exposure
-protect credentials
-review approval policies
-```
-
-The authors are not responsible for lost messages, accidental email delivery, account restrictions, data loss, or other consequences resulting from improper configuration or use.
+Test it with a non-critical account before relying on it for important mail. Review your provider settings, recipient policy, backups and network exposure before production use.
