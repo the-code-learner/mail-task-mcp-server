@@ -482,44 +482,377 @@ These values are deployment-specific and therefore are not hard-coded in the pub
 
 # Security model
 
-The application is designed to sit behind an external access layer.
+Postmaster MCP is designed around a **split security perimeter**:
 
-The stack itself does **not** provide a complete public-facing login system for the dashboard. Do not expose port `8787` directly to the public Internet without a trusted access layer.
+```text
+                         Internet
+                            |
+                            v
+                    Cloudflare Tunnel
+                            |
+                            v
+                  Cloudflare Access
+                  /              \
+                 /                \
+                v                  v
+      authenticated control     narrowly scoped
+             plane             public callbacks
+                |                  |
+       +--------+--------+      +--+----------------+
+       |                 |      |                   |
+       v                 v      v                   v
+   Dashboard           /mcp  /api/amp/*       /track/open/*
+       |                 |      |                   |
+       +--------+--------+      +---------+---------+
+                |                         |
+                v                         v
+                     Postmaster MCP
+                         :8000
+```
+
+The general rule is:
+
+> **Protect the whole application by default, then explicitly carve out only the machine-to-machine callback paths that cannot authenticate through the normal user or OAuth flow.**
+
+The Docker service itself is not intended to be exposed directly to the public Internet.
+
+## Protected control plane
+
+The following surfaces belong to the authenticated **control plane**:
+
+```text
+/
+dashboard routes
+/mcp
+account administration
+recipient/domain authorization
+task management
+tracking analytics
+mailbox operations
+write actions
+```
+
+They should sit behind a Cloudflare Access application with an **Allow** policy restricted to the identities that are authorized to administer or use the server.
+
+The public Docker port should normally be reachable only from the trusted network or through the tunnel origin path.
 
 A typical deployment is:
 
 ```text
-Internet
-    |
-    v
-Cloudflare Access / trusted reverse proxy
-    |
-    v
-Postmaster MCP :8000
+MCP client / browser
+        |
+        v
+Cloudflare Access
+        |
+   authenticated
+        |
+        v
+Cloudflare Tunnel
+        |
+        v
+Postmaster MCP
 ```
 
-The original deployment model uses Cloudflare Access externally.
+The application deliberately delegates the external authentication boundary to Cloudflare Access rather than implementing a second public username/password login system.
 
-Recommended rules:
+## Managed OAuth for MCP clients
 
-- protect `/` and `/mcp` behind authenticated access;
-- keep mailbox credentials only in the encrypted server-side account store;
-- back up the encryption key together with the corresponding database;
-- review recipient authorization before enabling automated sending;
-- avoid exposing the raw Docker port publicly.
+For MCP clients that support OAuth, the protected Access application can use **Cloudflare Access Managed OAuth**.
 
-## AMP and tracking exception
+The general setup is:
 
-Mail clients cannot complete an interactive dashboard login when loading an AMP XHR endpoint or tracking pixel.
+```text
+MCP client
+    |
+    | OAuth authorization
+    v
+Cloudflare Access
+    |
+    | authenticated request
+    v
+/mcp
+```
 
-If you enable those features, narrowly scoped routes such as:
+Register only the redirect URIs required by the MCP clients you actually intend to use.
+
+Localhost or loopback redirect clients should be enabled only when they are needed for local development or for a trusted client that specifically requires them.
+
+OAuth grant duration and access-token lifetime are deployment policy choices and should be selected according to the security requirements of the installation.
+
+Managed OAuth protects the MCP connection. It does **not** make the email callback endpoints below private, because receiving mail clients cannot complete this OAuth flow when fetching message resources.
+
+## Public callback exception
+
+Two classes of endpoint need a different policy:
 
 ```text
 /api/amp/*
 /track/open/*
 ```
 
-must be reachable by the receiving mail client. Configure your reverse proxy/access policy accordingly. The endpoint tokens are scoped and unguessable, but exposing these routes is still a deployment decision you should review carefully.
+These paths are fetched by external email infrastructure rather than by the authenticated administrator or MCP client.
+
+For example:
+
+- an AMP-capable mail client performs an XHR request to the AMP endpoint;
+- an email client or image proxy fetches the open-tracking pixel.
+
+Those systems cannot complete the normal Cloudflare Access login or MCP OAuth flow.
+
+If these features are enabled, create a **separate, narrowly scoped Access application or equivalent path policy** whose destinations contain only the required callback paths and apply a **Bypass** action to those destinations.
+
+Conceptually:
+
+```text
+Protected application
+    mcp.example.com/*
+        -> Allow authorized identities
+
+Public callback application
+    mcp.example.com/api/amp/*
+    mcp.example.com/track/open/*
+        -> Bypass
+```
+
+Do **not** apply the bypass to:
+
+```text
+/
+ /mcp
+/dashboard/*
+mailbox routes
+account management
+task management
+```
+
+A bypass should never cover the whole hostname simply because AMP or tracking is enabled.
+
+## Why the public routes can be exposed
+
+The public routes are deliberately designed as narrow capability endpoints rather than general API access.
+
+### Open-tracking endpoint
+
+Tracked deliveries receive a cryptographically random per-recipient token.
+
+The public URL has the form:
+
+```text
+https://mcp.example.com/track/open/<random-token>.gif
+```
+
+The token is created with a cryptographically secure random generator and is unique for the delivery.
+
+The endpoint:
+
+- records an open/image-load observation when the token is valid;
+- does not expose mailbox credentials;
+- does not expose MCP tools;
+- does not provide dashboard access;
+- always returns the tracking image even when recording fails, avoiding a simple token-validity response oracle;
+- sends no-cache headers.
+
+Open tracking remains telemetry, not proof that a human read a message. Image proxies, scanners, prefetching and image blocking can create or suppress observations.
+
+### AMP endpoint
+
+Each AMP-enabled delivery receives a separate cryptographically random token.
+
+The AMP callback URL is recipient-scoped and time-limited.
+
+The endpoint verifies:
+
+```text
+delivery token
+token expiration
+sender account AMP state
+AMP Email sender/origin headers
+```
+
+before returning dynamic data.
+
+The AMP token does not grant access to the general MCP API or dashboard.
+
+## Path isolation is essential
+
+The security of this design depends on keeping the public callback surface small.
+
+A useful mental model is:
+
+```text
+authenticated control plane
+    !=
+public email callback plane
+```
+
+The callback plane must never grow into a general unauthenticated API.
+
+Any new public endpoint should be reviewed individually before being added to the Access bypass destinations.
+
+## Origin isolation
+
+Cloudflare Access protects requests that pass through Cloudflare, so the origin must not provide an easier route around it.
+
+Recommended deployment rules:
+
+- expose the service to Cloudflare through a Tunnel or another trusted reverse-proxy path;
+- do not publish the raw application port directly to the Internet;
+- restrict firewall/NAT rules accordingly;
+- use the direct Portainer-published port only on a trusted LAN when needed;
+- do not create a second public DNS/origin route that bypasses Access.
+
+The desired topology is:
+
+```text
+Internet
+   |
+   X----> raw :8787 / :8000        blocked
+   |
+   v
+Cloudflare
+   |
+   v
+Tunnel
+   |
+   v
+Postmaster MCP
+```
+
+## Server-side defense in depth
+
+Cloudflare Access is only the outer authentication boundary. Postmaster MCP still applies server-side protections.
+
+### Encrypted mailbox credentials
+
+Mailbox credentials are stored in the persistent account database in encrypted form.
+
+```text
+/data/mail_accounts.db
+/data/mail_accounts.key
+```
+
+The encryption key is kept separately from the database content. Both must be protected and backed up appropriately.
+
+Credentials are used server-side and are not returned through normal MCP tools.
+
+### Recipient authorization
+
+Outbound email can be constrained by recipient/domain authorization rules.
+
+This provides a second boundary between:
+
+```text
+AI has access to send_email
+```
+
+and:
+
+```text
+AI may send to any address on the Internet
+```
+
+Deployments can maintain explicit authorized recipients and domains and review them from the dashboard/MCP tools.
+
+### Explicit write operations
+
+Tools that modify state are intentionally distinct from read-only tools.
+
+Examples include:
+
+```text
+send_email
+reply_email
+create_draft
+move_email
+mark_as_spam
+mark_not_spam
+authorize_recipient
+authorize_domain
+create_job
+complete_job
+```
+
+This makes it possible for MCP clients and surrounding policy systems to treat write operations differently from inspection operations.
+
+### Dashboard CSRF protection
+
+Authentication is delegated to Cloudflare Access, but dashboard form writes also use an application-side CSRF token.
+
+This provides an additional control for browser-originated state-changing requests.
+
+### Registry-only task execution
+
+The task scheduler is intentionally configured as:
+
+```text
+task_registry_only
+autonomous_execution: false
+```
+
+A stored task cannot independently send an email merely because its schedule became due.
+
+An authorized AI/client must:
+
+1. retrieve the due task;
+2. inspect the relevant current state;
+3. decide what action is appropriate;
+4. invoke an explicit MCP operation;
+5. mark the task handled.
+
+This prevents the task database itself from becoming an unattended email execution engine.
+
+## Recommended Cloudflare Access layout
+
+A generic production layout is:
+
+```text
+Application A — Postmaster MCP control plane
+
+Destination:
+    mcp.example.com
+
+Policy:
+    Allow -> authorized administrators / MCP users
+
+Managed OAuth:
+    enabled when OAuth-capable MCP clients are used
+
+Redirect URIs:
+    only those required by trusted clients
+
+
+Application B — Postmaster public email callbacks
+
+Destinations:
+    mcp.example.com/api/amp/*
+    mcp.example.com/track/open/*
+
+Policy:
+    Bypass
+```
+
+The names of the applications and policies are arbitrary. What matters is the separation of responsibilities.
+
+## Security checklist
+
+Before exposing a deployment publicly, verify:
+
+```text
+[ ] the whole hostname is protected by default
+[ ] /mcp requires authenticated Access
+[ ] the dashboard requires authenticated Access
+[ ] only /api/amp/* and/or /track/open/* are bypassed when needed
+[ ] the bypass does not cover the root hostname
+[ ] Managed OAuth redirect URIs are restricted to trusted clients
+[ ] the raw Docker port is not publicly reachable
+[ ] mailbox credentials remain server-side
+[ ] the account encryption key is backed up securely
+[ ] recipient/domain authorization is configured as intended
+[ ] tracking/AMP public hostname uses HTTPS
+[ ] task execution remains registry-only unless deliberately redesigned
+```
+
+If AMP or tracking are not used, there is no reason to create the public callback bypass at all.
 
 ---
 
