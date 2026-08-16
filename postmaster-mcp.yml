@@ -1,4 +1,4 @@
-# Postmaster MCP v8.6 - self-contained Portainer / Docker Compose stack
+# Postmaster MCP v8.7 - self-contained Portainer / Docker Compose stack
 # Original project by the-code-learner.
 # Licensed under the Apache License 2.0.
 # Public template: contains no mailbox credentials, personal domains, or private recipient allowlists.
@@ -15,7 +15,7 @@ services:
     # PUBLIC_EMAIL_BASE_URL to your own public hostname/base URL.
     environment:
       TZ: UTC
-      BRIDGE_BUILD: postmaster-mcp-v8.6-public
+      BRIDGE_BUILD: postmaster-mcp-v8.7-public
       PYTHONUNBUFFERED: '1'
       PYTHONDONTWRITEBYTECODE: '1'
       LEGACY_EMAIL_ADDRESS: ''
@@ -133,7 +133,7 @@ configs:
           "Postmaster MCP",
           instructions=(
               "Self-hosted MCP server intended to be protected by an external access layer. "
-              "v8.6 supports multiple encrypted IMAP/SMTP accounts configured from the WebGUI. "
+              "v8.7 supports multiple encrypted IMAP/SMTP accounts configured from the WebGUI. "
               "Every mailbox/email MCP operation accepts an optional account_id; when omitted, "
               "the configured default account is used. HTML email, drafts, attachments, attachment "
               "reuse/readback, mailbox moves, spam actions and recipient safety policies remain available. "
@@ -186,13 +186,15 @@ configs:
       # -------------------------
       @mcp.tool()
       def build_status():
-          """Read-only. Return the running bridge build and high-level v8.6 capabilities."""
+          """Read-only. Return the running bridge build and high-level v8.7 capabilities."""
           return {
               "ok": True,
               "build": os.getenv("BRIDGE_BUILD", "unknown"),
               "multi_account": True,
               "amp_per_account": True,
               "per_recipient_open_tracking": True,
+              "reply_open_tracking": True,
+              "tracking_default_applies_to_replies": True,
               "visible_to_cc_preserved_for_tracked_fanout": True,
               "scheduler_mode": "task_registry_only",
           }
@@ -536,13 +538,26 @@ configs:
           bcc: list[str] | None = None,
           body_html: str | None = None,
           attachments: list[dict[str, Any]] | None = None,
+          track_opens: bool | None = None,
+          campaign_id: str | None = None,
           account_id: str | None = None,
       ):
-          """WRITE ACTION. Threaded HTML reply from the selected account."""
+          """
+          WRITE ACTION. Threaded HTML reply from the selected account.
+
+          track_opens is optional:
+          - None: use the selected account's tracking_default
+          - True: force per-recipient open tracking for this reply
+          - False: disable tracking for this reply
+
+          Tracked replies preserve visible To/Cc plus In-Reply-To/References on every
+          individualized delivery. Bcc recipients remain hidden.
+          """
           return _safe_call(
               mail_client(account_id).reply_email,
               mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
               body_html=body_html, attachments=attachments,
+              track_opens=track_opens, campaign_id=campaign_id,
           )
 
 
@@ -618,7 +633,7 @@ configs:
       # Scheduler
       @mcp.tool()
       def scheduler_status():
-          """Read-only. Return persistent task-registry status. No autonomous worker runs in v8.6."""
+          """Read-only. Return persistent task-registry status. No autonomous worker runs in v8.7."""
           return _safe_call(scheduler().status)
 
 
@@ -1098,7 +1113,7 @@ configs:
       <div class="row" style="margin-top:14px">
        <label><input type="checkbox" name="enabled" value="1"{enabled_checked}> Enabled</label>
        <label><input type="checkbox" name="make_default" value="1"{default_checked}> Make default</label>
-       <label><input type="checkbox" name="tracking_default" value="1"{tracking_checked}> Track opens by default</label>
+       <label><input type="checkbox" name="tracking_default" value="1"{tracking_checked}> Track opens by default (send + reply)</label>
        <button class="primary" type="submit">Save account</button>
        {'<a href="/#accounts" class="muted">Cancel edit</a>' if edit else ''}
       </div>
@@ -1248,7 +1263,7 @@ configs:
 
           body = f"""
       <h1>Postmaster MCP</h1>
-      <p class="sub">Multi-account IMAP/SMTP + optional AMP for Email + per-recipient open analytics + task registry · v8.6</p>
+      <p class="sub">Multi-account IMAP/SMTP + optional AMP for Email + per-recipient open analytics + task registry · v8.7</p>
 
       <nav class="tabs" aria-label="Dashboard sections">
         <a class="tab-link" href="#overview" data-tab="overview">Overview</a>
@@ -1363,7 +1378,7 @@ configs:
       <div><strong>{total_campaign_count}</strong> campaigns stored · <span class="muted">{campaign_count} shown</span></div>
       <div><strong>{total_delivery_count}</strong> individualized deliveries stored · <span class="muted">{tracked_delivery_count} shown</span></div>
       <div><strong>{open_event_count}</strong> observed open/image-load events stored</div>
-      <p class="small muted">Tracking is opt-in. For multi-recipient sends, v8.3 uses one SMTP envelope per recipient with a distinct token, while preserving the original visible To/Cc headers on every copy.</p>
+      <p class="small muted">Tracking is opt-in. For tracked sends and replies, v8.7 uses one SMTP envelope per recipient with a distinct token while preserving the original visible To/Cc headers on every copy. The account tracking default applies to both send_email and reply_email unless explicitly overridden.</p>
       </section>
 
       <section class="card">
@@ -1439,7 +1454,7 @@ configs:
       }})();
       </script>
       """
-          return _layout("Postmaster MCP v8.6", body, flash=flash)
+          return _layout("Postmaster MCP v8.7", body, flash=flash)
 
 
       async def dashboard_account_save(request: Request):
@@ -4245,7 +4260,13 @@ configs:
               ]
               return msg, recipients, meta
 
-          def send_email(
+          def _resolve_track_opens(self, track_opens: bool | None) -> bool:
+              """None follows the per-account default; explicit True/False always wins."""
+              if track_opens is None:
+                  return bool(getattr(self.settings, "tracking_default", False))
+              return bool(track_opens)
+
+          def _send_individualized(
               self,
               *,
               to: list[str],
@@ -4256,50 +4277,25 @@ configs:
               body_html: str | None = None,
               body_amp: str | None = None,
               attachments: list[dict[str, Any]] | None = None,
-              track_opens: bool | None = None,
+              track_opens: bool,
               campaign_id: str | None = None,
+              in_reply_to: str = "",
+              references: str = "",
           ) -> dict:
               """
-              Send email. Normal sends remain a single message.
+              Shared per-recipient delivery engine for tracked/AMP sends and replies.
 
-              If open tracking is enabled, or an AMP body is supplied, the send is individualized
-              per recipient. This is required to keep tracking/AMP tokens separate for every
-              destination. Each recipient therefore receives an individualized SMTP copy while the original visible To/Cc headers are preserved.
+              Each recipient gets a distinct SMTP envelope/token while every copy preserves the
+              original visible To/Cc headers. Bcc recipients are validated and individualized but
+              never exposed in message headers.
               """
               amp_used = bool(body_amp)
-              if amp_used and not bool(getattr(self.settings, "amp_enabled", False)):
-                  raise MailBridgeError(
-                      f"AMP is not enabled for account {getattr(self.settings, 'account_id', '') or self.settings.email_address}"
-                  )
-              if amp_used:
-                  check = validate_amp_document(body_amp or "")
-                  if not check.get("ok"):
-                      raise MailBridgeError("Invalid AMP email preflight: " + "; ".join(check.get("issues", [])))
 
-              if track_opens is None:
-                  track_opens = bool(getattr(self.settings, "tracking_default", False))
-              else:
-                  track_opens = bool(track_opens)
-
-              # Keep v8.1 behavior for ordinary email.
-              if not track_opens and not amp_used:
-                  msg, recipients, meta = self._build_message(
-                      to=to, subject=subject, body=body, cc=cc, bcc=bcc,
-                      body_html=body_html, attachments=attachments, allow_unlisted=False
-                  )
-                  result = self._send_message(msg, recipients)
-                  result.update({
-                      "html": True,
-                      "amp": False,
-                      "tracked": False,
-                      "attachments": meta,
-                  })
-                  return result
-
-              # Validate once and preserve the original role of each recipient.
+              # Validate recipients and authorization once, before mutating analytics state.
               to_clean = self._validate_recipients(to)
               cc_clean = self._validate_recipients(cc or []) if cc else []
               bcc_clean = self._validate_recipients(bcc or []) if bcc else []
+
               recipient_roles: list[tuple[str, str]] = []
               seen: set[str] = set()
               for role, addresses in (("to", to_clean), ("cc", cc_clean), ("bcc", bcc_clean)):
@@ -4310,6 +4306,12 @@ configs:
                           recipient_roles.append((address, role))
 
               analytics = analytics_store()
+
+              # Fail before create_campaign/create_delivery so a missing public URL cannot leave
+              # orphan analytics rows behind.
+              if track_opens or amp_used:
+                  analytics.validate_public_base_url()
+
               campaign = analytics.create_campaign(
                   account_id=getattr(self.settings, "account_id", "") or self.settings.email_address,
                   sender=self.settings.email_address,
@@ -4338,10 +4340,8 @@ configs:
                       track_opens=track_opens,
                   )
                   try:
-                      # v8.3: individual SMTP envelope, original visible recipient headers.
-                      # Every recipient gets a unique rendered body/token, but To:/Cc: remain
-                      # exactly as composed so group context and Reply-All semantics are preserved.
-                      # Bcc is intentionally omitted from visible headers.
+                      # Header semantics are identical on every individualized copy.
+                      # Bcc is intentionally NOT passed to _build_message, so it stays invisible.
                       msg, _, meta = self._build_message(
                           to=to_clean,
                           cc=cc_clean,
@@ -4351,9 +4351,10 @@ configs:
                           body_amp=rendered_amp,
                           attachments=attachments,
                           allow_unlisted=False,
+                          in_reply_to=in_reply_to,
+                          references=references,
                       )
-                      # Critical privacy/tracking boundary: only the current recipient is used
-                      # as the SMTP envelope destination even though visible To/Cc are complete.
+                      # Only the current delivery recipient is used as SMTP envelope destination.
                       result = self._send_message(msg, [recipient])
                       analytics.mark_sent(delivery["id"], str(result.get("message_id", "")))
                       attachment_meta = meta
@@ -4380,7 +4381,7 @@ configs:
                   "campaign_id": campaign["id"],
                   "individualized": True,
                   "visible_recipient_headers_preserved": True,
-                  "tracked": track_opens,
+                  "tracked": bool(track_opens),
                   "amp": amp_used,
                   "amp_registered": bool(getattr(self.settings, "amp_registered", False)),
                   "deliveries": delivery_results,
@@ -4392,6 +4393,71 @@ configs:
                   ) if track_opens else "",
               }
 
+          def send_email(
+              self,
+              *,
+              to: list[str],
+              subject: str,
+              body: str = "",
+              cc: list[str] | None = None,
+              bcc: list[str] | None = None,
+              body_html: str | None = None,
+              body_amp: str | None = None,
+              attachments: list[dict[str, Any]] | None = None,
+              track_opens: bool | None = None,
+              campaign_id: str | None = None,
+          ) -> dict:
+              """
+              Send email.
+
+              Normal plain/HTML sends remain a single SMTP message. Tracking or AMP uses the
+              shared individualized delivery engine so recipient-specific tokens stay separate.
+              """
+              amp_used = bool(body_amp)
+              if amp_used and not bool(getattr(self.settings, "amp_enabled", False)):
+                  raise MailBridgeError(
+                      f"AMP is not enabled for account "
+                      f"{getattr(self.settings, 'account_id', '') or self.settings.email_address}"
+                  )
+              if amp_used:
+                  check = validate_amp_document(body_amp or "")
+                  if not check.get("ok"):
+                      raise MailBridgeError(
+                          "Invalid AMP email preflight: " + "; ".join(check.get("issues", []))
+                      )
+
+              track_opens = self._resolve_track_opens(track_opens)
+
+              # Keep the ordinary non-tracked path as one SMTP group delivery.
+              if not track_opens and not amp_used:
+                  msg, recipients, meta = self._build_message(
+                      to=to, subject=subject, body=body, cc=cc, bcc=bcc,
+                      body_html=body_html, attachments=attachments, allow_unlisted=False
+                  )
+                  result = self._send_message(msg, recipients)
+                  result.update({
+                      "html": True,
+                      "amp": False,
+                      "tracked": False,
+                      "individualized": False,
+                      "visible_recipient_headers_preserved": True,
+                      "attachments": meta,
+                  })
+                  return result
+
+              return self._send_individualized(
+                  to=to,
+                  cc=cc,
+                  bcc=bcc,
+                  subject=subject,
+                  body=body,
+                  body_html=body_html,
+                  body_amp=body_amp,
+                  attachments=attachments,
+                  track_opens=track_opens,
+                  campaign_id=campaign_id,
+              )
+
           def reply_email(
               self,
               *,
@@ -4402,24 +4468,78 @@ configs:
               bcc: list[str] | None = None,
               body_html: str | None = None,
               attachments: list[dict[str, Any]] | None = None,
+              track_opens: bool | None = None,
+              campaign_id: str | None = None,
           ) -> dict:
+              """
+              Send a threaded reply.
+
+              track_opens=None follows the account tracking_default. Explicit True/False overrides
+              the account default for this reply. Tracked replies use per-recipient envelopes while
+              preserving visible To/Cc and In-Reply-To/References on every copy.
+              """
               original = self.get_email(mailbox, uid)
               from_addresses = original.get("from_addresses") or []
               if not from_addresses:
                   raise MailBridgeError("Original email has no valid From address")
+
               subject = original.get("subject", "") or ""
               if not subject.lower().startswith("re:"):
                   subject = f"Re: {subject}"
+
               message_id = original.get("message_id", "") or ""
               refs = original.get("references", "").strip()
               references = (refs + " " + message_id).strip() if message_id else refs
-              msg, recipients, meta = self._build_message(
-                  to=[from_addresses[0]], subject=subject, body=body, cc=cc, bcc=bcc,
-                  body_html=body_html, attachments=attachments, allow_unlisted=False,
-                  in_reply_to=message_id, references=references,
+              reply_to = [from_addresses[0]]
+              track_opens = self._resolve_track_opens(track_opens)
+
+              # Preserve historical behavior when tracking is disabled: one normal group message.
+              if not track_opens:
+                  msg, recipients, meta = self._build_message(
+                      to=reply_to,
+                      subject=subject,
+                      body=body,
+                      cc=cc,
+                      bcc=bcc,
+                      body_html=body_html,
+                      attachments=attachments,
+                      allow_unlisted=False,
+                      in_reply_to=message_id,
+                      references=references,
+                  )
+                  result = self._send_message(msg, recipients)
+                  result.update({
+                      "html": True,
+                      "amp": False,
+                      "tracked": False,
+                      "individualized": False,
+                      "visible_recipient_headers_preserved": True,
+                      "attachments": meta,
+                      "in_reply_to": message_id,
+                      "references": references,
+                      "reply_to": {"mailbox": mailbox, "uid": uid, "message_id": message_id},
+                  })
+                  return result
+
+              result = self._send_individualized(
+                  to=reply_to,
+                  cc=cc,
+                  bcc=bcc,
+                  subject=subject,
+                  body=body,
+                  body_html=body_html,
+                  body_amp=None,
+                  attachments=attachments,
+                  track_opens=True,
+                  campaign_id=campaign_id,
+                  in_reply_to=message_id,
+                  references=references,
               )
-              result = self._send_message(msg, recipients)
-              result.update({"html": True, "attachments": meta})
+              result.update({
+                  "in_reply_to": message_id,
+                  "references": references,
+                  "reply_to": {"mailbox": mailbox, "uid": uid, "message_id": message_id},
+              })
               return result
 
           def _save_draft(self, msg: EmailMessage) -> dict:
@@ -5422,6 +5542,15 @@ configs:
                           conn.execute(
                               f"ALTER TABLE tracking_opens ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
                           )
+
+          def validate_public_base_url(self) -> str:
+              """
+              Validate the public tracking/AMP base URL before creating campaign rows.
+
+              This prevents orphan campaign/delivery records when tracking or AMP is requested
+              but PUBLIC_EMAIL_BASE_URL / PUBLIC_MCP_HOST is not configured.
+              """
+              return _safe_base_url()
 
           def create_campaign(
               self,
