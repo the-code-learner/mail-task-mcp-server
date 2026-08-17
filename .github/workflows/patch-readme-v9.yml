@@ -1,0 +1,60 @@
+name: Patch README for v9 structural runtime
+
+on:
+  push:
+    branches:
+      - v9-structural-runtime
+    paths:
+      - '.github/readme-v9-trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v9-structural-runtime
+      - name: Update README
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  'The public v8.7 Portainer stack includes the application source directly inside a single Docker Compose YAML file. No separate application image or source checkout is required to start it.',
+                  'The v9 structural runtime keeps the application as normal source files in this repository while preserving a **single-YAML Portainer deployment**. `postmaster-mcp.yml` bootstraps a pinned GitHub ref into persistent code/venv volumes; v8.7 remains the previous monolithic-stack design.'
+              ),
+              (
+                  '''# Portainer stack design\n\nThe public distribution is intentionally a **single YAML file**.\n\nIt contains:\n\n```text\nDocker service definition\nruntime environment\npersistent volumes\nstartup command\nhealth check\nserver.py\nmail_bridge.py\nscheduler_engine.py\nmail_extensions.py\naccount_store.py\nemail_analytics.py\n```\n\nThe Python modules are embedded using Compose `configs:` entries.\n\nAt first start the container creates a Python virtual environment in the persistent `mcp_venv` volume and installs:\n\n```text\nmcp\ncroniter\ntzdata\npypdf\ncryptography\n```\n\nApplication state is stored in the persistent `mcp_data` volume mounted at:\n\n```text\n/data\n```''',
+                  '''# Portainer stack design\n\nThe v9 public distribution still requires only **one YAML file** in Portainer, but application source is no longer embedded in Compose `configs:` entries.\n\n`postmaster-mcp.yml` contains only the service definition, environment, persistent volumes, bootstrap command and health check. On startup it downloads the configured `NOMADCOMPASS_REPO@NOMADCOMPASS_REF`, validates archive paths, installs it into a persistent code cache and starts the selected release.\n\nThe repository itself contains the maintainable source tree:\n\n```text\nsrc/nomadcompass/\nscripts/\ntests/\ndocs/\nrequirements.txt\n```\n\nThe Python virtual environment is cached in `mcp_venv`, source releases are cached in `mcp_code`, and state remains in the persistent `mcp_data` volume mounted at `/data`.\n\nFor production, pin `NOMADCOMPASS_REF` to an immutable release tag or commit. A mutable branch is useful while testing upgrades.'''
+              ),
+              (
+                  '''# HTML email\n\nPostmaster MCP supports plain-text and HTML email.\n\nA normal multipart message can contain:\n\n```text\ntext/plain\ntext/html\n```\n\nAttachments can also be added to sends and drafts.''',
+                  '''# HTML email\n\nPostmaster MCP supports plain-text and HTML email for both sending and reading.\n\nA normal multipart message can contain:\n\n```text\ntext/plain\ntext/html\n```\n\nIn v9, `get_email` exposes the selected text body and `body_html`. MIME parsing evaluates both alternatives instead of blindly preferring `text/plain`, so a tiny forwarding boilerplate cannot hide a substantially richer HTML body. Forwarded `message/rfc822` parts are traversed explicitly, and URLs in HTML-derived text are preserved.\n\nAttachments can also be added to sends and drafts.'''
+              ),
+              (
+                  '''The Docker volumes are:\n\n```text\nmcp_venv\nmcp_data\n```''',
+                  '''The Docker volumes are:\n\n```text\nmcp_code\nmcp_venv\nmcp_data\n```'''
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Expected README block not found: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+          rm -f .github/readme-v9-trigger .github/workflows/patch-readme-v9.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Document structural v9 deployment and MIME parsing'
+          git push origin HEAD:v9-structural-runtime
