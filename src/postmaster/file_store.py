@@ -241,13 +241,22 @@ class FileStore:
             else:
                 where.append("project_id=?")
                 args.append(str(project_id))
+        requested_limit = max(1, min(int(limit), 1000))
+        requested_offset = max(0, int(offset))
+        # Tags are stored as normalized JSON metadata. When filtering by tag, fetch the
+        # complete bounded candidate set first, then paginate the matches. Filtering
+        # after the SQL LIMIT could otherwise hide valid tagged files behind newer
+        # non-matching records.
+        sql_limit = min(self.max_files, self.HARD_MAX_FILES) if tag else requested_limit
+        sql_offset = 0 if tag else requested_offset
         sql = "SELECT * FROM stored_files" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY updated_at DESC LIMIT ? OFFSET ?"
-        args.extend([max(1, min(int(limit), 1000)), max(0, int(offset))])
+        args.extend([sql_limit, sql_offset])
         with self._conn() as conn:
             items = [self._snapshot(row) for row in conn.execute(sql, args).fetchall()]
         if tag:
             wanted = str(tag).strip().lower()
             items = [item for item in items if wanted in item.get("tags", [])]
+            items = items[requested_offset:requested_offset + requested_limit]
         return items
 
     def _read_bytes(self, file_id: str) -> tuple[dict[str, Any], bytes]:
