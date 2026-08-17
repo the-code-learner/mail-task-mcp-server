@@ -17,7 +17,7 @@ services:
 
       # Bootstrap. Pin an immutable tag/commit for production.
       POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
-      POSTMASTER_REF: v9-structural-runtime
+      POSTMASTER_REF: main
       POSTMASTER_REFRESH_ON_START: "true"
 
       # Primary mail account. Leave secrets only in your private Portainer stack.

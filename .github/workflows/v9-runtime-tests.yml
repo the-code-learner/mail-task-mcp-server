@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-      - v9-structural-runtime
-      - sanitized-base
     paths:
       - 'README.md'
       - 'docs/**'
@@ -58,6 +56,15 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
+
+      - name: Validate mounted-volume-safe venv rebuild
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('scripts/start.sh').read_text()
+          assert 'rm -rf "$VENV_DIR"' not in text, 'must not remove a Docker volume mount point'
+          assert 'find "$VENV_DIR" -mindepth 1 -maxdepth 1' in text, 'venv rebuild must clear only mount contents'
+          PY
 
       - name: Verify compact context model provisioning
         env:
@@ -113,6 +120,7 @@ jobs:
           env = service['environment']
           assert env.get('HOSTINGER_EMAIL', '') == ''
           assert env.get('HOSTINGER_PASSWORD', '') == ''
+          assert env['POSTMASTER_REF'] == 'main'
           assert env['CONTEXT_MODEL_DIMS'] == '128'
           assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
           assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
