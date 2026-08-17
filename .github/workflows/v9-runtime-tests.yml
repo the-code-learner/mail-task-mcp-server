@@ -5,6 +5,8 @@ on:
     branches:
       - v9-structural-runtime
     paths:
+      - 'README.md'
+      - 'docs/**'
       - 'postmaster-mcp.yml'
       - 'requirements.txt'
       - 'src/**'
@@ -15,6 +17,8 @@ on:
     branches:
       - main
     paths:
+      - 'README.md'
+      - 'docs/**'
       - 'postmaster-mcp.yml'
       - 'requirements.txt'
       - 'src/**'
