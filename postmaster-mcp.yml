@@ -18,6 +18,7 @@ services:
       # Bootstrap update policy. `latest` follows stable GitHub Releases; an explicit version/tag/commit stays pinned.
       POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
       POSTMASTER_VERSION: latest
+      POSTMASTER_CHECK_UPDATES_ON_START: "true"
       POSTMASTER_FORCE_REFRESH: "false"
 
       # Primary mail account. Leave secrets only in your private Portainer stack.
@@ -98,17 +99,32 @@ services:
         APP_ROOT=/opt/postmaster
         REPO="$${POSTMASTER_REPO:-the-code-learner/mail-task-mcp-server}"
         REQUESTED="$${POSTMASTER_VERSION:-$${POSTMASTER_REF:-latest}}"
+        CHECK_UPDATES="$${POSTMASTER_CHECK_UPDATES_ON_START:-true}"
         FORCE_REFRESH="$${POSTMASTER_FORCE_REFRESH:-$${POSTMASTER_REFRESH_ON_START:-false}}"
         CURRENT="$$APP_ROOT/current"
         mkdir -p "$$APP_ROOT/releases"
+
+        case "$$CHECK_UPDATES" in
+          true|false) ;;
+          *) echo "ERROR: POSTMASTER_CHECK_UPDATES_ON_START must be true or false." >&2; exit 2 ;;
+        esac
 
         case "$$REQUESTED" in
           [0-9]*.[0-9]*.[0-9]*) REQUESTED="v$$REQUESTED" ;;
         esac
 
+        REF=""
         if [ "$$REQUESTED" = "latest" ]; then
-          export REPO
-          if REF="$$(python - <<'PY'
+          if [ "$$CHECK_UPDATES" = "false" ] && [ -x "$$CURRENT/scripts/start.sh" ] && [ -s "$$CURRENT/.postmaster-source-ready" ]; then
+            REF="$$(sed -n '1p' "$$CURRENT/.postmaster-source-ready" | tr -d '\r\n')"
+            if [ -n "$$REF" ]; then
+              echo "Postmaster update check disabled; using cached current source: $$REF"
+            fi
+          fi
+
+          if [ -z "$$REF" ]; then
+            export REPO
+            if REF="$$(python - <<'PY'
         import json
         import os
         import re
@@ -138,14 +154,22 @@ services:
             raise RuntimeError("No stable Postmaster vX.Y.Z release found")
         print(max(candidates, key=lambda item: item[0])[1])
         PY
-          )"; then
-            :
-          elif [ -x "$$CURRENT/scripts/start.sh" ]; then
-            echo "WARNING: could not resolve latest release; using cached current release." >&2
-            exec "$$CURRENT/scripts/start.sh"
-          else
-            echo "ERROR: could not resolve latest release and no cached release exists." >&2
-            exit 1
+            )"; then
+              :
+            elif [ -x "$$CURRENT/scripts/start.sh" ]; then
+              if [ -s "$$CURRENT/.postmaster-source-ready" ]; then
+                CACHED_REF="$$(sed -n '1p' "$$CURRENT/.postmaster-source-ready" | tr -d '\r\n')"
+                if [ -n "$$CACHED_REF" ]; then
+                  export POSTMASTER_REF="$$CACHED_REF"
+                fi
+              fi
+              export POSTMASTER_REQUESTED_VERSION="$$REQUESTED"
+              echo "WARNING: could not resolve latest release; using cached current release." >&2
+              exec "$$CURRENT/scripts/start.sh"
+            else
+              echo "ERROR: could not resolve latest release and no cached release exists." >&2
+              exit 1
+            fi
           fi
         else
           REF="$$REQUESTED"
