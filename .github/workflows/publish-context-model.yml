@@ -1,0 +1,65 @@
+name: Publish compact context model
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v9-structural-runtime
+    paths:
+      - '.github/context-model-release-trigger'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: '32055129516'
+      EXPECTED_SHA256: '33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632'
+      RELEASE_TAG: context-model-v1
+      ASSET_NAME: nomadcompass-context-mrl-128d-int8.tar.gz
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download verified benchmark artifact
+        run: |
+          mkdir -p /tmp/model-artifact
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name static-mrl-selected --dir /tmp/model-artifact
+          test -s /tmp/model-artifact/static-mrl-selected.tar.gz
+          echo "$EXPECTED_SHA256  /tmp/model-artifact/static-mrl-selected.tar.gz" | sha256sum -c -
+          cp /tmp/model-artifact/static-mrl-selected.tar.gz "/tmp/$ASSET_NAME"
+
+      - name: Sanity-check archive contents
+        run: |
+          python - <<'PY'
+          from pathlib import PurePosixPath
+          import tarfile
+          p = '/tmp/nomadcompass-context-mrl-128d-int8.tar.gz'
+          with tarfile.open(p, 'r:gz') as tf:
+              names = []
+              for m in tf.getmembers():
+                  q = PurePosixPath(m.name)
+                  if q.is_absolute() or '..' in q.parts or m.issym() or m.islnk():
+                      raise SystemExit(f'unsafe archive member: {m.name}')
+                  names.append(m.name)
+          required = {'static-mrl-selected/model.safetensors', 'static-mrl-selected/tokenizer.json', 'static-mrl-selected/config.json'}
+          missing = required.difference(names)
+          if missing:
+              raise SystemExit(f'missing model files: {sorted(missing)}')
+          PY
+
+      - name: Publish or refresh release asset
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "/tmp/$ASSET_NAME" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "/tmp/$ASSET_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title 'NomadCompass compact context model v1' \
+              --notes '128d int8 derivative of sentence-transformers/static-similarity-mrl-multilingual-v1. Source license: Apache-2.0. Contains no user data. Runtime benchmark artifact SHA-256: 33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632.'
+          fi
