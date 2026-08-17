@@ -15,10 +15,10 @@ class FileStoreTests(unittest.TestCase):
         self.store = FileStore(
             db_path=str(root / "files.db"),
             root=str(root / "files"),
-            max_bytes=1024,
-            max_total_bytes=4096,
+            max_bytes=2048,
+            max_total_bytes=8192,
             max_files=10,
-            text_max_chars=100,
+            text_max_chars=1000,
         )
 
     def tearDown(self) -> None:
@@ -73,15 +73,15 @@ class FileStoreTests(unittest.TestCase):
         with self.assertRaises(FileStoreError):
             self.store.save_base64(owner_id="owner", filename="bad.bin", content_base64="not base64!!!")
         with self.assertRaises(FileStoreError):
-            self.store.save_bytes(owner_id="owner", filename="too-big.bin", data=b"x" * 1025)
+            self.store.save_bytes(owner_id="owner", filename="too-big.bin", data=b"x" * 2049)
         with self.assertRaises(FileStoreError):
             self.store.save_text(owner_id="owner", filename="../escape.txt", content="no")
 
     def test_text_truncation_and_binary_rejection(self) -> None:
-        text = self.store.save_text(owner_id="owner", filename="long.txt", content="x" * 150)
+        text = self.store.save_text(owner_id="owner", filename="long.txt", content="x" * 1500)
         row = self.store.read_text(text["id"])
         self.assertTrue(row["truncated"])
-        self.assertEqual(row["returned_chars"], 100)
+        self.assertEqual(row["returned_chars"], 1000)
 
         binary = self.store.save_bytes(owner_id="owner", filename="bad.bin", data=b"\xff\xfe")
         with self.assertRaises(FileStoreError):
