@@ -66,9 +66,10 @@ services:
       CONTEXT_CHUNK_OVERLAP: "160"
       CONTEXT_SEMANTIC_ENABLED: "true"
       CONTEXT_MODEL_AUTO_PREPARE: "true"
-      CONTEXT_MODEL_AUTO_DOWNLOAD: "false"
-      CONTEXT_MODEL_URL: ""
-      CONTEXT_MODEL_SHA256: ""
+      CONTEXT_MODEL_AUTO_DOWNLOAD: "true"
+      CONTEXT_MODEL_URL: https://github.com/the-code-learner/mail-task-mcp-server/releases/download/context-model-v1/nomadcompass-context-mrl-128d-int8.tar.gz
+      CONTEXT_MODEL_SHA256: 33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632
+      CONTEXT_MODEL_SOURCE_FALLBACK: "true"
       CONTEXT_MODEL_ID: static-similarity-mrl-multilingual-v1-128d-int8
       CONTEXT_MODEL_PATH: /data/models/static-similarity-mrl-multilingual-int8-128d
       CONTEXT_MODEL_SOURCE_ID: sentence-transformers/static-similarity-mrl-multilingual-v1
