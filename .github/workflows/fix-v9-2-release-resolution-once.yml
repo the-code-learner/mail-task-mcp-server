@@ -1,0 +1,32 @@
+name: Fix v9.2 release resolver once
+
+on:
+  push:
+    branches:
+      - v9.2-native-file-upload
+    paths:
+      - 'scripts/fix_v9_2_release_resolution.py'
+      - '.github/workflows/fix-v9-2-release-resolution-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v9.2-native-file-upload
+      - name: Harden release resolution
+        run: |
+          python scripts/fix_v9_2_release_resolution.py
+          rm scripts/fix_v9_2_release_resolution.py
+      - name: Commit resolver fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+the-code-learner@users.noreply.github.com'
+          git add postmaster-mcp.yml scripts/fix_v9_2_release_resolution.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Ignore non-application releases when resolving latest'
+          git push origin HEAD:v9.2-native-file-upload
