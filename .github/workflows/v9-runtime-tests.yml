@@ -57,6 +57,27 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
 
+      - name: Validate provider-neutral public tree
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          needle = 'host' + 'inger'
+          bad = []
+          for path in Path('.').rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              if needle in str(path).casefold():
+                  bad.append(str(path))
+                  continue
+              try:
+                  text = path.read_text(encoding='utf-8').casefold()
+              except (UnicodeDecodeError, OSError):
+                  continue
+              if needle in text:
+                  bad.append(str(path))
+          assert not bad, f'provider-specific branding remains in public tree: {bad}'
+          PY
+
       - name: Validate mounted-volume-safe venv rebuild
         run: |
           python - <<'PY'
@@ -89,8 +110,10 @@ jobs:
       - name: Import complete MCP application
         env:
           PYTHONPATH: src
-          HOSTINGER_EMAIL: test@example.invalid
-          HOSTINGER_PASSWORD: test-only-password
+          MAIL_EMAIL: test@example.invalid
+          MAIL_PASSWORD: test-only-password
+          IMAP_HOST: imap.example.com
+          SMTP_HOST: smtp.example.com
           ENABLE_SEND: 'false'
           CONTEXT_SEMANTIC_ENABLED: 'false'
           CONTEXT_DB_PATH: /tmp/postmaster-ci-knowledge.db
@@ -112,14 +135,16 @@ jobs:
           raw = path.read_text()
           doc = yaml.safe_load(raw)
           assert isinstance(doc, dict)
-          assert set(doc.get('services', {})) == {'hostinger-mcp'}
+          assert set(doc.get('services', {})) == {'postmaster-mcp'}
           assert 'configs' not in doc, 'v9 must not embed application source as Compose configs'
           assert path.stat().st_size < 12000, 'bootstrap YAML unexpectedly became monolithic again'
 
-          service = doc['services']['hostinger-mcp']
+          service = doc['services']['postmaster-mcp']
           env = service['environment']
-          assert env.get('HOSTINGER_EMAIL', '') == ''
-          assert env.get('HOSTINGER_PASSWORD', '') == ''
+          assert env.get('MAIL_EMAIL', '') == ''
+          assert env.get('MAIL_PASSWORD', '') == ''
+          assert env['IMAP_HOST'] == 'imap.example.com'
+          assert env['SMTP_HOST'] == 'smtp.example.com'
           assert env['POSTMASTER_REF'] == 'main'
           assert env['CONTEXT_MODEL_DIMS'] == '128'
           assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
