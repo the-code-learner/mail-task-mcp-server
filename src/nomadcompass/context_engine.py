@@ -19,6 +19,7 @@ class ContextEngine:
         self.auto_index_limit = max(1, int(os.getenv("CONTEXT_AUTO_INDEX_LIMIT", "10000")))
 
     def warmup(self) -> dict[str, Any]:
+        # Best effort only. Failure is reflected in status and FTS5 remains fully usable.
         self.semantic.ensure_model(download_if_missing=True)
         return self.status()
 
@@ -60,7 +61,9 @@ class ContextEngine:
             return {"ok": False, "indexed": 0, "semantic": self.semantic.status(), "error": self.semantic.last_error}
         model_id = self.semantic.model_id
         if force and item_id:
+            # Item chunks are already recreated on update; explicit force for one item clears only those vectors.
             rows = self.store.chunks_for_embedding(item_id=item_id, limit=limit)
+            # save_embedding will overwrite below, so no separate clear is necessary.
         else:
             rows = self.store.chunks_for_embedding(
                 only_missing_for_model=None if force else model_id,
@@ -144,6 +147,7 @@ class ContextEngine:
             kinds=kinds_clean or None, limit=max(limit * 4, 40),
         ) if query else []
 
+        # Collapse multiple lexical chunks to the first (best-ranked) hit per item.
         lexical: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in lexical_rows:

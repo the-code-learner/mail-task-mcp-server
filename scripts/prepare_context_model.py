@@ -97,6 +97,7 @@ def main() -> None:
         }
         (output_dir / "nomadcompass-model.json").write_text(json.dumps(metadata, indent=2) + "\n")
 
+        # Sanity-check through the exact runtime loader before making the model current.
         runtime = StaticModel.from_pretrained(output_dir, normalize=True, force_download=False)
         probe = runtime.encode(["memoria persistente del progetto", "persistent project memory"])
         if probe.shape != (2, TARGET_DIMS) or not np.isfinite(probe).all():

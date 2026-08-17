@@ -37,7 +37,7 @@ class SemanticEngine:
         return path.is_dir() and (path / "model.safetensors").is_file() and (path / "tokenizer.json").is_file()
 
     def ensure_model(self, download_if_missing: bool = False) -> bool:
-        del download_if_missing
+        del download_if_missing  # retained for compatibility with the v9 context engine
         if not self.enabled:
             self.last_error = "Semantic search disabled by CONTEXT_SEMANTIC_ENABLED"
             return False
