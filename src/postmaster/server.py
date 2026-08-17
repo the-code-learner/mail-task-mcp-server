@@ -7,6 +7,7 @@ import hmac
 import secrets
 from functools import lru_cache
 from html import escape
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -28,6 +29,10 @@ from .knowledge_store import KnowledgeError
 from .semantic_engine import SemanticError
 from .context_engine import ContextEngine
 from .file_store import FileStore, FileStoreError
+from .remote_file import (
+    OpenAIFile, RemoteFileError, download_openai_file, filename_for_openai_file,
+    remote_max_batch_files,
+)
 
 
 logger = logging.getLogger("postmaster-mcp")
@@ -37,7 +42,7 @@ mcp = MCPServer(
     "Postmaster Self-Hosted MCP",
     instructions=(
         "Private self-hosted MCP server protected externally by Cloudflare Access. "
-        "v9.1 adds persistent project memory/skills and a scoped small-file store, revision history, FTS5 and optional Model2Vec hybrid retrieval. "
+        "v9.2 adds native ChatGPT file inputs on top of persistent project memory/skills, the scoped small-file store, revision history, FTS5 and optional Model2Vec hybrid retrieval. "
         "Multiple encrypted IMAP/SMTP accounts remain configurable from the WebGUI. "
         "Every mailbox/email MCP operation accepts an optional account_id; when omitted, "
         "the configured default account is used. HTML email, drafts, attachments, attachment "
@@ -85,10 +90,18 @@ def context_engine() -> ContextEngine:
 def file_store() -> FileStore:
     return FileStore()
 
+
+def _project_version() -> str:
+    try:
+        return (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
 def _safe_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except (MailBridgeError, SchedulerError, AccountStoreError, AnalyticsError, KnowledgeError, SemanticError, FileStoreError) as exc:
+    except (MailBridgeError, SchedulerError, AccountStoreError, AnalyticsError, KnowledgeError, SemanticError, FileStoreError, RemoteFileError) as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
         logger.exception("Unhandled MCP operation failure in %s", getattr(fn, "__name__", repr(fn)))
@@ -100,10 +113,13 @@ def _safe_call(fn, *args, **kwargs):
 # -------------------------
 @mcp.tool()
 def build_status():
-    """Read-only. Return the running bridge build and high-level v9.1 capabilities."""
+    """Read-only. Return the running build, release version and high-level v9.2 capabilities."""
+    resolved = os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown"
     return {
         "ok": True,
-        "build": os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown",
+        "version": _project_version(),
+        "build": resolved,
+        "requested_version": os.getenv("POSTMASTER_VERSION") or os.getenv("POSTMASTER_REQUESTED_VERSION") or resolved,
         "multi_account": True,
         "amp_per_account": True,
         "per_recipient_open_tracking": True,
@@ -115,6 +131,7 @@ def build_status():
         "fts5_search": True,
         "optional_model2vec": True,
         "small_file_store": True,
+        "native_chatgpt_file_upload": True,
     }
 
 
@@ -183,7 +200,7 @@ def mailbox_status(account_id: str | None = None) -> dict[str, Any]:
     if isinstance(base, dict) and base.get("ok"):
         account = account_store().get_account(account_id)
         base.update({
-            "build": os.getenv("BRIDGE_BUILD", "unknown"),
+            "build": os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown",
             "html_email": True,
             "draft_mailbox": client.draft_mailbox,
             "inbox_mailbox": client.inbox_mailbox,
@@ -833,6 +850,102 @@ def save_file(
         )
     except (FileStoreError, SchedulerError) as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _save_uploaded_file_impl(
+    *,
+    owner_id: str,
+    file: OpenAIFile,
+    project_id: str | None = None,
+    filename: str | None = None,
+    media_type: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+):
+    _require_knowledge_scope(owner_id, project_id)
+    store = file_store()
+    downloaded = download_openai_file(file, max_bytes=store.max_bytes)
+    resolved_name = filename or filename_for_openai_file(file)
+    resolved_media = media_type or file.get("mime_type") or downloaded.response_media_type
+    return store.save_bytes(
+        owner_id=owner_id,
+        project_id=project_id,
+        filename=resolved_name,
+        data=downloaded.data,
+        media_type=resolved_media,
+        description=description,
+        tags=tags or [],
+    )
+
+
+@mcp.tool(meta={
+    "openai/fileParams": ["file"],
+    "openai/toolInvocation/invoking": "Saving uploaded file",
+    "openai/toolInvocation/invoked": "Uploaded file saved",
+})
+def save_uploaded_file(
+    owner_id: str,
+    file: OpenAIFile,
+    project_id: str | None = None,
+    filename: str | None = None,
+    media_type: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+):
+    """WRITE ACTION. Save one file attached/authorized by ChatGPT without routing Base64 through model context."""
+    try:
+        return _save_uploaded_file_impl(
+            owner_id=owner_id,
+            file=file,
+            project_id=project_id,
+            filename=filename,
+            media_type=media_type,
+            description=description,
+            tags=tags,
+        )
+    except (FileStoreError, SchedulerError, RemoteFileError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool(meta={
+    "openai/fileParams": ["files"],
+    "openai/toolInvocation/invoking": "Saving uploaded files",
+    "openai/toolInvocation/invoked": "Uploaded files processed",
+})
+def save_uploaded_files(
+    owner_id: str,
+    files: list[OpenAIFile],
+    project_id: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+):
+    """WRITE ACTION. Save several ChatGPT file inputs. Returns per-file results and preserves successful items if another fails."""
+    if not files:
+        return {"ok": False, "error": "files must contain at least one ChatGPT file object", "saved": [], "errors": []}
+    maximum = remote_max_batch_files()
+    if len(files) > maximum:
+        return {"ok": False, "error": f"batch exceeds FILE_STORE_REMOTE_MAX_BATCH_FILES ({maximum})", "saved": [], "errors": []}
+    saved: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+    for index, source in enumerate(files):
+        try:
+            saved.append(_save_uploaded_file_impl(
+                owner_id=owner_id,
+                file=source,
+                project_id=project_id,
+                description=description,
+                tags=tags,
+            ))
+        except (FileStoreError, SchedulerError, RemoteFileError) as exc:
+            errors.append({"index": index, "file_id": str(source.get("file_id") or ""), "error": str(exc)})
+    return {
+        "ok": not errors,
+        "partial": bool(saved) and bool(errors),
+        "saved_count": len(saved),
+        "error_count": len(errors),
+        "saved": saved,
+        "errors": errors,
+    }
 
 
 @mcp.tool()

@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'README.md'
+      - 'CHANGELOG.md'
+      - 'VERSION'
       - 'docs/**'
       - 'postmaster-mcp.yml'
       - 'requirements.txt'
@@ -18,6 +20,8 @@ on:
       - main
     paths:
       - 'README.md'
+      - 'CHANGELOG.md'
+      - 'VERSION'
       - 'docs/**'
       - 'postmaster-mcp.yml'
       - 'requirements.txt'
@@ -56,6 +60,18 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
+
+      - name: Validate release version metadata
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          version = Path('VERSION').read_text().strip()
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), version
+          changelog = Path('CHANGELOG.md').read_text()
+          assert f'## {version} - ' in changelog, 'VERSION must have a CHANGELOG release entry'
+          print(f'Version metadata OK: {version}')
+          PY
 
       - name: Validate provider-neutral public tree
         run: |
@@ -139,7 +155,7 @@ jobs:
           assert isinstance(doc, dict)
           assert set(doc.get('services', {})) == {'postmaster-mcp'}
           assert 'configs' not in doc, 'v9 must not embed application source as Compose configs'
-          assert path.stat().st_size < 12000, 'bootstrap YAML unexpectedly became monolithic again'
+          assert path.stat().st_size < 16000, 'bootstrap YAML unexpectedly became monolithic again'
 
           service = doc['services']['postmaster-mcp']
           env = service['environment']
@@ -147,7 +163,9 @@ jobs:
           assert env.get('MAIL_PASSWORD', '') == ''
           assert env['IMAP_HOST'] == 'imap.example.com'
           assert env['SMTP_HOST'] == 'smtp.example.com'
-          assert env['POSTMASTER_REF'] == 'main'
+          assert env['POSTMASTER_VERSION'] == 'latest'
+          assert env['POSTMASTER_FORCE_REFRESH'] == 'false'
+          assert 'POSTMASTER_REF' not in env, 'public v9.2 YAML should use POSTMASTER_VERSION; legacy POSTMASTER_REF is runtime fallback only'
           assert env['CONTEXT_MODEL_DIMS'] == '128'
           assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
           assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
@@ -159,8 +177,16 @@ jobs:
           assert env['FILE_STORE_MAX_TOTAL_BYTES'] == '104857600'
           assert env['FILE_STORE_MAX_FILES'] == '1000'
           assert env['FILE_STORE_TEXT_MAX_CHARS'] == '200000'
+          assert env['FILE_STORE_REMOTE_TIMEOUT_SECONDS'] == '30'
+          assert env['FILE_STORE_REMOTE_MAX_REDIRECTS'] == '3'
+          assert env['FILE_STORE_REMOTE_MAX_BATCH_FILES'] == '20'
 
           command = service['command'][2]
+          assert 'releases?per_page=100' in command, 'latest policy must scan stable releases'
+          assert 'v([0-9]+)\\.([0-9]+)\\.([0-9]+)' in command, 'latest policy must filter application SemVer tags'
+          assert 'release.get("draft")' in command and 'release.get("prerelease")' in command, 'latest policy must ignore draft/prerelease releases'
+          assert 'POSTMASTER_REF:-latest' in command, 'legacy POSTMASTER_REF fallback must remain supported'
+          assert 'using cached current release' in command, 'bootstrap must retain last known-good source on update lookup failure'
           assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
           rendered = command.replace('$$', '$')
           Path('/tmp/postmaster-bootstrap.sh').write_text(rendered)

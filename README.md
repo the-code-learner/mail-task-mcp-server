@@ -4,7 +4,7 @@
 
 Postmaster MCP connects MCP-capable AI clients to one or more IMAP/SMTP mailboxes while keeping credentials, recipient policy, task state, analytics, memories, skills and project context on your own server.
 
-Version 9 moves the project from the old all-in-one Compose source layout to a normal, maintainable multi-file application **without giving up one-file deployment**: Portainer still needs only `postmaster-mcp.yml`.
+Version 9 moves the project from the old all-in-one Compose source layout to a normal, maintainable multi-file application **without giving up one-file deployment**: Portainer still needs only `postmaster-mcp.yml`. From v9.2 the same YAML can follow stable releases automatically or stay pinned to an exact version.
 
 > Original project by **the-code-learner**.  
 > Licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
@@ -42,7 +42,9 @@ The important v9 changes are:
 - SQLite FTS5 plus compact multilingual semantic retrieval;
 - verified ~9.9 MB compressed context-model release;
 - improved MIME parsing for forwarded mail and HTML-heavy messages;
-- CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning.
+- CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning;
+- persistent small-file storage plus native ChatGPT file inputs in v9.2;
+- semantic release history through `VERSION`, `CHANGELOG.md` and immutable `vX.Y.Z` release tags.
 
 ---
 
@@ -80,16 +82,18 @@ The default mapping is:
 host :8787 -> container :8000
 ```
 
-## 2. Choose the source revision
+## 2. Choose the update policy
 
-The stack downloads the application from GitHub using:
+The v9.2 bootstrap uses one persistent YAML and a version policy:
 
 ```yaml
 POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
-POSTMASTER_REF: v9-structural-runtime
+POSTMASTER_VERSION: latest
 ```
 
-A mutable branch is convenient while testing. For production, pin `POSTMASTER_REF` to an immutable release tag or commit SHA.
+`latest` resolves the newest stable GitHub Release at container startup and only downloads it when that release is not already cached. To freeze a deployment, use an exact release such as `v9.2.0` (or `9.2.0`), or an immutable commit SHA. Existing deployments that still provide only `POSTMASTER_REF` remain supported as a compatibility fallback.
+
+If GitHub is temporarily unavailable, a previously working cached release is kept and started instead of replacing it with an incomplete update. Set `POSTMASTER_FORCE_REFRESH=true` only when you deliberately want to redownload the already selected revision.
 
 ## 3. Open the dashboard
 
@@ -184,6 +188,8 @@ src/postmaster/
     knowledge_store.py
     context_engine.py
     semantic_engine.py
+    file_store.py
+    remote_file.py
 
 scripts/
     start.sh
@@ -192,6 +198,8 @@ scripts/
 tests/
 docs/
 requirements.txt
+VERSION
+CHANGELOG.md
 postmaster-mcp.yml
 ```
 
@@ -605,3 +613,25 @@ v9.1 adds a private persistent store for small reference files. Metadata is kept
 MCP clients can save UTF-8 text directly or binary data as base64, list scoped metadata, read text with a character budget, retrieve binary content as base64, update metadata and delete files. Owner/project scopes reuse the scheduler registry. The WebGUI has a Files tab for upload, download and deletion. Downloads are forced as attachments with `X-Content-Type-Options: nosniff`; Postmaster never executes stored content and does not expose public file URLs.
 
 The file store is intentionally separate from Knowledge in v9.1. Uploading a document does not automatically inject it into semantic context; a later version can add explicit opt-in document extraction/indexing without making arbitrary uploads part of prompts by default.
+
+---
+
+# Versioning and updates
+
+Stable Postmaster releases use Semantic Versioning and are recorded in `CHANGELOG.md`. The repository `VERSION` file contains the application version, while GitHub release tags use `vX.Y.Z`.
+
+For a Portainer deployment:
+
+```text
+POSTMASTER_VERSION=latest   -> follow the latest stable GitHub Release on restart
+POSTMASTER_VERSION=v9.2.0  -> stay pinned to that exact release
+POSTMASTER_VERSION=<SHA>   -> stay pinned to an immutable commit
+```
+
+`build_status` reports the application `version`, the resolved running `build`, and the `requested_version` policy so an MCP client can distinguish `latest` from the concrete release actually running.
+
+# Native ChatGPT file upload (v9.2)
+
+The portable MCP `save_file(content_base64=...)` tool remains available. ChatGPT clients can instead use `save_uploaded_file` or `save_uploaded_files`; those tools declare `_meta["openai/fileParams"]`, so ChatGPT passes temporary authorized file download objects rather than forcing large Base64 strings through model context.
+
+Remote downloads are HTTPS-only, bounded by the same per-file store limit while streaming, limited in redirects and timeout, checked against non-public address resolution, and then stored through the same SHA-256 content-addressed `FileStore`. Uploaded content is never executed or automatically added to semantic Knowledge.
