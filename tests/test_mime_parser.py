@@ -5,7 +5,7 @@ from email import policy
 from email.message import EmailMessage
 from email.parser import BytesParser
 
-from postmaster.hostinger_mail import _message_to_dict
+from postmaster.mail_bridge import _message_to_dict
 
 
 class MimeBodyRegressionTests(unittest.TestCase):

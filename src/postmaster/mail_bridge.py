@@ -26,9 +26,9 @@ class MailBridgeError(RuntimeError):
 class Settings:
     email_address: str
     email_password: str
-    imap_host: str = "imap.hostinger.com"
+    imap_host: str = "imap.example.com"
     imap_port: int = 993
-    smtp_host: str = "smtp.hostinger.com"
+    smtp_host: str = "smtp.example.com"
     smtp_port: int = 465
     smtp_starttls: bool = False
     enable_send: bool = False
@@ -55,11 +55,11 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        address = os.getenv("HOSTINGER_EMAIL", "").strip()
-        password = os.getenv("HOSTINGER_PASSWORD", "")
+        address = os.getenv("MAIL_EMAIL", "").strip()
+        password = os.getenv("MAIL_PASSWORD", "")
         if not address or not password:
             raise MailBridgeError(
-                "HOSTINGER_EMAIL and HOSTINGER_PASSWORD must be set in the environment."
+                "MAIL_EMAIL and MAIL_PASSWORD must be set in the environment."
             )
         allowlist = tuple(
             x.strip().lower()
@@ -70,9 +70,9 @@ class Settings:
         return cls(
             email_address=address,
             email_password=password,
-            imap_host=os.getenv("IMAP_HOST", "imap.hostinger.com").strip(),
+            imap_host=os.getenv("IMAP_HOST", "imap.example.com").strip(),
             imap_port=int(os.getenv("IMAP_PORT", "993")),
-            smtp_host=os.getenv("SMTP_HOST", "smtp.hostinger.com").strip(),
+            smtp_host=os.getenv("SMTP_HOST", "smtp.example.com").strip(),
             smtp_port=int(os.getenv("SMTP_PORT", "465")),
             smtp_starttls=smtp_starttls,
             enable_send=_env_bool("ENABLE_SEND", False),
@@ -397,7 +397,7 @@ def _message_to_dict(
     }
 
 
-class HostingerMailClient:
+class MailClient:
     def __init__(self, settings: Settings):
         self.settings = settings
 

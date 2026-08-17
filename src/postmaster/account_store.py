@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
-from .hostinger_mail import Settings, MailBridgeError
+from .mail_bridge import Settings, MailBridgeError
 
 
 class AccountStoreError(RuntimeError):
@@ -174,20 +174,20 @@ class MailAccountStore:
             if count or marker:
                 return
 
-        email = os.getenv("HOSTINGER_EMAIL", "").strip()
-        password = os.getenv("HOSTINGER_PASSWORD", "")
+        email = os.getenv("MAIL_EMAIL", "").strip()
+        password = os.getenv("MAIL_PASSWORD", "")
         if email and password:
             account_id = _slug(email.replace("@", "-"))
             self.save_account(
                 account_id=account_id,
                 label="Primary / migrated from v7",
                 email_address=email,
-                imap_host=os.getenv("IMAP_HOST", "imap.hostinger.com").strip(),
+                imap_host=os.getenv("IMAP_HOST", "imap.example.com").strip(),
                 imap_port=int(os.getenv("IMAP_PORT", "993")),
                 imap_security="ssl",
                 imap_username=email,
                 imap_password=password,
-                smtp_host=os.getenv("SMTP_HOST", "smtp.hostinger.com").strip(),
+                smtp_host=os.getenv("SMTP_HOST", "smtp.example.com").strip(),
                 smtp_port=int(os.getenv("SMTP_PORT", "465")),
                 smtp_security="starttls" if _env_bool("SMTP_STARTTLS", False) else "ssl",
                 smtp_username=email,
