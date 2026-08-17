@@ -10,7 +10,10 @@ REQ_MARKER="$VENV_DIR/.postmaster-requirements.sha256"
 
 if [ ! -x "$VENV_DIR/bin/python" ] || [ ! -f "$REQ_MARKER" ] || [ "$(cat "$REQ_MARKER" 2>/dev/null || true)" != "$REQ_HASH" ]; then
     echo "Preparing Python environment..."
-    rm -rf "$VENV_DIR"
+    mkdir -p "$VENV_DIR"
+    # VENV_DIR may itself be a Docker volume mount. Never remove the mount point;
+    # clear only its contents before rebuilding the virtual environment in place.
+    find "$VENV_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
     python -m venv "$VENV_DIR"
     "$VENV_DIR/bin/pip" install --disable-pip-version-check --no-cache-dir -r "$REQ_FILE"
     printf '%s\n' "$REQ_HASH" > "$REQ_MARKER"
