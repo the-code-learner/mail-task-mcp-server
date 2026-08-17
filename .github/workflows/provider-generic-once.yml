@@ -1,0 +1,32 @@
+name: Provider-generic refactor
+
+on:
+  push:
+    branches:
+      - generic-mail-provider
+    paths:
+      - 'scripts/provider_generic_refactor.py'
+      - '.github/workflows/provider-generic-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refactor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: generic-mail-provider
+      - name: Apply provider-generic refactor
+        run: |
+          python scripts/provider_generic_refactor.py
+          rm scripts/provider_generic_refactor.py
+      - name: Commit transformed tree
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m 'Make mail provider configuration generic'
+          git push origin HEAD:generic-mail-provider
