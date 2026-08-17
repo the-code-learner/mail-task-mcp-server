@@ -118,7 +118,7 @@ services:
         if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
             raise RuntimeError("Invalid POSTMASTER_REPO")
         request = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/releases/latest",
+            f"https://api.github.com/repos/{repo}/releases?per_page=100",
             headers={
                 "Accept": "application/vnd.github+json",
                 "User-Agent": "Postmaster-MCP-bootstrap",
@@ -126,10 +126,17 @@ services:
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.load(response)
-        tag = str(payload.get("tag_name") or "").strip()
-        if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
-            raise RuntimeError(f"Latest stable release has unexpected tag: {tag!r}")
-        print(tag)
+        candidates = []
+        for release in payload if isinstance(payload, list) else []:
+            if release.get("draft") or release.get("prerelease"):
+                continue
+            tag = str(release.get("tag_name") or "").strip()
+            match = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag)
+            if match:
+                candidates.append((tuple(int(x) for x in match.groups()), tag))
+        if not candidates:
+            raise RuntimeError("No stable Postmaster vX.Y.Z release found")
+        print(max(candidates, key=lambda item: item[0])[1])
         PY
           )"; then
             :
