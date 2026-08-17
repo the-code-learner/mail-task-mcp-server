@@ -4,7 +4,7 @@
 
 Postmaster MCP is a self-contained Model Context Protocol server that connects MCP-capable AI clients to one or more IMAP/SMTP mailboxes while keeping credentials, task state, recipient policies, analytics and operational data on your own server.
 
-The public v8.7 Portainer stack includes the application source directly inside a single Docker Compose YAML file. No separate application image or source checkout is required to start it.
+The v9 structural runtime keeps the application as normal source files in this repository while preserving a **single-YAML Portainer deployment**. `postmaster-mcp.yml` bootstraps a pinned GitHub ref into persistent code/venv volumes; v8.7 remains the previous monolithic-stack design.
 
 > Original project by **the-code-learner**.  
 > Licensed under the **Apache License 2.0**. See `LICENSE` and `NOTICE`.
@@ -215,41 +215,23 @@ Do not lose `mail_accounts.key`: existing encrypted mailbox credentials cannot b
 
 # Portainer stack design
 
-The public distribution is intentionally a **single YAML file**.
+The v9 public distribution still requires only **one YAML file** in Portainer, but application source is no longer embedded in Compose `configs:` entries.
 
-It contains:
+`postmaster-mcp.yml` contains only the service definition, environment, persistent volumes, bootstrap command and health check. On startup it downloads the configured `NOMADCOMPASS_REPO@NOMADCOMPASS_REF`, validates archive paths, installs it into a persistent code cache and starts the selected release.
 
-```text
-Docker service definition
-runtime environment
-persistent volumes
-startup command
-health check
-server.py
-mail_bridge.py
-scheduler_engine.py
-mail_extensions.py
-account_store.py
-email_analytics.py
-```
-
-The Python modules are embedded using Compose `configs:` entries.
-
-At first start the container creates a Python virtual environment in the persistent `mcp_venv` volume and installs:
+The repository itself contains the maintainable source tree:
 
 ```text
-mcp
-croniter
-tzdata
-pypdf
-cryptography
+src/nomadcompass/
+scripts/
+tests/
+docs/
+requirements.txt
 ```
 
-Application state is stored in the persistent `mcp_data` volume mounted at:
+The Python virtual environment is cached in `mcp_venv`, source releases are cached in `mcp_code`, and state remains in the persistent `mcp_data` volume mounted at `/data`.
 
-```text
-/data
-```
+For production, pin `NOMADCOMPASS_REF` to an immutable release tag or commit. A mutable branch is useful while testing upgrades.
 
 ---
 
@@ -269,6 +251,7 @@ The stack uses separate SQLite databases and key files.
 The Docker volumes are:
 
 ```text
+mcp_code
 mcp_venv
 mcp_data
 ```
@@ -359,7 +342,7 @@ This allows one MCP server to manage multiple mail identities while keeping the 
 
 # HTML email
 
-Postmaster MCP supports plain-text and HTML email.
+Postmaster MCP supports plain-text and HTML email for both sending and reading.
 
 A normal multipart message can contain:
 
@@ -367,6 +350,8 @@ A normal multipart message can contain:
 text/plain
 text/html
 ```
+
+In v9, `get_email` exposes the selected text body and `body_html`. MIME parsing evaluates both alternatives instead of blindly preferring `text/plain`, so a tiny forwarding boilerplate cannot hide a substantially richer HTML body. Forwarded `message/rfc822` parts are traversed explicitly, and URLs in HTML-derived text are preserved.
 
 Attachments can also be added to sends and drafts.
 
