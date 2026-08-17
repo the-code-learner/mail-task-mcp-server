@@ -3,7 +3,7 @@ services:
     image: python:3.12-slim-bookworm
     container_name: hostinger-mcp
     restart: unless-stopped
-    working_dir: /opt/nomadcompass/current
+    working_dir: /opt/nomadcompass
     ports:
       - "8787:8000"
     volumes:
