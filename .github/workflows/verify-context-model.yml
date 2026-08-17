@@ -1,0 +1,52 @@
+name: Verify compact context model
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: context-model-v1
+      ASSET_NAME: postmaster-context-mrl-128d-int8.tar.gz
+      EXPECTED_SHA256: 33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632
+    steps:
+      - name: Download release asset
+        run: |
+          mkdir -p /tmp/context-model
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern "$ASSET_NAME" \
+            --dir /tmp/context-model
+          echo "$EXPECTED_SHA256  /tmp/context-model/$ASSET_NAME" | sha256sum -c -
+
+      - name: Sanity-check archive contents
+        run: |
+          python - <<'PY'
+          from pathlib import PurePosixPath
+          import tarfile
+
+          path = '/tmp/context-model/postmaster-context-mrl-128d-int8.tar.gz'
+          with tarfile.open(path, 'r:gz') as tf:
+              names = []
+              for member in tf.getmembers():
+                  p = PurePosixPath(member.name.replace('\\', '/'))
+                  if p.is_absolute() or '..' in p.parts or member.issym() or member.islnk():
+                      raise SystemExit(f'unsafe archive member: {member.name}')
+                  names.append(member.name)
+
+          required = {
+              'static-mrl-selected/model.safetensors',
+              'static-mrl-selected/tokenizer.json',
+              'static-mrl-selected/config.json',
+          }
+          missing = required.difference(names)
+          if missing:
+              raise SystemExit(f'missing model files: {sorted(missing)}')
+          print('context model release verified')
+          PY

@@ -1,0 +1,129 @@
+name: v9 runtime tests
+
+on:
+  push:
+    branches:
+      - main
+      - v9-structural-runtime
+      - sanitized-base
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'postmaster-mcp.yml'
+      - 'requirements.txt'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/v9-runtime-tests.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'postmaster-mcp.yml'
+      - 'requirements.txt'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/v9-runtime-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v9-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: v9 runtime tests / test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime and validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt PyYAML
+
+      - name: Compile Python sources
+        run: python -m compileall -q src scripts tests
+
+      - name: Run regression tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Verify compact context model provisioning
+        env:
+          CONTEXT_MODEL_PATH: /tmp/postmaster-ci-model
+          CONTEXT_MODEL_AUTO_DOWNLOAD: 'true'
+          CONTEXT_MODEL_URL: https://github.com/the-code-learner/mail-task-mcp-server/releases/download/context-model-v1/postmaster-context-mrl-128d-int8.tar.gz
+          CONTEXT_MODEL_SHA256: 33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632
+          CONTEXT_MODEL_SOURCE_FALLBACK: 'false'
+          CONTEXT_MODEL_DIMS: '128'
+        run: |
+          python scripts/prepare_context_model.py
+          test -s /tmp/postmaster-ci-model/model.safetensors
+          test -s /tmp/postmaster-ci-model/tokenizer.json
+          python - <<'PY'
+          from model2vec import StaticModel
+          model = StaticModel.from_pretrained('/tmp/postmaster-ci-model', normalize=True, force_download=False)
+          encoded = model.encode(['memoria persistente', 'persistent memory'])
+          assert encoded.shape == (2, 128), encoded.shape
+          print('compact model provisioning OK')
+          PY
+
+      - name: Import complete MCP application
+        env:
+          PYTHONPATH: src
+          HOSTINGER_EMAIL: test@example.invalid
+          HOSTINGER_PASSWORD: test-only-password
+          ENABLE_SEND: 'false'
+          CONTEXT_SEMANTIC_ENABLED: 'false'
+          CONTEXT_DB_PATH: /tmp/postmaster-ci-knowledge.db
+          SCHEDULER_DB_PATH: /tmp/postmaster-ci-scheduler.db
+          MAIL_ACCOUNTS_DB_PATH: /tmp/postmaster-ci-accounts.db
+          MAIL_ACCOUNTS_KEY_PATH: /tmp/postmaster-ci-accounts.key
+          EMAIL_ANALYTICS_DB_PATH: /tmp/postmaster-ci-analytics.db
+          EMAIL_ANALYTICS_KEY_PATH: /tmp/postmaster-ci-analytics.key
+          RECIPIENT_POLICY_DB_PATH: /tmp/postmaster-ci-recipient-policy.db
+        run: python -c 'import postmaster.server; print("server import OK")'
+
+      - name: Validate single-YAML Portainer bootstrap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          path = Path('postmaster-mcp.yml')
+          raw = path.read_text()
+          doc = yaml.safe_load(raw)
+          assert isinstance(doc, dict)
+          assert set(doc.get('services', {})) == {'hostinger-mcp'}
+          assert 'configs' not in doc, 'v9 must not embed application source as Compose configs'
+          assert path.stat().st_size < 12000, 'bootstrap YAML unexpectedly became monolithic again'
+
+          service = doc['services']['hostinger-mcp']
+          env = service['environment']
+          assert env.get('HOSTINGER_EMAIL', '') == ''
+          assert env.get('HOSTINGER_PASSWORD', '') == ''
+          assert env['CONTEXT_MODEL_DIMS'] == '128'
+          assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
+          assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
+          assert env['CONTEXT_MODEL_SHA256'] == '33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632'
+          assert env['CONTEXT_MODEL_URL'].endswith('/context-model-v1/postmaster-context-mrl-128d-int8.tar.gz')
+
+          command = service['command'][2]
+          assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
+          rendered = command.replace('$$', '$')
+          Path('/tmp/postmaster-bootstrap.sh').write_text(rendered)
+          print(f'bootstrap YAML OK: {path.stat().st_size} bytes')
+          PY
+          /bin/sh -n /tmp/postmaster-bootstrap.sh
+          /bin/sh -n scripts/start.sh
