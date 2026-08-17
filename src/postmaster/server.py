@@ -8,7 +8,7 @@ import secrets
 from functools import lru_cache
 from html import escape
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import uvicorn
 from starlette.applications import Starlette
@@ -27,6 +27,7 @@ from .scheduler_engine import SchedulerEngine, SchedulerError, SchedulerSettings
 from .knowledge_store import KnowledgeError
 from .semantic_engine import SemanticError
 from .context_engine import ContextEngine
+from .file_store import FileStore, FileStoreError
 
 
 logger = logging.getLogger("postmaster-mcp")
@@ -36,7 +37,7 @@ mcp = MCPServer(
     "Postmaster Self-Hosted MCP",
     instructions=(
         "Private self-hosted MCP server protected externally by Cloudflare Access. "
-        "v9.0 adds persistent project memory/skills, revision history, FTS5 and optional Model2Vec hybrid retrieval. "
+        "v9.1 adds persistent project memory/skills and a scoped small-file store, revision history, FTS5 and optional Model2Vec hybrid retrieval. "
         "Multiple encrypted IMAP/SMTP accounts remain configurable from the WebGUI. "
         "Every mailbox/email MCP operation accepts an optional account_id; when omitted, "
         "the configured default account is used. HTML email, drafts, attachments, attachment "
@@ -80,10 +81,14 @@ def context_engine() -> ContextEngine:
     return ContextEngine()
 
 
+@lru_cache(maxsize=1)
+def file_store() -> FileStore:
+    return FileStore()
+
 def _safe_call(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
-    except (MailBridgeError, SchedulerError, AccountStoreError, AnalyticsError, KnowledgeError, SemanticError) as exc:
+    except (MailBridgeError, SchedulerError, AccountStoreError, AnalyticsError, KnowledgeError, SemanticError, FileStoreError) as exc:
         return {"ok": False, "error": str(exc)}
     except Exception as exc:
         logger.exception("Unhandled MCP operation failure in %s", getattr(fn, "__name__", repr(fn)))
@@ -95,10 +100,10 @@ def _safe_call(fn, *args, **kwargs):
 # -------------------------
 @mcp.tool()
 def build_status():
-    """Read-only. Return the running bridge build and high-level v9.0 capabilities."""
+    """Read-only. Return the running bridge build and high-level v9.1 capabilities."""
     return {
         "ok": True,
-        "build": os.getenv("BRIDGE_BUILD", "unknown"),
+        "build": os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown",
         "multi_account": True,
         "amp_per_account": True,
         "per_recipient_open_tracking": True,
@@ -109,6 +114,7 @@ def build_status():
         "persistent_context": True,
         "fts5_search": True,
         "optional_model2vec": True,
+        "small_file_store": True,
     }
 
 
@@ -797,6 +803,119 @@ def reindex_knowledge(
         project_id=project_id, force=force, limit=limit,
     )
 
+
+# -------------------------
+# Persistent small files (v9.1)
+# -------------------------
+@mcp.tool()
+def file_store_status():
+    """Read-only. Return persistent small-file store status and configured limits."""
+    return _safe_call(file_store().status)
+
+
+@mcp.tool()
+def save_file(
+    owner_id: str,
+    filename: str,
+    content_base64: str,
+    project_id: str | None = None,
+    media_type: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+):
+    """WRITE ACTION. Save one small binary file from base64 into the persistent scoped file store."""
+    try:
+        _require_knowledge_scope(owner_id, project_id)
+        return file_store().save_base64(
+            owner_id=owner_id, project_id=project_id, filename=filename,
+            content_base64=content_base64, media_type=media_type,
+            description=description, tags=tags or [],
+        )
+    except (FileStoreError, SchedulerError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+def save_text_file(
+    owner_id: str,
+    filename: str,
+    content: str,
+    project_id: str | None = None,
+    media_type: str | None = None,
+    description: str = "",
+    tags: list[str] | None = None,
+):
+    """WRITE ACTION. Save a small UTF-8 text file without requiring base64 encoding."""
+    try:
+        _require_knowledge_scope(owner_id, project_id)
+        return file_store().save_text(
+            owner_id=owner_id, project_id=project_id, filename=filename, content=content,
+            media_type=media_type, description=description, tags=tags or [],
+        )
+    except (FileStoreError, SchedulerError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@mcp.tool()
+def list_files(
+    owner_id: str | None = None,
+    project_id: str | None = None,
+    include_global: bool = True,
+    tag: str | None = None,
+    limit: int = 200,
+):
+    """Read-only. List stored-file metadata. File bytes are returned only by explicit read tools."""
+    try:
+        if project_id and not owner_id:
+            raise FileStoreError("owner_id is required when project_id is provided")
+        rows = file_store().list_files(
+            owner_id=owner_id, project_id=project_id, include_global=include_global,
+            tag=tag, limit=limit,
+        )
+        return {"ok": True, "count": len(rows), "files": rows}
+    except FileStoreError as exc:
+        return {"ok": False, "error": str(exc), "count": 0, "files": []}
+
+
+@mcp.tool()
+def get_file_info(file_id: str):
+    """Read-only. Return metadata for one stored file without returning its content."""
+    return _safe_call(file_store().get_info, file_id)
+
+
+@mcp.tool()
+def read_text_file(file_id: str, max_chars: int | None = None):
+    """Read-only. Return UTF-8 text from a stored file, bounded by FILE_STORE_TEXT_MAX_CHARS."""
+    return _safe_call(file_store().read_text, file_id, max_chars=max_chars)
+
+
+@mcp.tool()
+def get_file_base64(file_id: str):
+    """Read-only. Return one stored file as base64 plus metadata."""
+    return _safe_call(file_store().read_base64, file_id)
+
+
+@mcp.tool()
+def update_file_metadata(
+    file_id: str,
+    filename: str | None = None,
+    media_type: str | None = None,
+    description: str | None = None,
+    tags: list[str] | None = None,
+):
+    """WRITE ACTION. Update filename/media type/description/tags without changing stored bytes."""
+    return _safe_call(
+        file_store().update_metadata, file_id,
+        filename=filename, media_type=media_type, description=description, tags=tags,
+    )
+
+
+@mcp.tool()
+def delete_stored_file(file_id: str):
+    """WRITE ACTION. Delete one stored-file record and remove its blob when no other record references it."""
+    return _safe_call(file_store().delete, file_id)
+
+
 # Scheduler
 @mcp.tool()
 def scheduler_status():
@@ -1074,7 +1193,7 @@ def _redir(message: str = "", tab: str = "overview", account_id: str | None = No
     if account_id:
         params["account"] = account_id
     target = "/" + (("?" + urlencode(params)) if params else "")
-    if tab in {"overview", "accounts", "amp", "tracking", "domains", "recipients", "knowledge", "scheduler"}:
+    if tab in {"overview", "accounts", "amp", "tracking", "domains", "recipients", "knowledge", "files", "scheduler"}:
         target += f"#{tab}"
     return RedirectResponse(target, status_code=303)
 
@@ -1120,6 +1239,8 @@ async def dashboard_home(request: Request):
     knowledge_search = _safe_call(context_engine().search, knowledge_query, limit=50) if knowledge_query else {"ok": True, "results": []}
     knowledge_projects = _safe_call(scheduler().list_projects)
     knowledge_owners = _safe_call(scheduler().list_owners)
+    files_stat = _safe_call(file_store().status)
+    stored_files = _safe_call(file_store().list_files, limit=500)
 
     tracking_stat = _safe_call(analytics_store().status)
     tracking_campaigns = _safe_call(analytics_store().list_campaigns, limit=500)
@@ -1479,6 +1600,30 @@ async def dashboard_home(request: Request):
         '<select name="kind"><option value="memory">Memory</option><option value="skill">Skill</option></select>'
     )
 
+
+    file_rows = ""
+    for stored in (stored_files if isinstance(stored_files, list) else []):
+        fid = escape(str(stored.get("id", "")))
+        filename = escape(str(stored.get("filename", "")))
+        owner = escape(str(stored.get("owner_id", "")))
+        project = escape(str(stored.get("project_id") or "global"))
+        media_type = escape(str(stored.get("media_type", "application/octet-stream")))
+        tags = escape(", ".join(stored.get("tags") or []))
+        size = int(stored.get("size_bytes") or 0)
+        description = escape(str(stored.get("description") or ""))
+        file_rows += f"""<tr>
+<td><strong>{filename}</strong><div class="small muted mono">{fid}</div><div class="small muted">{description}</div></td>
+<td>{owner}<div class="small muted">{project}</div></td>
+<td class="mono small">{media_type}<div class="muted">{size} bytes</div></td>
+<td class="small">{tags}</td>
+<td class="actions"><a href="/dashboard/files/{fid}/download"><button type="button">Download</button></a>
+<form method="post" action="/dashboard/files/delete" onsubmit="return confirm('Delete this stored file?');">
+<input type="hidden" name="csrf" value="{escape(_csrf_value())}"><input type="hidden" name="file_id" value="{fid}"><button class="danger" type="submit">Delete</button></form></td></tr>"""
+    file_count = len(stored_files) if isinstance(stored_files, list) else 0
+    file_logical_bytes = int(files_stat.get("logical_bytes", 0)) if isinstance(files_stat, dict) else 0
+    file_max_bytes = int(files_stat.get("max_bytes_per_file", 0)) if isinstance(files_stat, dict) else 0
+    file_owner_selected = os.getenv("DEFAULT_OWNER_ID", "")
+
     due_count = len(due) if isinstance(due, list) else 0
     job_count = len(jobs) if isinstance(jobs, list) else 0
     domain_count = domains.get("count", 0) if isinstance(domains, dict) else 0
@@ -1523,7 +1668,7 @@ async def dashboard_home(request: Request):
 
     body = f"""
 <h1>Postmaster MCP</h1>
-<p class="sub">Persistent Context + multi-account IMAP/SMTP + analytics + task registry · v9.0</p>
+<p class="sub">Persistent Context + multi-account IMAP/SMTP + analytics + task registry + small files · v9.1</p>
 
 <nav class="tabs" aria-label="Dashboard sections">
   <a class="tab-link" href="#overview" data-tab="overview">Overview</a>
@@ -1533,6 +1678,7 @@ async def dashboard_home(request: Request):
   <a class="tab-link" href="#domains" data-tab="domains">Domains <span class="tab-count">{domain_count}</span></a>
   <a class="tab-link" href="#recipients" data-tab="recipients">Recipients <span class="tab-count">{recipient_count}</span></a>
   <a class="tab-link" href="#knowledge" data-tab="knowledge">Knowledge <span class="tab-count">{knowledge_total_count}</span></a>
+  <a class="tab-link" href="#files" data-tab="files">Files <span class="tab-count">{file_count}</span></a>
   <a class="tab-link" href="#scheduler" data-tab="scheduler">Tasks <span class="tab-count">{job_count}</span></a>
 </nav>
 
@@ -1548,12 +1694,13 @@ async def dashboard_home(request: Request):
 <hr>
 <div><strong>{selected_label}</strong></div>
 <div class="small muted">Selected account</div>
-<div class="small muted mono" style="margin-top:8px">build: {escape(os.getenv("BRIDGE_BUILD","unknown"))}</div>
+<div class="small muted mono" style="margin-top:8px">build: {escape(os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown")}</div>
 <div style="margin-top:10px"><strong>{job_count}</strong> tasks · <strong>{due_count}</strong> due</div>
 <div><strong>{account_count}</strong> mail accounts · <strong>{amp_enabled_count}</strong> AMP-enabled</div>
 <div><strong>{campaign_count}</strong> recent campaigns · <strong>{open_event_count}</strong> total observed open events</div>
 <div><strong>{domain_count}</strong> domains · <strong>{recipient_count}</strong> exact recipients</div>
 <div><strong>{knowledge_memory_count}</strong> memories · <strong>{knowledge_skill_count}</strong> skills</div>
+<div><strong>{file_count}</strong> stored files · <strong>{file_logical_bytes}</strong> logical bytes</div>
 {f'<div class="small" style="color:var(--danger);margin-top:8px">{mail_error}</div>' if mail_error else ''}
 </section>
 
@@ -1750,6 +1897,39 @@ Official docs:
 </div>
 </section>
 
+
+<section class="tab-panel" id="panel-files" data-panel="files">
+<div class="grid">
+<section class="card">
+<h2>Small-file store</h2>
+<div><strong>{file_count}</strong> files · <strong>{file_logical_bytes}</strong> logical bytes</div>
+<div class="small muted">Per-file limit: {file_max_bytes} bytes. Blobs are stored under /data by SHA-256; original filenames are metadata only.</div>
+<p class="small muted">Files are private to this deployment, never executed by Postmaster, and WebGUI downloads use attachment disposition + nosniff.</p>
+</section>
+<section class="card wide">
+<div class="panel-title"><h2>Upload file</h2><span class="small muted">owner/project scopes reuse the Tasks registry</span></div>
+<form method="post" action="/dashboard/files/upload" enctype="multipart/form-data">
+<input type="hidden" name="csrf" value="{escape(_csrf_value())}">
+<div class="row">
+<div class="field"><label>Owner</label><select name="owner_id" required>{_knowledge_owner_options(file_owner_selected)}</select></div>
+<div class="field"><label>Project</label><select name="project_id">{_knowledge_project_options(None)}</select></div>
+<div class="field grow"><label>File</label><input type="file" name="file" required></div>
+</div>
+<div class="row" style="margin-top:10px">
+<div class="field grow"><label>Description</label><input type="text" name="description" placeholder="Optional note"></div>
+<div class="field grow"><label>Tags (comma separated)</label><input type="text" name="tags" placeholder="docs, config, reference"></div>
+<button class="primary" type="submit">Upload</button>
+</div>
+</form>
+</section>
+<section class="card wide">
+<div class="panel-title"><h2>Stored files</h2><span class="badge">{file_count} total</span></div>
+<div class="scroll"><table><thead><tr><th>File</th><th>Owner / project</th><th>Type / size</th><th>Tags</th><th></th></tr></thead>
+<tbody>{file_rows or '<tr><td colspan="5" class="muted">No stored files yet</td></tr>'}</tbody></table></div>
+</section>
+</div>
+</section>
+
 <section class="tab-panel" id="panel-scheduler" data-panel="scheduler">
 <div class="grid"><section class="card wide">
 <div class="panel-title"><h2>Task registry</h2><span class="badge">{job_count} total · {due_count} due</span></div>
@@ -1761,7 +1941,7 @@ Official docs:
 
 <script>
 (() => {{
- const allowed = new Set(['overview','accounts','amp','tracking','domains','recipients','knowledge','scheduler']);
+ const allowed = new Set(['overview','accounts','amp','tracking','domains','recipients','knowledge','files','scheduler']);
  function activate() {{
    const raw = (window.location.hash || '#overview').slice(1);
    const tab = allowed.has(raw) ? raw : 'overview';
@@ -1772,7 +1952,7 @@ Official docs:
 }})();
 </script>
 """
-    return _layout("Postmaster MCP v9.0", body, flash=flash)
+    return _layout("Postmaster MCP v9.1", body, flash=flash)
 
 
 async def dashboard_knowledge_save(request: Request):
@@ -1824,6 +2004,59 @@ async def dashboard_knowledge_reindex(request: Request):
         return _redir(f"Embeddings indexed: {result.get('indexed', 0)}", "knowledge")
     return _redir(result.get("error", "Semantic model unavailable"), "knowledge")
 
+
+
+async def dashboard_file_upload(request: Request):
+    form, error = await _verified_form(request)
+    if error:
+        return error
+    try:
+        owner_id = str(form.get("owner_id", "")).strip()
+        project_id = str(form.get("project_id", "")).strip() or None
+        _require_knowledge_scope(owner_id, project_id)
+        upload = form.get("file")
+        if upload is None or not getattr(upload, "filename", "") or not hasattr(upload, "read"):
+            raise FileStoreError("file upload is required")
+        data = await upload.read(file_store().max_bytes + 1)
+        tags = [x.strip() for x in str(form.get("tags", "")).split(",") if x.strip()]
+        saved = file_store().save_bytes(
+            owner_id=owner_id,
+            project_id=project_id,
+            filename=str(upload.filename),
+            data=data,
+            media_type=str(getattr(upload, "content_type", "") or "") or None,
+            description=str(form.get("description", "")),
+            tags=tags,
+        )
+        return _redir(f"File uploaded: {saved.get('filename')}", "files")
+    except Exception as exc:
+        logger.exception("File upload failed")
+        return _redir(f"{type(exc).__name__}: {exc}", "files")
+
+
+async def dashboard_file_delete(request: Request):
+    form, error = await _verified_form(request)
+    if error:
+        return error
+    result = _safe_call(file_store().delete, str(form.get("file_id", "")))
+    return _redir("Stored file deleted" if result.get("ok") else result.get("error", "Failed"), "files")
+
+
+async def dashboard_file_download(request: Request):
+    try:
+        info, data = file_store().raw_bytes(str(request.path_params.get("file_id", "")))
+        filename = quote(str(info.get("filename") or "download.bin"), safe="")
+        return Response(
+            data,
+            media_type=str(info.get("media_type") or "application/octet-stream"),
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, no-store, max-age=0",
+            },
+        )
+    except FileStoreError as exc:
+        return PlainTextResponse(str(exc), status_code=404)
 
 
 async def dashboard_account_save(request: Request):
@@ -2093,6 +2326,7 @@ async def app_lifespan(app: Starlette):
     account_store()
     scheduler()
     analytics_store()
+    file_store()
     ctx = context_engine()
     try:
         ctx.warmup()
@@ -2117,6 +2351,9 @@ app = Starlette(
         Route("/dashboard/knowledge/save", dashboard_knowledge_save, methods=["POST"]),
         Route("/dashboard/knowledge/delete", dashboard_knowledge_delete, methods=["POST"]),
         Route("/dashboard/knowledge/reindex", dashboard_knowledge_reindex, methods=["POST"]),
+        Route("/dashboard/files/upload", dashboard_file_upload, methods=["POST"]),
+        Route("/dashboard/files/delete", dashboard_file_delete, methods=["POST"]),
+        Route("/dashboard/files/{file_id}/download", dashboard_file_download, methods=["GET"]),
         Route("/dashboard/job/pause", dashboard_job_pause, methods=["POST"]),
         Route("/dashboard/job/resume", dashboard_job_resume, methods=["POST"]),
         Route("/dashboard/mail/spam", dashboard_mail_spam, methods=["POST"]),
