@@ -123,6 +123,8 @@ jobs:
           EMAIL_ANALYTICS_DB_PATH: /tmp/postmaster-ci-analytics.db
           EMAIL_ANALYTICS_KEY_PATH: /tmp/postmaster-ci-analytics.key
           RECIPIENT_POLICY_DB_PATH: /tmp/postmaster-ci-recipient-policy.db
+          FILE_STORE_DB_PATH: /tmp/postmaster-ci-files.db
+          FILE_STORE_ROOT: /tmp/postmaster-ci-files
         run: python -c 'import postmaster.server; print("server import OK")'
 
       - name: Validate single-YAML Portainer bootstrap
@@ -151,6 +153,12 @@ jobs:
           assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
           assert env['CONTEXT_MODEL_SHA256'] == '33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632'
           assert env['CONTEXT_MODEL_URL'].endswith('/context-model-v1/postmaster-context-mrl-128d-int8.tar.gz')
+          assert env['FILE_STORE_DB_PATH'] == '/data/files.db'
+          assert env['FILE_STORE_ROOT'] == '/data/files'
+          assert env['FILE_STORE_MAX_BYTES'] == '1048576'
+          assert env['FILE_STORE_MAX_TOTAL_BYTES'] == '104857600'
+          assert env['FILE_STORE_MAX_FILES'] == '1000'
+          assert env['FILE_STORE_TEXT_MAX_CHARS'] == '200000'
 
           command = service['command'][2]
           assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'

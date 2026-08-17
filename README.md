@@ -596,3 +596,12 @@ Apache License 2.0. See:
 LICENSE
 NOTICE
 ```
+
+
+## v9.1 small-file store
+
+v9.1 adds a private persistent store for small reference files. Metadata is kept in SQLite while file bytes are stored as SHA-256-addressed blobs under `/data/files`, so user-provided filenames never become filesystem paths. The default public stack limits individual files to 1 MiB, the logical store to 100 MiB and 1000 records; hard application caps prevent accidentally configuring unbounded values.
+
+MCP clients can save UTF-8 text directly or binary data as base64, list scoped metadata, read text with a character budget, retrieve binary content as base64, update metadata and delete files. Owner/project scopes reuse the scheduler registry. The WebGUI has a Files tab for upload, download and deletion. Downloads are forced as attachments with `X-Content-Type-Options: nosniff`; Postmaster never executes stored content and does not expose public file URLs.
+
+The file store is intentionally separate from Knowledge in v9.1. Uploading a document does not automatically inject it into semantic context; a later version can add explicit opt-in document extraction/indexing without making arbitrary uploads part of prompts by default.

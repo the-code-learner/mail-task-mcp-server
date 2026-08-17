@@ -55,6 +55,12 @@ services:
       INBOX_MAILBOX: INBOX
       JUNK_MAILBOX: Junk
       RECIPIENT_POLICY_DB_PATH: /data/recipient-policy.db
+      FILE_STORE_DB_PATH: /data/files.db
+      FILE_STORE_ROOT: /data/files
+      FILE_STORE_MAX_BYTES: "1048576"
+      FILE_STORE_MAX_TOTAL_BYTES: "104857600"
+      FILE_STORE_MAX_FILES: "1000"
+      FILE_STORE_TEXT_MAX_CHARS: "200000"
       MAIL_ACCOUNTS_DB_PATH: /data/mail-accounts.db
       MAIL_ACCOUNTS_KEY_PATH: /data/mail-accounts.key
       EMAIL_ANALYTICS_DB_PATH: /data/email-analytics.db
