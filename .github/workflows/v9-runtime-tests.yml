@@ -52,6 +52,26 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
 
+      - name: Verify compact context model provisioning
+        env:
+          CONTEXT_MODEL_PATH: /tmp/nomadcompass-ci-model
+          CONTEXT_MODEL_AUTO_DOWNLOAD: 'true'
+          CONTEXT_MODEL_URL: https://github.com/the-code-learner/mail-task-mcp-server/releases/download/context-model-v1/nomadcompass-context-mrl-128d-int8.tar.gz
+          CONTEXT_MODEL_SHA256: 33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632
+          CONTEXT_MODEL_SOURCE_FALLBACK: 'false'
+          CONTEXT_MODEL_DIMS: '128'
+        run: |
+          python scripts/prepare_context_model.py
+          test -s /tmp/nomadcompass-ci-model/model.safetensors
+          test -s /tmp/nomadcompass-ci-model/tokenizer.json
+          python - <<'PY'
+          from model2vec import StaticModel
+          model = StaticModel.from_pretrained('/tmp/nomadcompass-ci-model', normalize=True, force_download=False)
+          encoded = model.encode(['memoria persistente', 'persistent memory'])
+          assert encoded.shape == (2, 128), encoded.shape
+          print('compact model provisioning OK')
+          PY
+
       - name: Import complete MCP application
         env:
           PYTHONPATH: src
@@ -88,6 +108,9 @@ jobs:
           assert env.get('HOSTINGER_PASSWORD', '') == ''
           assert env['CONTEXT_MODEL_DIMS'] == '128'
           assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
+          assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
+          assert env['CONTEXT_MODEL_SHA256'] == '33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632'
+          assert env['CONTEXT_MODEL_URL'].endswith('/context-model-v1/nomadcompass-context-mrl-128d-int8.tar.gz')
 
           command = service['command'][2]
           assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
