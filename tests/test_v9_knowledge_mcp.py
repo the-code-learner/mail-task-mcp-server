@@ -218,7 +218,7 @@ class V9KnowledgeMCPIntegrationTests(unittest.TestCase):
         )
         self.assertTrue(imported["ok"], imported)
         self.assertEqual(imported["created"], len(imported_bundle["items"]))
-        imported_items = s.server_context_items if False else s.context_engine().store.list_items(
+        imported_items = s.context_engine().store.list_items(
             owner_id=owner_id,
             project_id=import_project_id,
             include_global=False,
