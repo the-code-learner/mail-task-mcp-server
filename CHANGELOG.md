@@ -2,6 +2,19 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.2.1 - 2026-08-18
+
+### Added
+- `POSTMASTER_CHECK_UPDATES_ON_START` controls whether `POSTMASTER_VERSION=latest` checks GitHub Releases on each container start.
+- `build_status` reports the update-check and force-refresh policy alongside the requested/resolved version.
+
+### Changed
+- With `POSTMASTER_CHECK_UPDATES_ON_START=false`, `latest` reuses the currently cached source without a remote update lookup; if no usable cached source exists yet, Postmaster resolves `latest` once so first boot can succeed.
+- Explicit release/tag/commit selections remain pinned and do not require a latest-release lookup.
+
+### Fixed
+- Cached fallback after a failed GitHub release lookup preserves the cached resolved ref for build identity when available.
+
 ## 9.2.0 - 2026-08-18
 
 ### Added
