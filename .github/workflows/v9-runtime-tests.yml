@@ -182,7 +182,9 @@ jobs:
           assert env['FILE_STORE_REMOTE_MAX_BATCH_FILES'] == '20'
 
           command = service['command'][2]
-          assert 'releases/latest' in command, 'latest policy must resolve the latest stable GitHub Release'
+          assert 'releases?per_page=100' in command, 'latest policy must scan stable releases'
+          assert 'v([0-9]+)\\.([0-9]+)\\.([0-9]+)' in command, 'latest policy must filter application SemVer tags'
+          assert 'release.get("draft")' in command and 'release.get("prerelease")' in command, 'latest policy must ignore draft/prerelease releases'
           assert 'POSTMASTER_REF:-latest' in command, 'legacy POSTMASTER_REF fallback must remain supported'
           assert 'using cached current release' in command, 'bootstrap must retain last known-good source on update lookup failure'
           assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
