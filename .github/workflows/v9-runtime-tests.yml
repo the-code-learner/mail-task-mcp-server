@@ -1,0 +1,99 @@
+name: v9 runtime tests
+
+on:
+  push:
+    branches:
+      - v9-structural-runtime
+    paths:
+      - 'postmaster-mcp.yml'
+      - 'requirements.txt'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/v9-runtime-tests.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'postmaster-mcp.yml'
+      - 'requirements.txt'
+      - 'src/**'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/v9-runtime-tests.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v9-runtime-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install runtime and validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt PyYAML
+
+      - name: Compile Python sources
+        run: python -m compileall -q src scripts tests
+
+      - name: Run regression tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Import complete MCP application
+        env:
+          PYTHONPATH: src
+          HOSTINGER_EMAIL: test@example.invalid
+          HOSTINGER_PASSWORD: test-only-password
+          ENABLE_SEND: 'false'
+          CONTEXT_SEMANTIC_ENABLED: 'false'
+          CONTEXT_DB_PATH: /tmp/nomadcompass-ci-knowledge.db
+          SCHEDULER_DB_PATH: /tmp/nomadcompass-ci-scheduler.db
+          MAIL_ACCOUNTS_DB_PATH: /tmp/nomadcompass-ci-accounts.db
+          MAIL_ACCOUNTS_KEY_PATH: /tmp/nomadcompass-ci-accounts.key
+          EMAIL_ANALYTICS_DB_PATH: /tmp/nomadcompass-ci-analytics.db
+          EMAIL_ANALYTICS_KEY_PATH: /tmp/nomadcompass-ci-analytics.key
+          RECIPIENT_POLICY_DB_PATH: /tmp/nomadcompass-ci-recipient-policy.db
+        run: python -c 'import nomadcompass.server; print("server import OK")'
+
+      - name: Validate single-YAML Portainer bootstrap
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+
+          path = Path('postmaster-mcp.yml')
+          raw = path.read_text()
+          doc = yaml.safe_load(raw)
+          assert isinstance(doc, dict)
+          assert set(doc.get('services', {})) == {'hostinger-mcp'}
+          assert 'configs' not in doc, 'v9 must not embed application source as Compose configs'
+          assert path.stat().st_size < 12000, 'bootstrap YAML unexpectedly became monolithic again'
+
+          service = doc['services']['hostinger-mcp']
+          env = service['environment']
+          assert env.get('HOSTINGER_EMAIL', '') == ''
+          assert env.get('HOSTINGER_PASSWORD', '') == ''
+          assert env['CONTEXT_MODEL_DIMS'] == '128'
+          assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
+
+          command = service['command'][2]
+          assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
+          rendered = command.replace('$$', '$')
+          Path('/tmp/nomadcompass-bootstrap.sh').write_text(rendered)
+          print(f'bootstrap YAML OK: {path.stat().st_size} bytes')
+          PY
+          /bin/sh -n /tmp/nomadcompass-bootstrap.sh
+          /bin/sh -n scripts/start.sh
