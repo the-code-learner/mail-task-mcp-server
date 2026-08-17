@@ -15,10 +15,10 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
 
-      # Bootstrap. Pin an immutable tag/commit for production.
+      # Bootstrap update policy. `latest` follows stable GitHub Releases; an explicit version/tag/commit stays pinned.
       POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
-      POSTMASTER_REF: main
-      POSTMASTER_REFRESH_ON_START: "true"
+      POSTMASTER_VERSION: latest
+      POSTMASTER_FORCE_REFRESH: "false"
 
       # Primary mail account. Leave secrets only in your private Portainer stack.
       MAIL_EMAIL: ""
@@ -61,6 +61,9 @@ services:
       FILE_STORE_MAX_TOTAL_BYTES: "104857600"
       FILE_STORE_MAX_FILES: "1000"
       FILE_STORE_TEXT_MAX_CHARS: "200000"
+      FILE_STORE_REMOTE_TIMEOUT_SECONDS: "30"
+      FILE_STORE_REMOTE_MAX_REDIRECTS: "3"
+      FILE_STORE_REMOTE_MAX_BATCH_FILES: "20"
       MAIL_ACCOUNTS_DB_PATH: /data/mail-accounts.db
       MAIL_ACCOUNTS_KEY_PATH: /data/mail-accounts.key
       EMAIL_ANALYTICS_DB_PATH: /data/email-analytics.db
@@ -94,14 +97,59 @@ services:
         set -eu
         APP_ROOT=/opt/postmaster
         REPO="$${POSTMASTER_REPO:-the-code-learner/mail-task-mcp-server}"
-        REF="$${POSTMASTER_REF:-main}"
-        REF_KEY="$$(printf '%s' "$$REF" | tr '/:@ ' '____')"
-        TARGET="$$APP_ROOT/releases/$$REF_KEY"
+        REQUESTED="$${POSTMASTER_VERSION:-$${POSTMASTER_REF:-latest}}"
+        FORCE_REFRESH="$${POSTMASTER_FORCE_REFRESH:-$${POSTMASTER_REFRESH_ON_START:-false}}"
         CURRENT="$$APP_ROOT/current"
-        REFRESH="$${POSTMASTER_REFRESH_ON_START:-false}"
         mkdir -p "$$APP_ROOT/releases"
 
-        if [ "$$REFRESH" = "true" ] || [ ! -f "$$TARGET/.postmaster-source-ready" ]; then
+        case "$$REQUESTED" in
+          [0-9]*.[0-9]*.[0-9]*) REQUESTED="v$$REQUESTED" ;;
+        esac
+
+        if [ "$$REQUESTED" = "latest" ]; then
+          export REPO
+          if REF="$$(python - <<'PY'
+        import json
+        import os
+        import re
+        import urllib.request
+
+        repo = os.environ["REPO"]
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repo):
+            raise RuntimeError("Invalid POSTMASTER_REPO")
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{repo}/releases/latest",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "Postmaster-MCP-bootstrap",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.load(response)
+        tag = str(payload.get("tag_name") or "").strip()
+        if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+            raise RuntimeError(f"Latest stable release has unexpected tag: {tag!r}")
+        print(tag)
+        PY
+          )"; then
+            :
+          elif [ -x "$$CURRENT/scripts/start.sh" ]; then
+            echo "WARNING: could not resolve latest release; using cached current release." >&2
+            exec "$$CURRENT/scripts/start.sh"
+          else
+            echo "ERROR: could not resolve latest release and no cached release exists." >&2
+            exit 1
+          fi
+        else
+          REF="$$REQUESTED"
+        fi
+
+        export POSTMASTER_REQUESTED_VERSION="$$REQUESTED"
+        export POSTMASTER_REF="$$REF"
+        REF_KEY="$$(printf '%s' "$$REF" | tr '/:@ ' '____')"
+        TARGET="$$APP_ROOT/releases/$$REF_KEY"
+
+        if [ "$$FORCE_REFRESH" = "true" ] || [ ! -f "$$TARGET/.postmaster-source-ready" ]; then
           STAGING="$$APP_ROOT/releases/.staging-$$REF_KEY-$$$$"
           rm -rf "$$STAGING"
           mkdir -p "$$STAGING"
@@ -160,6 +208,10 @@ services:
           else
             rm -rf "$$STAGING"
             if [ ! -f "$$TARGET/.postmaster-source-ready" ]; then
+              if [ -x "$$CURRENT/scripts/start.sh" ]; then
+                echo "WARNING: requested release download failed; using cached current release." >&2
+                exec "$$CURRENT/scripts/start.sh"
+              fi
               echo "ERROR: source download failed and no cached release exists." >&2
               exit 1
             fi
