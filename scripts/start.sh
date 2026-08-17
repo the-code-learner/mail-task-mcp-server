@@ -2,6 +2,7 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
 VENV_DIR="${VENV_DIR:-/opt/venv}"
 REQ_FILE="$ROOT/requirements.txt"
 REQ_HASH="$(sha256sum "$REQ_FILE" | awk '{print $1}')"
