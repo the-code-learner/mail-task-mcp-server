@@ -9,6 +9,7 @@ from typing import NotRequired, TypedDict
 from urllib.parse import urljoin, urlsplit
 
 import httpx
+from pydantic import ConfigDict
 
 
 class RemoteFileError(RuntimeError):
@@ -17,6 +18,8 @@ class RemoteFileError(RuntimeError):
 
 class OpenAIFile(TypedDict):
     """ChatGPT file-param object. download_url and file_id are always present."""
+
+    __pydantic_config__ = ConfigDict(extra="forbid")
 
     download_url: str
     file_id: str
