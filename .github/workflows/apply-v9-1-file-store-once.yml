@@ -42,6 +42,7 @@ jobs:
           PY
           python scripts/apply_v9_1_file_store.py
           rm scripts/apply_v9_1_file_store.py
+          git checkout -- .github/workflows/v9-runtime-tests.yml
       - name: Commit transformed tree
         run: |
           git config user.name 'github-actions[bot]'
