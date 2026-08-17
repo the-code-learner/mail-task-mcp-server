@@ -1,7 +1,7 @@
 services:
-  hostinger-mcp:
+  postmaster-mcp:
     image: python:3.12-slim-bookworm
-    container_name: hostinger-mcp
+    container_name: postmaster-mcp
     restart: unless-stopped
     working_dir: /opt/postmaster
     ports:
@@ -21,11 +21,11 @@ services:
       POSTMASTER_REFRESH_ON_START: "true"
 
       # Primary mail account. Leave secrets only in your private Portainer stack.
-      HOSTINGER_EMAIL: ""
-      HOSTINGER_PASSWORD: ""
-      IMAP_HOST: imap.hostinger.com
+      MAIL_EMAIL: ""
+      MAIL_PASSWORD: ""
+      IMAP_HOST: imap.example.com
       IMAP_PORT: "993"
-      SMTP_HOST: smtp.hostinger.com
+      SMTP_HOST: smtp.example.com
       SMTP_PORT: "465"
       SMTP_STARTTLS: "false"
 

@@ -19,8 +19,8 @@ from starlette.routing import Mount, Route
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 
-from .hostinger_mail import MailBridgeError, Settings
-from .mail_extensions import EnhancedHostingerMailClient
+from .mail_bridge import MailBridgeError, Settings
+from .mail_extensions import EnhancedMailClient
 from .account_store import MailAccountStore, AccountStoreError
 from .email_analytics import analytics_store, AnalyticsError, TRANSPARENT_GIF, validate_amp_document
 from .scheduler_engine import SchedulerEngine, SchedulerError, SchedulerSettings
@@ -52,14 +52,14 @@ def account_store() -> MailAccountStore:
     return MailAccountStore()
 
 
-def mail_client(account_id: str | None = None) -> EnhancedHostingerMailClient:
-    return EnhancedHostingerMailClient(account_store().settings(account_id))
+def mail_client(account_id: str | None = None) -> EnhancedMailClient:
+    return EnhancedMailClient(account_store().settings(account_id))
 
 
 @lru_cache(maxsize=1)
-def policy_client() -> EnhancedHostingerMailClient:
+def policy_client() -> EnhancedMailClient:
     # Recipient/domain policy is global and can be managed even before an account exists.
-    return EnhancedHostingerMailClient(
+    return EnhancedMailClient(
         Settings(
             email_address="policy@localhost",
             email_password="",
@@ -1266,14 +1266,14 @@ async def dashboard_home(request: Request):
  <div class="field"><label>Email / From address</label><input type="text" name="email_address" value="{val('email_address')}" required></div>
 </div>
 <div class="form-section"><h3>IMAP</h3><div class="row">
- <div class="field"><label>Host</label><input type="text" name="imap_host" value="{val('imap_host','imap.hostinger.com')}" required></div>
+ <div class="field"><label>Host</label><input type="text" name="imap_host" value="{val('imap_host','imap.example.com')}" required></div>
  <div class="field"><label>Port</label><input type="number" name="imap_port" value="{val('imap_port','993')}" required></div>
  <div class="field"><label>Security</label><select name="imap_security">{security_options(imap_sec,'imap')}</select></div>
  <div class="field"><label>Username</label><input type="text" name="imap_username" value="{val('imap_username')}" placeholder="defaults to email"></div>
  <div class="field"><label>Password</label><input type="password" name="imap_password" placeholder="{'leave blank to keep saved password' if edit else 'required'}"></div>
 </div></div>
 <div class="form-section"><h3>SMTP</h3><div class="row">
- <div class="field"><label>Host</label><input type="text" name="smtp_host" value="{val('smtp_host','smtp.hostinger.com')}" required></div>
+ <div class="field"><label>Host</label><input type="text" name="smtp_host" value="{val('smtp_host','smtp.example.com')}" required></div>
  <div class="field"><label>Port</label><input type="number" name="smtp_port" value="{val('smtp_port','465')}" required></div>
  <div class="field"><label>Security</label><select name="smtp_security">{security_options(smtp_sec,'smtp')}</select></div>
  <div class="field"><label>Username</label><input type="text" name="smtp_username" value="{val('smtp_username')}" placeholder="defaults to email"></div>

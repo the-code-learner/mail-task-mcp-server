@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable
 from xml.etree import ElementTree as ET
 
-from .hostinger_mail import HostingerMailClient, MailBridgeError
+from .mail_bridge import MailClient, MailBridgeError
 from .email_analytics import analytics_store, validate_amp_document
 
 
@@ -50,7 +50,7 @@ def _strip_html_local(html: str) -> str:
     return text.strip()
 
 
-class EnhancedHostingerMailClient(HostingerMailClient):
+class EnhancedMailClient(MailClient):
     """Generic IMAP/SMTP mail client with HTML, drafts, attachments, recipient policy and mailbox writes."""
 
     @property

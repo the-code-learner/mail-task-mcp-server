@@ -176,7 +176,7 @@ The repository itself remains a normal project:
 ```text
 src/postmaster/
     server.py
-    hostinger_mail.py
+    mail_bridge.py
     mail_extensions.py
     account_store.py
     scheduler_engine.py
