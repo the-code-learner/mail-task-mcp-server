@@ -86,18 +86,18 @@ services:
       - |
         set -eu
         APP_ROOT=/opt/nomadcompass
-        REPO="${NOMADCOMPASS_REPO:-the-code-learner/mail-task-mcp-server}"
-        REF="${NOMADCOMPASS_REF:-main}"
-        REF_KEY="$(printf '%s' "$REF" | tr '/:@ ' '____')"
-        TARGET="$APP_ROOT/releases/$REF_KEY"
-        CURRENT="$APP_ROOT/current"
-        REFRESH="${NOMADCOMPASS_REFRESH_ON_START:-false}"
-        mkdir -p "$APP_ROOT/releases"
+        REPO="$${NOMADCOMPASS_REPO:-the-code-learner/mail-task-mcp-server}"
+        REF="$${NOMADCOMPASS_REF:-main}"
+        REF_KEY="$$(printf '%s' "$$REF" | tr '/:@ ' '____')"
+        TARGET="$$APP_ROOT/releases/$$REF_KEY"
+        CURRENT="$$APP_ROOT/current"
+        REFRESH="$${NOMADCOMPASS_REFRESH_ON_START:-false}"
+        mkdir -p "$$APP_ROOT/releases"
 
-        if [ "$REFRESH" = "true" ] || [ ! -f "$TARGET/.nomadcompass-source-ready" ]; then
-          STAGING="$APP_ROOT/releases/.staging-$REF_KEY-$$"
-          rm -rf "$STAGING"
-          mkdir -p "$STAGING"
+        if [ "$$REFRESH" = "true" ] || [ ! -f "$$TARGET/.nomadcompass-source-ready" ]; then
+          STAGING="$$APP_ROOT/releases/.staging-$$REF_KEY-$$$$"
+          rm -rf "$$STAGING"
+          mkdir -p "$$STAGING"
           export REPO REF STAGING
           if python - <<'PY'
         import io
@@ -148,21 +148,21 @@ services:
         (staging / ".nomadcompass-source-ready").write_text(ref + "\n")
         PY
           then
-            rm -rf "$TARGET"
-            mv "$STAGING" "$TARGET"
+            rm -rf "$$TARGET"
+            mv "$$STAGING" "$$TARGET"
           else
-            rm -rf "$STAGING"
-            if [ ! -f "$TARGET/.nomadcompass-source-ready" ]; then
+            rm -rf "$$STAGING"
+            if [ ! -f "$$TARGET/.nomadcompass-source-ready" ]; then
               echo "ERROR: source download failed and no cached release exists." >&2
               exit 1
             fi
-            echo "WARNING: source refresh failed; using cached $TARGET" >&2
+            echo "WARNING: source refresh failed; using cached $$TARGET" >&2
           fi
         fi
 
-        rm -f "$CURRENT"
-        ln -s "$TARGET" "$CURRENT"
-        exec "$CURRENT/scripts/start.sh"
+        rm -f "$$CURRENT"
+        ln -s "$$TARGET" "$$CURRENT"
+        exec "$$CURRENT/scripts/start.sh"
     healthcheck:
       test:
         - CMD-SHELL
