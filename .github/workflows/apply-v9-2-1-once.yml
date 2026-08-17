@@ -1,0 +1,32 @@
+name: Apply v9.2.1 once
+
+on:
+  push:
+    branches:
+      - v9.2.1-update-check-control
+    paths:
+      - 'scripts/apply_v9_2_1.py'
+      - '.github/workflows/apply-v9-2-1-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v9.2.1-update-check-control
+      - name: Apply v9.2.1 transformation
+        run: |
+          python scripts/apply_v9_2_1.py
+          rm scripts/apply_v9_2_1.py
+      - name: Commit transformed sources
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/postmaster/server.py postmaster-mcp.yml README.md scripts/apply_v9_2_1.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Implement v9.2.1 update-check control'
+          git push origin HEAD:v9.2.1-update-check-control
