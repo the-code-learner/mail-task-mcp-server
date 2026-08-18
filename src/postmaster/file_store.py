@@ -259,14 +259,27 @@ class FileStore:
             items = items[requested_offset:requested_offset + requested_limit]
         return items
 
-    def _read_bytes(self, file_id: str) -> tuple[dict[str, Any], bytes]:
+    def resolve_blob(self, file_id: str) -> tuple[dict[str, Any], Path]:
+        """Resolve one canonical content-addressed blob without loading its bytes into memory."""
         info = self.get_info(file_id)
         path = self._blob_path(str(info["sha256"]))
+        try:
+            actual_size = path.stat().st_size
+        except FileNotFoundError as exc:
+            raise FileStoreError("stored blob is missing from disk") from exc
+        except OSError as exc:
+            raise FileStoreError(f"stored blob could not be inspected: {exc}") from exc
+        if actual_size != int(info["size_bytes"]):
+            raise FileStoreError("stored blob failed size verification")
+        return info, path
+
+    def _read_bytes(self, file_id: str) -> tuple[dict[str, Any], bytes]:
+        info, path = self.resolve_blob(file_id)
         try:
             data = path.read_bytes()
         except FileNotFoundError as exc:
             raise FileStoreError("stored blob is missing from disk") from exc
-        if len(data) != int(info["size_bytes"]) or hashlib.sha256(data).hexdigest() != info["sha256"]:
+        if hashlib.sha256(data).hexdigest() != info["sha256"]:
             raise FileStoreError("stored blob failed integrity verification")
         return info, data
 
@@ -337,7 +350,7 @@ class FileStore:
         return {"ok": True, "deleted": str(file_id), "blob_deleted": blob_deleted}
 
     def raw_bytes(self, file_id: str) -> tuple[dict[str, Any], bytes]:
-        """WebGUI-only helper; callers must still enforce external authentication."""
+        """Trusted internal helper for MCP resources and authenticated dashboard operations."""
         return self._read_bytes(file_id)
 
     def status(self) -> dict[str, Any]:
