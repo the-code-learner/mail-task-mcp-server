@@ -7,6 +7,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from mcp import Client
@@ -21,7 +22,7 @@ class V93FileHandoffTests(unittest.TestCase):
         "FILE_STORE_DB_PATH", "FILE_STORE_ROOT", "FILE_STORE_MAX_BYTES",
         "FILE_STORE_MAX_TOTAL_BYTES", "FILE_STORE_MAX_FILES", "FILE_STORE_TEXT_MAX_CHARS",
         "FILE_STORE_PUBLIC_BASE_URL", "FILE_STORE_DOWNLOAD_SECRET",
-        "FILE_STORE_DOWNLOAD_URL_TTL_SECONDS", "MAIL_ACCOUNTS_DB_PATH",
+        "FILE_STORE_DOWNLOAD_URL_TTL_SECONDS", "PUBLIC_MCP_HOST", "MAIL_ACCOUNTS_DB_PATH",
         "MAIL_ACCOUNTS_KEY_PATH", "EMAIL_ANALYTICS_DB_PATH", "EMAIL_ANALYTICS_KEY_PATH",
         "RECIPIENT_POLICY_DB_PATH", "POSTMASTER_REF", "POSTMASTER_VERSION",
     )
@@ -45,6 +46,7 @@ class V93FileHandoffTests(unittest.TestCase):
             "FILE_STORE_PUBLIC_BASE_URL": "https://files.example.test",
             "FILE_STORE_DOWNLOAD_SECRET": "ci-v9.3-file-download-secret-0123456789abcdef",
             "FILE_STORE_DOWNLOAD_URL_TTL_SECONDS": "900",
+            "PUBLIC_MCP_HOST": "",
             "MAIL_ACCOUNTS_DB_PATH": str(root / "accounts.db"),
             "MAIL_ACCOUNTS_KEY_PATH": str(root / "accounts.key"),
             "EMAIL_ANALYTICS_DB_PATH": str(root / "analytics.db"),
@@ -83,7 +85,9 @@ class V93FileHandoffTests(unittest.TestCase):
             })
 
     def test_native_resource_link_and_resources_read(self) -> None:
-        result = asyncio.run(self._tool("mcp"))
+        store = self.s.file_store()
+        with patch.object(store, "raw_bytes", side_effect=AssertionError("link construction must not read blob")):
+            result = asyncio.run(self._tool("mcp"))
         self.assertFalse(result.is_error)
         self.assertEqual(len(result.content), 1)
         link = result.content[0]
@@ -170,12 +174,19 @@ class V93FileHandoffTests(unittest.TestCase):
                 f"/files/{missing_id}?expires={future}&sig={missing_sig}"
             ).status_code, 404)
 
+    def test_transport_configuration_fallbacks(self) -> None:
         os.environ["FILE_STORE_PUBLIC_BASE_URL"] = ""
+        os.environ["PUBLIC_MCP_HOST"] = "mcp.example.test"
+        via_existing_host = asyncio.run(self._tool("auto"))
+        self.assertFalse(via_existing_host.is_error)
+        self.assertTrue(str(via_existing_host.content[0].uri).startswith("https://mcp.example.test/files/"))
+
+        os.environ["PUBLIC_MCP_HOST"] = ""
         mcp_fallback = asyncio.run(self._tool("auto"))
         self.assertEqual(str(mcp_fallback.content[0].uri), f"postmaster://files/{self.saved['id']}")
         http_error = asyncio.run(self._tool("http"))
         self.assertTrue(http_error.is_error)
-        self.assertIn("FILE_STORE_PUBLIC_BASE_URL", http_error.content[0].text)
+        self.assertIn("PUBLIC_MCP_HOST", http_error.content[0].text)
 
 
 if __name__ == "__main__":
