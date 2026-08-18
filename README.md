@@ -639,3 +639,17 @@ POSTMASTER_VERSION=<SHA>   -> stay pinned to an immutable commit
 The portable MCP `save_file(content_base64=...)` tool remains available. ChatGPT clients can instead use `save_uploaded_file` or `save_uploaded_files`; those tools declare `_meta["openai/fileParams"]`, so ChatGPT passes temporary authorized file download objects rather than forcing large Base64 strings through model context.
 
 Remote downloads are HTTPS-only, bounded by the same per-file store limit while streaming, limited in redirects and timeout, checked against non-public address resolution, and then stored through the same SHA-256 content-addressed `FileStore`. Uploaded content is never executed or automatically added to semantic Knowledge.
+
+# Native Postmaster file handoff (v9.3)
+
+v9.3 completes the reverse path from Postmaster to MCP clients. `get_stored_file_resource(file_id, transport="auto")` returns a real MCP `ResourceLink` content block using the canonical FileStore `file_id`; constructing the link reads metadata only and does not serialize the link into text or load the stored blob.
+
+The preferred hierarchy is native ResourceLink/file reference, signed HTTPS streaming, MCP `resources/read`, Base64 fallback, and inline Base64 only as a last resort. `postmaster://files/{file_id}` is registered as a resource template, and the SDK turns returned bytes into protocol `BlobResourceContents` when a client follows the MCP resource.
+
+`GET` and `HEAD /files/{file_id}` provide temporary HMAC-signed HTTPS capabilities with byte-range support. The HTTP path streams the original content-addressed blob directly: it does not resize, recompress, transcode, Base64-encode, or create a second transfer copy.
+
+The existing `PUBLIC_MCP_HOST` is reused as the normal HTTPS base for the same service, so the public `postmaster-mcp.yml` does not need new required variables. Advanced deployments may optionally override the file base or signing behavior with `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET`, and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS`; otherwise the signing secret is generated once and persisted at `/data/file-store-download.secret` and the TTL defaults to 900 seconds.
+
+An existing stack with `POSTMASTER_VERSION=latest` can therefore receive v9.3 by restarting after the stable release is published. If the external access layer protects the full app, ensure the signed `/files/*` route is reachable according to the deployment's proxy policy without weakening protection for `/mcp`, the dashboard, or unrelated routes.
+
+See `docs/FILE_HANDOFF.md` for the handoff hierarchy, security model, signed URL behavior and deployment details.
