@@ -30,6 +30,7 @@ class V93FileHandoffTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         root = Path(self.tmp.name)
+        version = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
         self.old = {key: os.environ.get(key) for key in self.KEYS}
         os.environ.update({
             "SCHEDULER_DB_PATH": str(root / "scheduler.db"),
@@ -52,7 +53,7 @@ class V93FileHandoffTests(unittest.TestCase):
             "EMAIL_ANALYTICS_DB_PATH": str(root / "analytics.db"),
             "EMAIL_ANALYTICS_KEY_PATH": str(root / "analytics.key"),
             "RECIPIENT_POLICY_DB_PATH": str(root / "policy.db"),
-            "POSTMASTER_REF": "v9.3.0-test",
+            "POSTMASTER_REF": f"v{version}-test",
             "POSTMASTER_VERSION": "latest",
         })
         import postmaster.runtime as runtime
