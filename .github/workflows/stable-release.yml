@@ -103,8 +103,8 @@ jobs:
           PY
           HEAD_REF="$(cat /tmp/head-ref.txt)"
           if [ -n "$HEAD_REF" ]; then
-            ENCODED_REF="$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["HEAD_REF"], safe=""))')"
             export HEAD_REF
+            ENCODED_REF="$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["HEAD_REF"], safe=""))')"
             gh api --method DELETE "/repos/$GITHUB_REPOSITORY/git/refs/heads/$ENCODED_REF" || true
             echo "Deleted merged feature branch: $HEAD_REF"
           else
