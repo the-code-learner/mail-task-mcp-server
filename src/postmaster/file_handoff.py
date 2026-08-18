@@ -28,11 +28,21 @@ class FileHandoffError(FileStoreError):
 
 
 def _public_base_url(*, required: bool = False) -> str | None:
+    """Resolve the external HTTPS base without coupling file transfer to mail callbacks.
+
+    A dedicated FILE_STORE_PUBLIC_BASE_URL may override the normal MCP host. Otherwise
+    PUBLIC_MCP_HOST is reused because /files is served by the same public MCP service.
+    This keeps existing single-YAML deployments usable without adding mandatory envs.
+    """
     raw = os.getenv("FILE_STORE_PUBLIC_BASE_URL", "").strip()
+    if not raw:
+        public_host = os.getenv("PUBLIC_MCP_HOST", "").strip()
+        if public_host:
+            raw = f"https://{public_host}"
     if not raw:
         if required:
             raise FileHandoffError(
-                "HTTP file handoff is not configured; set FILE_STORE_PUBLIC_BASE_URL to an externally reachable HTTPS base URL"
+                "HTTP file handoff is not configured; set FILE_STORE_PUBLIC_BASE_URL or PUBLIC_MCP_HOST to an externally reachable HTTPS host"
             )
         return None
     parsed = urlsplit(raw)
@@ -45,7 +55,7 @@ def _public_base_url(*, required: bool = False) -> str | None:
         or parsed.fragment
     ):
         raise FileHandoffError(
-            "FILE_STORE_PUBLIC_BASE_URL must be an absolute HTTPS URL without credentials, query parameters or fragments"
+            "file handoff public base must be an absolute HTTPS URL without credentials, query parameters or fragments"
         )
     return raw.rstrip("/")
 
