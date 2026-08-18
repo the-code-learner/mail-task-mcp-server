@@ -1,0 +1,54 @@
+name: v9.3 README append helper
+
+on:
+  push:
+    branches:
+      - v9.3-file-resource-handoff
+
+permissions:
+  contents: write
+
+jobs:
+  append:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Append v9.3 file handoff section once
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          marker = '# Native Postmaster file handoff (v9.3)'
+          if marker in text:
+              raise SystemExit(0)
+          addition = r'''
+
+# Native Postmaster file handoff (v9.3)
+
+v9.3 completes the reverse file path from Postmaster to MCP clients. `get_stored_file_resource(file_id, transport="auto")` returns a real MCP `ResourceLink` content block using the canonical FileStore `file_id`; it does not serialize the link into text or read the entire blob merely to construct metadata.
+
+The preferred hierarchy is native ResourceLink/file reference, signed HTTPS streaming when explicitly configured, MCP `resources/read`, Base64 fallback, and inline Base64 only as a last resort. `postmaster://files/{file_id}` is registered as an MCP resource template, while `GET`/`HEAD /files/{file_id}` supports signed temporary URLs and byte ranges without resizing, recompressing, transcoding or making a second transfer copy.
+
+Optional HTTPS settings are:
+
+```text
+FILE_STORE_PUBLIC_BASE_URL
+FILE_STORE_DOWNLOAD_SECRET
+FILE_STORE_DOWNLOAD_URL_TTL_SECONDS
+```
+
+Leaving `FILE_STORE_PUBLIC_BASE_URL` blank keeps `transport=auto` on the MCP resource path. If `FILE_STORE_DOWNLOAD_SECRET` is blank, Postmaster creates and persists a random secret under `/data`. Existing v9.2 native ChatGPT uploads and generic `save_file(content_base64)` remain unchanged.
+
+See `docs/FILE_HANDOFF.md` for the handoff hierarchy, security model, signed URL behavior and deployment notes.
+'''
+          path.write_text(text.rstrip() + addition + '\n', encoding='utf-8')
+          PY
+          if git diff --quiet -- README.md; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add README.md
+          git commit -m "Document v9.3 native file handoff"
+          git push
