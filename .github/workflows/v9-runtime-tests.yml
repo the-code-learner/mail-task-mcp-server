@@ -101,6 +101,7 @@ jobs:
           text = Path('scripts/start.sh').read_text()
           assert 'rm -rf "$VENV_DIR"' not in text, 'must not remove a Docker volume mount point'
           assert 'find "$VENV_DIR" -mindepth 1 -maxdepth 1' in text, 'venv rebuild must clear only mount contents'
+          assert '-m postmaster.runtime' in text, 'deployment must launch the composed v9.3 runtime'
           PY
 
       - name: Verify compact context model provisioning
@@ -141,7 +142,7 @@ jobs:
           RECIPIENT_POLICY_DB_PATH: /tmp/postmaster-ci-recipient-policy.db
           FILE_STORE_DB_PATH: /tmp/postmaster-ci-files.db
           FILE_STORE_ROOT: /tmp/postmaster-ci-files
-        run: python -c 'import postmaster.server; print("server import OK")'
+        run: python -c 'import postmaster.runtime; print("v9.3 runtime import OK")'
 
       - name: Validate single-YAML Portainer bootstrap
         run: |
@@ -181,6 +182,9 @@ jobs:
           assert env['FILE_STORE_REMOTE_TIMEOUT_SECONDS'] == '30'
           assert env['FILE_STORE_REMOTE_MAX_REDIRECTS'] == '3'
           assert env['FILE_STORE_REMOTE_MAX_BATCH_FILES'] == '20'
+          assert env['FILE_STORE_PUBLIC_BASE_URL'] == ''
+          assert env['FILE_STORE_DOWNLOAD_SECRET'] == ''
+          assert env['FILE_STORE_DOWNLOAD_URL_TTL_SECONDS'] == '900'
 
           command = service['command'][2]
           assert 'releases?per_page=100' in command, 'latest policy must scan stable releases'
