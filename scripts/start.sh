@@ -26,4 +26,4 @@ if [ "${CONTEXT_SEMANTIC_ENABLED:-true}" = "true" ] && [ "${CONTEXT_MODEL_AUTO_P
 fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
-exec "$VENV_DIR/bin/python" -m postmaster.server
+exec "$VENV_DIR/bin/python" -m postmaster.runtime
