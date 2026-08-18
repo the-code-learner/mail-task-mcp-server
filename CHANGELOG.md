@@ -7,8 +7,8 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 ### Added
 - Native Postmaster-to-client file handoff through `get_stored_file_resource(file_id, transport)` returning a real MCP `ResourceLink` content block with canonical FileStore metadata.
 - `postmaster://files/{file_id}` MCP resource template; `resources/read` returns the original stored bytes and lets the MCP SDK handle `BlobResourceContents` protocol encoding.
-- Optional signed HTTPS file handoff at `GET`/`HEAD /files/{file_id}` with HMAC-bound expiry, constant-time signature verification, direct blob streaming, byte ranges, `206 Partial Content` and `416 Range Not Satisfiable` handling.
-- `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET` and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS` configuration. When no explicit secret is supplied, a persistent random download secret is created under `/data`.
+- Signed HTTPS file handoff at `GET`/`HEAD /files/{file_id}` with HMAC-bound expiry, constant-time signature verification, direct blob streaming, byte ranges, `206 Partial Content` and `416 Range Not Satisfiable` handling.
+- Optional `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET` and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS` runtime overrides. The existing `PUBLIC_MCP_HOST` is reused as the normal public HTTPS host, and when no explicit secret is supplied a persistent random download secret is created under `/data`.
 - `docs/FILE_HANDOFF.md` documenting the preferred transfer hierarchy and no-transcode rule.
 - `build_status.native_file_resource_handoff` capability reporting.
 
@@ -16,6 +16,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - The authenticated WebGUI download route now streams the canonical content-addressed blob and supports `HEAD`/ranges instead of materializing the complete file before responding.
 - Runtime startup composes the existing v9.2 server with the v9.3 handoff layer while preserving all existing ChatGPT upload and generic FileStore tools.
 - Version-sensitive regression tests read `VERSION` rather than embedding the current release number.
+- The single-YAML bootstrap remains unchanged for v9.3; existing `POSTMASTER_VERSION=latest` deployments can receive the MCP ResourceLink/resources-read handoff on restart without a private YAML rewrite.
 
 ### Security
 - A FileStore UUID/file_id alone does not authorize the public file endpoint: signed URLs require both expiry and HMAC signature.
