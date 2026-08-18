@@ -1,0 +1,112 @@
+name: stable application release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: stable-application-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare release metadata
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = Path('VERSION').read_text(encoding='utf-8').strip()
+          if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
+              raise SystemExit(f'Invalid VERSION: {version!r}')
+          changelog = Path('CHANGELOG.md').read_text(encoding='utf-8')
+          match = re.search(
+              rf'^## {re.escape(version)} - .*?\n(?P<body>.*?)(?=^## |\Z)',
+              changelog,
+              flags=re.MULTILINE | re.DOTALL,
+          )
+          if not match:
+              raise SystemExit(f'CHANGELOG entry missing for {version}')
+          tag = f'v{version}'
+          Path('/tmp/release-notes.md').write_text(match.group(0).strip() + '\n', encoding='utf-8')
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env:
+              env.write(f'RELEASE_TAG={tag}\n')
+          print(f'Prepared {tag}')
+          PY
+
+      - name: Create immutable tag and stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          REMOTE_SHA="$(git ls-remote origin "refs/tags/$RELEASE_TAG" | awk '{print $1}')"
+          if [ -n "$REMOTE_SHA" ]; then
+            if [ "$REMOTE_SHA" != "$GITHUB_SHA" ]; then
+              echo "ERROR: immutable tag $RELEASE_TAG already points to $REMOTE_SHA, not $GITHUB_SHA" >&2
+              exit 1
+            fi
+          else
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+            git push origin "$RELEASE_TAG"
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Stable release $RELEASE_TAG already exists for this immutable tag."
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "$RELEASE_TAG" \
+              --notes-file /tmp/release-notes.md
+          fi
+
+          gh release view "$RELEASE_TAG" --json tagName,isDraft,isPrerelease > /tmp/release.json
+          python - <<'PY'
+          import json
+          data = json.load(open('/tmp/release.json', encoding='utf-8'))
+          assert data['tagName'] == __import__('os').environ['RELEASE_TAG']
+          assert data['isDraft'] is False
+          assert data['isPrerelease'] is False
+          print('Stable release verified:', data['tagName'])
+          PY
+
+      - name: Delete merged feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" > /tmp/pulls.json
+          python - <<'PY' > /tmp/head-ref.txt
+          import json, os
+          pulls = json.load(open('/tmp/pulls.json', encoding='utf-8'))
+          repo = os.environ['GITHUB_REPOSITORY']
+          for pr in pulls:
+              head = pr.get('head') or {}
+              source = (head.get('repo') or {}).get('full_name')
+              ref = head.get('ref')
+              if pr.get('merged_at') and source == repo and ref and ref != 'main':
+                  print(ref)
+                  break
+          PY
+          HEAD_REF="$(cat /tmp/head-ref.txt)"
+          if [ -n "$HEAD_REF" ]; then
+            ENCODED_REF="$(python -c 'import os,urllib.parse; print(urllib.parse.quote(os.environ["HEAD_REF"], safe=""))')"
+            export HEAD_REF
+            gh api --method DELETE "/repos/$GITHUB_REPOSITORY/git/refs/heads/$ENCODED_REF" || true
+            echo "Deleted merged feature branch: $HEAD_REF"
+          else
+            echo "No same-repository merged feature branch found for cleanup."
+          fi
