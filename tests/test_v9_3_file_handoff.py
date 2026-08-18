@@ -105,7 +105,7 @@ class V93FileHandoffTests(unittest.TestCase):
                 templates = await client.list_resource_templates()
                 self.assertTrue(any(
                     str(item.uri_template) == "postmaster://files/{file_id}"
-                    for item in templates
+                    for item in templates.resource_templates
                 ))
                 return await client.read_resource(f"postmaster://files/{self.saved['id']}")
 
