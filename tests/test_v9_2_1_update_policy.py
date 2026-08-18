@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from pathlib import Path
 
 
 class V921UpdatePolicyTests(unittest.TestCase):
@@ -27,8 +28,10 @@ class V921UpdatePolicyTests(unittest.TestCase):
     def test_build_status_reports_version_and_update_policy(self) -> None:
         import postmaster.server as server
 
+        expected_version = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
+        expected_ref = f"v{expected_version}"
         os.environ.pop("BRIDGE_BUILD", None)
-        os.environ["POSTMASTER_REF"] = "v9.2.1"
+        os.environ["POSTMASTER_REF"] = expected_ref
         os.environ["POSTMASTER_VERSION"] = "latest"
         os.environ["POSTMASTER_REQUESTED_VERSION"] = "latest"
         os.environ["POSTMASTER_CHECK_UPDATES_ON_START"] = "false"
@@ -36,8 +39,8 @@ class V921UpdatePolicyTests(unittest.TestCase):
 
         status = server.build_status()
         self.assertTrue(status["ok"])
-        self.assertEqual(status["version"], "9.2.1")
-        self.assertEqual(status["build"], "v9.2.1")
+        self.assertEqual(status["version"], expected_version)
+        self.assertEqual(status["build"], expected_ref)
         self.assertEqual(status["requested_version"], "latest")
         self.assertFalse(status["check_updates_on_start"])
         self.assertTrue(status["force_refresh"])
