@@ -26,10 +26,9 @@ def build_status():
     return status
 
 
-# Replace the v9.2-era registered status implementation without changing any of
-# the existing upload/file/mail tools. MCPServer v2 exposes add_tool publicly;
-# ToolManager removal is used only for this one compatibility override.
-mcp._tool_manager.remove_tool("build_status")
+# Replace only the registered build-status implementation. MCPServer v2 exposes
+# remove_tool() and add_tool() as public APIs; all v9.2 upload/file/mail tools stay intact.
+mcp.remove_tool("build_status")
 mcp.add_tool(build_status, name="build_status")
 _base.build_status = build_status
 
