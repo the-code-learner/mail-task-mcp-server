@@ -20,13 +20,13 @@ The v9.2 ChatGPT-to-Postmaster input path is unchanged: `save_uploaded_file`, `s
 
 ```text
 postmaster://files/{file_id}
-https://configured-file-base/files/{file_id}?expires=...&sig=...
+https://configured-public-host/files/{file_id}?expires=...&sig=...
 ```
 
 Transport behavior:
 
-- `auto`: use signed HTTPS only when `FILE_STORE_PUBLIC_BASE_URL` is explicitly configured; otherwise use the MCP resource URI.
-- `http`: require the dedicated HTTPS public base and return a temporary signed URL.
+- `auto`: use signed HTTPS when a public file base can be resolved from `FILE_STORE_PUBLIC_BASE_URL` or the existing `PUBLIC_MCP_HOST`; otherwise use the MCP resource URI.
+- `http`: require one of those HTTPS public-base settings and return a temporary signed URL.
 - `mcp`: always return `postmaster://files/{file_id}`.
 
 Constructing the link reads metadata only. It does not read the stored blob.
@@ -58,19 +58,31 @@ Responses include the stored MIME type, sanitized attachment disposition, `X-Con
 
 ## Configuration
 
+The normal single-YAML deployment needs no new required environment variables. Postmaster reuses the existing public MCP hostname when available:
+
+```text
+PUBLIC_MCP_HOST
+```
+
+Because `/files/*` is served by the same application, `PUBLIC_MCP_HOST=postmaster.example.com` resolves to the HTTPS base `https://postmaster.example.com`. This avoids coupling file delivery to `PUBLIC_EMAIL_BASE_URL`, which remains dedicated to mail/AMP callbacks.
+
+Advanced deployments may optionally override the file base or signing behavior with process environment variables:
+
 ```text
 FILE_STORE_PUBLIC_BASE_URL
 FILE_STORE_DOWNLOAD_SECRET
 FILE_STORE_DOWNLOAD_URL_TTL_SECONDS
 ```
 
-`FILE_STORE_PUBLIC_BASE_URL` is intentionally separate from mail/AMP callback settings and from the general MCP host. It must be an externally reachable HTTPS base URL and is opt-in. Leaving it blank keeps `transport=auto` on the MCP resource path.
+`FILE_STORE_PUBLIC_BASE_URL` must be an externally reachable HTTPS base URL and takes precedence over `PUBLIC_MCP_HOST`. If neither is configured, `transport=auto` falls back to the MCP resource path and `transport=http` returns a clear configuration error.
 
-`FILE_STORE_DOWNLOAD_SECRET` may be supplied by the private deployment. When it is blank, Postmaster creates a random persistent secret at `/data/file-store-download.secret` with restrictive permissions and reuses it across restarts.
+`FILE_STORE_DOWNLOAD_SECRET` may be supplied by a private deployment. When it is absent, Postmaster creates a random persistent secret at `/data/file-store-download.secret` with restrictive permissions and reuses it across restarts.
 
 `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS` defaults to 900 seconds. Runtime validation bounds generated capability lifetime and refuses URLs beyond the hard maximum of 24 hours.
 
 The signed `/files/*` path must be reachable by the client that will consume the URL. If an external access layer protects the whole application, expose this route only according to the deployment's security policy; possession of a valid short-lived signature is the file capability. Do not broadly bypass authentication for `/mcp`, the dashboard, or unrelated routes merely to enable file download.
+
+Because the v9.3 MCP ResourceLink/resources-read path works without new bootstrap configuration, an existing `POSTMASTER_VERSION=latest` stack can receive v9.3 by restarting after the stable release is published. No private YAML rewrite is required merely to enable the MCP handoff. If `PUBLIC_MCP_HOST` is already configured and `/files/*` is externally reachable according to your proxy policy, HTTPS handoff is available as well.
 
 ## Compatibility fallbacks
 
