@@ -187,7 +187,8 @@ class V92ServerToolTests(unittest.TestCase):
 
     def test_native_file_round_trip_uses_existing_file_store(self) -> None:
         s = self.s
-        self.assertEqual(s.build_status()["version"], "9.2.0")
+        expected_version = (Path(__file__).resolve().parents[1] / "VERSION").read_text(encoding="utf-8").strip()
+        self.assertEqual(s.build_status()["version"], expected_version)
         self.assertEqual(s.build_status()["build"], "v9.2.0")
         self.assertEqual(s.build_status()["requested_version"], "latest")
         self.assertTrue(s.build_status()["native_chatgpt_file_upload"])

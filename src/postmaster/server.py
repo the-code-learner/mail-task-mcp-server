@@ -113,13 +113,15 @@ def _safe_call(fn, *args, **kwargs):
 # -------------------------
 @mcp.tool()
 def build_status():
-    """Read-only. Return the running build, release version and high-level v9.2 capabilities."""
+    """Read-only. Return the running build, release version and high-level v9.2.1 capabilities."""
     resolved = os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown"
     return {
         "ok": True,
         "version": _project_version(),
         "build": resolved,
         "requested_version": os.getenv("POSTMASTER_VERSION") or os.getenv("POSTMASTER_REQUESTED_VERSION") or resolved,
+        "check_updates_on_start": os.getenv("POSTMASTER_CHECK_UPDATES_ON_START", "true").strip().lower() == "true",
+        "force_refresh": os.getenv("POSTMASTER_FORCE_REFRESH", "false").strip().lower() == "true",
         "multi_account": True,
         "amp_per_account": True,
         "per_recipient_open_tracking": True,

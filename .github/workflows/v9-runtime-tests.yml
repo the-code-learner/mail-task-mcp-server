@@ -155,7 +155,7 @@ jobs:
           assert isinstance(doc, dict)
           assert set(doc.get('services', {})) == {'postmaster-mcp'}
           assert 'configs' not in doc, 'v9 must not embed application source as Compose configs'
-          assert path.stat().st_size < 16000, 'bootstrap YAML unexpectedly became monolithic again'
+          assert path.stat().st_size < 18000, 'bootstrap YAML unexpectedly became monolithic again'
 
           service = doc['services']['postmaster-mcp']
           env = service['environment']
@@ -164,8 +164,9 @@ jobs:
           assert env['IMAP_HOST'] == 'imap.example.com'
           assert env['SMTP_HOST'] == 'smtp.example.com'
           assert env['POSTMASTER_VERSION'] == 'latest'
+          assert env['POSTMASTER_CHECK_UPDATES_ON_START'] == 'true'
           assert env['POSTMASTER_FORCE_REFRESH'] == 'false'
-          assert 'POSTMASTER_REF' not in env, 'public v9.2 YAML should use POSTMASTER_VERSION; legacy POSTMASTER_REF is runtime fallback only'
+          assert 'POSTMASTER_REF' not in env, 'public v9.2+ YAML should use POSTMASTER_VERSION; legacy POSTMASTER_REF is runtime fallback only'
           assert env['CONTEXT_MODEL_DIMS'] == '128'
           assert env['CONTEXT_MODEL_ID'] == 'static-similarity-mrl-multilingual-v1-128d-int8'
           assert env['CONTEXT_MODEL_AUTO_DOWNLOAD'] == 'true'
@@ -185,6 +186,8 @@ jobs:
           assert 'releases?per_page=100' in command, 'latest policy must scan stable releases'
           assert 'v([0-9]+)\\.([0-9]+)\\.([0-9]+)' in command, 'latest policy must filter application SemVer tags'
           assert 'release.get("draft")' in command and 'release.get("prerelease")' in command, 'latest policy must ignore draft/prerelease releases'
+          assert 'POSTMASTER_CHECK_UPDATES_ON_START:-true' in command, 'bootstrap must expose update-check control'
+          assert 'Postmaster update check disabled; using cached current source' in command, 'disabled update checks must reuse cached current source'
           assert 'POSTMASTER_REF:-latest' in command, 'legacy POSTMASTER_REF fallback must remain supported'
           assert 'using cached current release' in command, 'bootstrap must retain last known-good source on update lookup failure'
           assert '$' not in command.replace('$$', ''), 'container-side shell variables must be escaped as $$ for Compose'
@@ -194,3 +197,58 @@ jobs:
           PY
           /bin/sh -n /tmp/postmaster-bootstrap.sh
           /bin/sh -n scripts/start.sh
+
+      - name: Verify disabled update check uses cached source without resolver
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import shutil
+          import stat
+          import subprocess
+          import yaml
+
+          root = pathlib.Path('/tmp/postmaster-update-policy')
+          shutil.rmtree(root, ignore_errors=True)
+          target = root / 'releases' / 'v9.2.0'
+          scripts = target / 'scripts'
+          scripts.mkdir(parents=True)
+          (target / '.postmaster-source-ready').write_text('v9.2.0\n')
+          result_path = root / 'result.txt'
+          starter = scripts / 'start.sh'
+          starter.write_text(
+              '#!/bin/sh\n'
+              f'printf "%s|%s|%s" "$POSTMASTER_REF" "$POSTMASTER_REQUESTED_VERSION" "$POSTMASTER_CHECK_UPDATES_ON_START" > {result_path}\n'
+          )
+          starter.chmod(starter.stat().st_mode | stat.S_IXUSR)
+          (root / 'current').symlink_to(target, target_is_directory=True)
+
+          fakebin = root / 'fakebin'
+          fakebin.mkdir()
+          python_marker = root / 'python-was-called'
+          fake_python = fakebin / 'python'
+          fake_python.write_text(
+              '#!/bin/sh\n'
+              f'echo called > {python_marker}\n'
+              'exit 97\n'
+          )
+          fake_python.chmod(fake_python.stat().st_mode | stat.S_IXUSR)
+
+          doc = yaml.safe_load(pathlib.Path('postmaster-mcp.yml').read_text())
+          command = doc['services']['postmaster-mcp']['command'][2].replace('$$', '$')
+          command = command.replace('APP_ROOT=/opt/postmaster', f'APP_ROOT={root}', 1)
+          env = os.environ.copy()
+          env.update({
+              'POSTMASTER_VERSION': 'latest',
+              'POSTMASTER_CHECK_UPDATES_ON_START': 'false',
+              'POSTMASTER_FORCE_REFRESH': 'false',
+              'POSTMASTER_REPO': 'example/should-not-be-contacted',
+              'PATH': f'{fakebin}:{env["PATH"]}',
+          })
+          completed = subprocess.run(['/bin/sh', '-c', command], env=env, text=True, capture_output=True)
+          assert completed.returncode == 0, (completed.stdout, completed.stderr)
+          assert not python_marker.exists(), 'remote resolver/downloader was invoked despite disabled update check and usable cache'
+          assert result_path.read_text() == 'v9.2.0|latest|false', result_path.read_text()
+          assert 'Postmaster update check disabled; using cached current source: v9.2.0' in completed.stdout
+          print('disabled update check cache path OK')
+          PY

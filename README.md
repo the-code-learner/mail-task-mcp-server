@@ -89,11 +89,15 @@ The v9.2 bootstrap uses one persistent YAML and a version policy:
 ```yaml
 POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
 POSTMASTER_VERSION: latest
+POSTMASTER_CHECK_UPDATES_ON_START: "true"
+POSTMASTER_FORCE_REFRESH: "false"
 ```
 
-`latest` resolves the newest stable GitHub Release at container startup and only downloads it when that release is not already cached. To freeze a deployment, use an exact release such as `v9.2.0` (or `9.2.0`), or an immutable commit SHA. Existing deployments that still provide only `POSTMASTER_REF` remain supported as a compatibility fallback.
+`latest` follows the newest stable `vX.Y.Z` GitHub Release. With `POSTMASTER_CHECK_UPDATES_ON_START=true` (the default), Postmaster resolves the newest stable application release at every container start and only downloads it when that release is not already cached. Set `POSTMASTER_CHECK_UPDATES_ON_START=false` to keep using the currently cached source without contacting GitHub for an update check; if no usable cached source exists yet, Postmaster resolves `latest` once so the first boot can succeed.
 
-If GitHub is temporarily unavailable, a previously working cached release is kept and started instead of replacing it with an incomplete update. Set `POSTMASTER_FORCE_REFRESH=true` only when you deliberately want to redownload the already selected revision.
+To freeze a deployment independently of the update-check switch, use an exact release such as `v9.2.1` (or `9.2.1`), or an immutable commit SHA. Explicit versions never require a latest-release lookup. Existing deployments that still provide only `POSTMASTER_REF` remain supported as a compatibility fallback.
+
+If GitHub is temporarily unavailable during an enabled update check, a previously working cached release is kept and started instead of replacing it with an incomplete update. `POSTMASTER_FORCE_REFRESH=true` is separate: it deliberately redownloads the already selected revision and may therefore use the network even when update checking is disabled.
 
 ## 3. Open the dashboard
 
