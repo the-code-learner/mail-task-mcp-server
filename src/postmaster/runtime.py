@@ -40,7 +40,8 @@ def get_stored_file_resource(file_id: str, transport: str = "auto") -> CallToolR
 
     transport=auto prefers a configured signed HTTPS file URL and otherwise
     returns the canonical postmaster:// resource URI. transport=http requires
-    FILE_STORE_PUBLIC_BASE_URL; transport=mcp always returns the MCP resource.
+    FILE_STORE_PUBLIC_BASE_URL or PUBLIC_MCP_HOST; transport=mcp always returns
+    the MCP resource.
     """
     return stored_file_resource_result(_base.file_store(), file_id, transport)
 
