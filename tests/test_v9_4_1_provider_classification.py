@@ -23,11 +23,13 @@ class ProviderClassificationTests(unittest.TestCase):
         user_agent: str,
         source: str = "direct_or_unknown",
         delivery_id: str = "del_ground_truth",
+        recipient: str = "reader@example.test",
     ) -> dict:
         return {
             "id": event_id,
             "delivery_id": delivery_id,
             "link_id": link_id,
+            "recipient": recipient,
             "client_fingerprint": fingerprint,
             "country_code": country,
             "browser": browser,
@@ -42,16 +44,16 @@ class ProviderClassificationTests(unittest.TestCase):
         android151 = "Mozilla/5.0 (Linux; Android 15) Chrome/151.0.0.0 Mobile Safari/537.36"
         events = [
             # Gmail A: the user click we know was made manually.
-            self._event(1, observed_at="2026-08-20T10:00:00+00:00", link_id="gmail-a", fingerprint="fp-human", country="IT", browser="Chrome 151.0.0.0", user_agent=chrome151),
+            self._event(1, observed_at="2026-08-20T10:00:00+00:00", link_id="gmail-a", fingerprint="fp-human", country="IT", browser="Chrome 151.0.0.0", user_agent=chrome151, recipient="reader@gmail.com"),
             # Gmail A: additional request not made by the user, 3.637 seconds later.
-            self._event(2, observed_at="2026-08-20T10:00:03.637000+00:00", link_id="gmail-a", fingerprint="fp-provider", country="US", browser="Chrome 149.0.0.0", user_agent=chrome149),
+            self._event(2, observed_at="2026-08-20T10:00:03.637000+00:00", link_id="gmail-a", fingerprint="fp-provider", country="US", browser="Chrome 149.0.0.0", user_agent=chrome149, recipient="reader@gmail.com"),
             # Same human fingerprint later on another link in the same delivery.
-            self._event(3, observed_at="2026-08-20T10:00:30+00:00", link_id="gmail-b", fingerprint="fp-human", country="IT", browser="Chrome 151.0.0.0", user_agent=chrome151),
+            self._event(3, observed_at="2026-08-20T10:00:30+00:00", link_id="gmail-b", fingerprint="fp-human", country="IT", browser="Chrome 151.0.0.0", user_agent=chrome151, recipient="reader@gmail.com"),
             # Libero-style pair: same fingerprint across two explicit human clicks.
-            self._event(4, observed_at="2026-08-20T10:01:00+00:00", link_id="libero-a", fingerprint="fp-libero", country="IT", browser="Chrome 151.0.0.0", user_agent=android151),
-            self._event(5, observed_at="2026-08-20T10:01:08+00:00", link_id="libero-b", fingerprint="fp-libero", country="IT", browser="Chrome 151.0.0.0", user_agent=android151),
+            self._event(4, observed_at="2026-08-20T10:01:00+00:00", link_id="libero-a", fingerprint="fp-libero", country="IT", browser="Chrome 151.0.0.0", user_agent=android151, recipient="reader@libero.it"),
+            self._event(5, observed_at="2026-08-20T10:01:08+00:00", link_id="libero-b", fingerprint="fp-libero", country="IT", browser="Chrome 151.0.0.0", user_agent=android151, recipient="reader@libero.it"),
             # Explicit known provider signature is deterministic and does not need timing heuristics.
-            self._event(6, observed_at="2026-08-20T10:02:00+00:00", link_id="proxy", fingerprint="fp-google-proxy", country="US", browser="Google Image Proxy", user_agent="Mozilla/5.0 (via ggpht.com GoogleImageProxy)", source="gmail_image_proxy"),
+            self._event(6, observed_at="2026-08-20T10:02:00+00:00", link_id="proxy", fingerprint="fp-google-proxy", country="US", browser="Google Image Proxy", user_agent="Mozilla/5.0 (via ggpht.com GoogleImageProxy)", source="gmail_image_proxy", recipient="reader@gmail.com"),
         ]
 
         classified = {row["id"]: row for row in classify_click_events(events)}
@@ -61,6 +63,7 @@ class ProviderClassificationTests(unittest.TestCase):
         self.assertGreaterEqual(classified[2]["provider_likelihood"], 85)
         self.assertLessEqual(classified[2]["provider_likelihood"], 100)
         self.assertEqual(classified[2]["provider_classification"], "likely_email_provider")
+        self.assertEqual(classified[2]["provider_guess"], "google")
         self.assertIn("second request on same delivery/link after 3.64s", classified[2]["classification_reasons"])
         self.assertIn("fingerprint changed", classified[2]["classification_reasons"])
         self.assertIn("country changed IT → US", classified[2]["classification_reasons"])
@@ -77,7 +80,7 @@ class ProviderClassificationTests(unittest.TestCase):
         self.assertEqual(summary["known_email_proxy_unique_clicks"], 1)
         self.assertEqual(summary["likely_human_or_unclassified_unique_clicks"], 4)
         self.assertEqual(summary["potential_provider_share"], {"numerator": 2, "denominator": 6, "percent": 33.3})
-        self.assertEqual(summary["provider_suspects"], {"google": 1, "other": 1})
+        self.assertEqual(summary["provider_suspects"], {"google": 2})
 
     def test_one_weak_signal_does_not_become_provider_proof(self) -> None:
         events = [
@@ -100,7 +103,7 @@ class ProviderClassificationStoreIntegrationTests(unittest.TestCase):
         self.analytics = EmailAnalyticsStore(db_path=str(root / "analytics.db"), key_path=str(root / "analytics.key"))
         self.links = LinkTrackingStore(self.analytics)
         self.campaign = self.analytics.create_campaign(account_id="acct", sender="sender@example.test", subject="v9.4.1", track_opens=True, amp_used=False)
-        self.delivery = self.analytics.create_delivery(campaign_id=self.campaign["id"], account_id="acct", recipient="reader@example.test", recipient_role="to")
+        self.delivery = self.analytics.create_delivery(campaign_id=self.campaign["id"], account_id="acct", recipient="reader@gmail.com", recipient_role="to")
 
     def tearDown(self) -> None:
         for key, value in self.old_public.items():
@@ -142,6 +145,7 @@ class ProviderClassificationStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(by_id[first["id"]]["provider_classification"], "likely_human")
         self.assertGreaterEqual(by_id[second["id"]]["provider_likelihood"], 85)
         self.assertEqual(by_id[second["id"]]["provider_classification"], "likely_email_provider")
+        self.assertEqual(by_id[second["id"]]["provider_guess"], "google")
 
         summary = self.links.summary(delivery_id=self.delivery["id"])
         self.assertEqual(summary["unique_clicks"], 2)
@@ -149,6 +153,7 @@ class ProviderClassificationStoreIntegrationTests(unittest.TestCase):
         self.assertEqual(summary["likely_provider_unique_clicks"], 1)
         self.assertEqual(summary["likely_human_or_unclassified_unique_clicks"], 1)
         self.assertEqual(summary["potential_provider_share"], {"numerator": 1, "denominator": 2, "percent": 50.0})
+        self.assertEqual(summary["provider_suspects"], {"google": 1})
         self.assertEqual(summary["provider_classification_model"], "heuristic-v1-query-time")
 
 
