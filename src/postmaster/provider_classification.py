@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -13,14 +13,17 @@ PROVIDER_CLASSIFICATIONS = {
 }
 
 
-def _parse_time(value: Any) -> datetime | None:
+def _parse_time(value: Any) -> float | None:
     text = str(value or "").strip()
     if not text:
         return None
     try:
-        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
 
 
 def _provider_hint(event: dict[str, Any]) -> str | None:
@@ -44,12 +47,6 @@ def _known_proxy(event: dict[str, Any]) -> tuple[str | None, str | None]:
     if "googleimageproxy" in ua or "gmail_image_proxy" in source or "google image proxy" in browser:
         return "google", "known GoogleImageProxy/Gmail image-proxy signature"
     return None, None
-
-
-def _same_nonempty(left: Any, right: Any) -> bool:
-    a = str(left or "").strip()
-    b = str(right or "").strip()
-    return bool(a and b and a == b)
 
 
 def _changed_nonempty(left: Any, right: Any) -> bool:
@@ -83,7 +80,9 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ordered = sorted(
             rows,
             key=lambda item: (
-                _parse_time(item[1].get("observed_at")) or datetime.min,
+                _parse_time(item[1].get("observed_at"))
+                if _parse_time(item[1].get("observed_at")) is not None
+                else float("-inf"),
                 int(item[1].get("id") or 0),
             ),
         )
@@ -108,7 +107,7 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         candidate_time = _parse_time(candidate.get("observed_at"))
                         if candidate_time is None:
                             continue
-                        delta = (current_time - candidate_time).total_seconds()
+                        delta = current_time - candidate_time
                         if delta < 0:
                             continue
                         if delta <= 15:
@@ -120,10 +119,9 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     if _changed_nonempty(event.get("client_fingerprint"), nearest.get("client_fingerprint")):
                         if delta_seconds <= 5:
                             score += 55
-                            reasons.append(f"second request on same delivery/link after {delta_seconds:.2f}s")
                         else:
                             score += 35
-                            reasons.append(f"second request on same delivery/link after {delta_seconds:.2f}s")
+                        reasons.append(f"second request on same delivery/link after {delta_seconds:.2f}s")
                         reasons.append("fingerprint changed")
                     if _changed_nonempty(event.get("country_code"), nearest.get("country_code")):
                         score += 15
@@ -157,8 +155,6 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     provider_guess = provider_guess or "other"
                 elif score >= 35:
                     classification = "uncertain"
-                    if provider_guess is None:
-                        provider_guess = None
                 else:
                     classification = "likely_human"
                     provider_guess = None
