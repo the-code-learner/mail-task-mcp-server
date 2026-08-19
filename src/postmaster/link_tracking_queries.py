@@ -2,8 +2,42 @@ from __future__ import annotations
 
 from typing import Any
 
+from .provider_classification import classify_click_events, summarize_click_classification
+
 
 class LinkTrackingQueriesMixin:
+    def _classification_events(
+        self,
+        *,
+        campaign_id: str | None = None,
+        delivery_id: str | None = None,
+        link_id: str | None = None,
+        account_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        for column, value in (
+            ("c.campaign_id", campaign_id),
+            ("c.delivery_id", delivery_id),
+            ("c.link_id", link_id),
+            ("c.account_id", account_id),
+        ):
+            if value:
+                clauses.append(f"{column}=?")
+                params.append(value)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.*
+                FROM tracking_clicks c
+                {where}
+                ORDER BY c.observed_at ASC,c.id ASC
+                """,
+                params,
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def list_links(
         self,
         *,
@@ -90,7 +124,7 @@ class LinkTrackingQueriesMixin:
                 """,
                 params,
             ).fetchall()
-        return [dict(row) for row in rows]
+        return classify_click_events([dict(row) for row in rows])
 
     def summary(
         self,
@@ -134,6 +168,21 @@ class LinkTrackingQueriesMixin:
             "If IP and User-Agent are unavailable, the existing keyed fingerprint pipeline "
             "uses the stable HMAC of the empty pair, collapsing unknown repeat fetches for that delivery/link."
         )
+        qualitative = summarize_click_classification(
+            self._classification_events(
+                campaign_id=campaign_id,
+                delivery_id=delivery_id,
+                link_id=link_id,
+                account_id=account_id,
+            )
+        )
+        out["qualitative_estimate"] = qualitative
+        out["likely_provider_unique_clicks"] = qualitative["likely_provider_unique_clicks"]
+        out["likely_human_or_unclassified_unique_clicks"] = qualitative["likely_human_or_unclassified_unique_clicks"]
+        out["uncertain_unique_clicks"] = qualitative["uncertain_unique_clicks"]
+        out["potential_provider_share"] = qualitative["potential_provider_share"]
+        out["provider_suspects"] = qualitative["provider_suspects"]
+        out["provider_classification_model"] = qualitative["classification_model"]
         return out
 
     def top_links(
