@@ -37,6 +37,7 @@ def build_status():
     status["native_file_resource_handoff"] = True
     status["link_tracking"] = True
     status["sent_copy_tracking_sanitized"] = True
+    status["provider_qualitative_classification"] = True
     return status
 
 mcp.remove_tool("build_status")
@@ -62,6 +63,7 @@ def tracking_status():
     base = _legacy_tracking_status()
     if isinstance(base, dict) and base.get("ok"):
         base["link_tracking"] = link_store().status()
+        base["link_tracking"]["provider_classification_query_time"] = True
         base["event_types"] = ["pixel", "amp_xhr", "link"]
     return base
 
@@ -93,7 +95,7 @@ def get_tracking_summary(
     link_id: str | None = None,
     account_id: str | None = None,
 ):
-    """Read-only click summary. Unique click = delivery_id + link_id + client_fingerprint."""
+    """Read-only click summary with stable fingerprint uniques plus query-time provider estimates."""
     return _base._safe_call(
         link_store().summary,
         campaign_id=campaign_id, delivery_id=delivery_id, link_id=link_id, account_id=account_id,
@@ -127,7 +129,7 @@ def list_tracking_events(
     event_type: str | None = None,
     limit: int = 500,
 ):
-    """Read-only unified tracking events. event_type may be all, pixel, amp_xhr or link."""
+    """Read-only unified tracking events. Link rows include query-time provider classification fields."""
     return _base._safe_call(
         link_store().unified_events,
         delivery_id=delivery_id, campaign_id=campaign_id, link_id=link_id,
@@ -174,6 +176,9 @@ async def tracking_click(request: Request):
 
 
 def _tracking_dashboard_fragment(account_id: str | None = None) -> str:
+    summary = link_store().summary(account_id=account_id)
+    qualitative = summary.get("qualitative_estimate") or {}
+    share = qualitative.get("potential_provider_share") or {}
     top = link_store().top_links(account_id=account_id, limit=20)
     events = link_store().unified_events(account_id=account_id, limit=100)
     top_rows = []
@@ -199,6 +204,10 @@ def _tracking_dashboard_fragment(account_id: str | None = None) -> str:
         browser_os = " / ".join(x for x in (str(row.get("browser") or ""), str(row.get("os") or "")) if x)
         label = str(row.get("anchor_text") or row.get("destination_host") or "")
         ua = str(row.get("user_agent") or "")[:180]
+        provider_class = str(row.get("provider_classification") or "")
+        provider_likelihood = str(row.get("provider_likelihood") if row.get("provider_likelihood") is not None else "")
+        provider_guess = str(row.get("provider_guess") or "")
+        reasons = "; ".join(str(x) for x in (row.get("classification_reasons") or []))
         event_rows.append(
             "<tr>"
             f"<td><strong>{escape(str(row.get('event_type') or ''))}</strong></td>"
@@ -207,23 +216,39 @@ def _tracking_dashboard_fragment(account_id: str | None = None) -> str:
             f"<td>{escape(source)}</td><td>{escape(browser_os)}</td>"
             f"<td>{escape(str(row.get('campaign_id') or ''))}<br><span class=\"muted\">{escape(str(row.get('delivery_id') or ''))}</span></td>"
             f"<td>{escape(str(row.get('client_fingerprint') or ''))}</td>"
+            f"<td>{escape(provider_likelihood)}</td><td>{escape(provider_class)}</td><td>{escape(provider_guess)}</td>"
+            f"<td title=\"{escape(reasons, quote=True)}\">{escape(reasons[:180])}</td>"
             f"<td>{escape(label)}</td><td>{escape(str(row.get('link_id') or ''))}</td>"
             f"<td>{escape(str(row.get('destination_host') or ''))}</td>"
             f"<td>{escape(str(row.get('position') if row.get('position') is not None else ''))}</td>"
             f"<td title=\"{escape(str(row.get('user_agent') or ''), quote=True)}\">{escape(ua)}</td></tr>"
         )
     if not event_rows:
-        event_rows.append('<tr><td colspan="12" class="muted">No tracking events recorded yet.</td></tr>')
+        event_rows.append('<tr><td colspan="16" class="muted">No tracking events recorded yet.</td></tr>')
+
+    unique_clicks = int(summary.get("unique_clicks") or 0)
+    likely_provider = int(qualitative.get("likely_provider_unique_clicks") or 0)
+    human_or_unclassified = int(qualitative.get("likely_human_or_unclassified_unique_clicks") or 0)
+    uncertain = int(qualitative.get("uncertain_unique_clicks") or 0)
+    share_percent = float(share.get("percent") or 0.0)
+    suspects = qualitative.get("provider_suspects") or {}
+    suspect_text = ", ".join(f"{key}: {value}" for key, value in suspects.items()) or "none"
 
     return f"""
 <section class="card wide">
+<div class="panel-title"><h2>Qualitative click estimate</h2><span class="small muted">v9.4.1 query-time heuristic</span></div>
+<p class="small">Stable fingerprint uniques remain unchanged. Provider likelihood is recalculated from stored evidence and never deletes or rewrites raw events.</p>
+<p><strong>{unique_clicks}</strong> unique fingerprint clicks &nbsp;·&nbsp; <strong>{likely_provider}</strong> likely provider/proxy &nbsp;·&nbsp; <strong>{human_or_unclassified}</strong> likely human or unclassified &nbsp;·&nbsp; <strong>{uncertain}</strong> uncertain</p>
+<p class="small">Potential provider share: <strong>{likely_provider}/{unique_clicks}</strong> ({share_percent:.1f}%). Provider suspects: {escape(suspect_text)}. Confidence: {escape(str(qualitative.get('confidence') or 'low'))}.</p>
+</section>
+<section class="card wide">
 <div class="panel-title"><h2>Top links</h2><span class="small muted">v9.4 click analytics</span></div>
-<p class="small">Unique click = <code>delivery_id + link_id + client_fingerprint</code>. Fetches are telemetry; v9.4 does not classify human vs scanner.</p>
+<p class="small">Unique click = <code>delivery_id + link_id + client_fingerprint</code>. The qualitative classifier is an additive interpretation layer and does not change these totals.</p>
 <div class="scroll"><table><thead><tr><th>Link ID</th><th>Label</th><th>Destination host</th><th>Total</th><th>Unique</th><th>Recipients</th><th>First click</th><th>Last click</th></tr></thead><tbody>{''.join(top_rows)}</tbody></table></div>
 </section>
 <section class="card wide">
 <div class="panel-title"><h2>Tracking events</h2><span class="small muted">pixel / AMP / link</span></div>
-<div class="scroll"><table><thead><tr><th>Type</th><th>Recipient</th><th>Observed UTC</th><th>Country / source</th><th>Browser / OS</th><th>Campaign / delivery</th><th>Client fingerprint</th><th>Link label</th><th>Link ID</th><th>Destination</th><th>Position</th><th>User-Agent</th></tr></thead><tbody>{''.join(event_rows)}</tbody></table></div>
+<div class="scroll"><table><thead><tr><th>Type</th><th>Recipient</th><th>Observed UTC</th><th>Country / source</th><th>Browser / OS</th><th>Campaign / delivery</th><th>Client fingerprint</th><th>Provider %</th><th>Classification</th><th>Provider guess</th><th>Reasons</th><th>Link label</th><th>Link ID</th><th>Destination</th><th>Position</th><th>User-Agent</th></tr></thead><tbody>{''.join(event_rows)}</tbody></table></div>
 </section>
 """
 
