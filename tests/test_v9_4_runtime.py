@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import unittest
 from pathlib import Path
 
+from starlette.requests import Request
 from starlette.routing import Mount, Route
-from starlette.testclient import TestClient
 
 class RuntimeRouteTests(unittest.TestCase):
     KEYS = (
@@ -62,6 +63,22 @@ class RuntimeRouteTests(unittest.TestCase):
             else: os.environ[key] = value
         self.tmp.cleanup()
 
+    @staticmethod
+    def _request(token: str, *, query: bytes = b"", headers: list[tuple[bytes, bytes]] | None = None) -> Request:
+        return Request({
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "https",
+            "path": f"/t/c/{token}",
+            "raw_path": f"/t/c/{token}".encode(),
+            "query_string": query,
+            "headers": headers or [],
+            "client": ("203.0.113.77", 443),
+            "server": ("postmaster.example.test", 443),
+            "path_params": {"token": token},
+        })
+
     def test_click_route_redirects_only_to_server_record_and_records_event(self) -> None:
         analytics = self.runtime.analytics_store()
         links = self.runtime.link_store()
@@ -71,13 +88,18 @@ class RuntimeRouteTests(unittest.TestCase):
         _, meta = links.instrument_html(body_html=f'<a href="{destination.replace("&", "&amp;")}">Destination</a>', delivery=delivery)
         with links._connect() as conn:
             token = str(conn.execute("SELECT tracking_token FROM tracking_links WHERE id=?", (meta[0]["occurrence_id"],)).fetchone()[0])
-        with TestClient(self.runtime.app) as client:
-            response = client.get(f"/t/c/{token}", follow_redirects=False, headers={"User-Agent":"Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36","X-Forwarded-For":"203.0.113.77","CF-IPCountry":"IT"})
-            self.assertEqual(response.status_code, 302)
-            self.assertEqual(response.headers["location"], destination)
-            invalid = client.get("/t/c/not-a-token?url=https://evil.example/", follow_redirects=False)
-            self.assertEqual(invalid.status_code, 404)
-            self.assertNotIn("location", invalid.headers)
+        response = asyncio.run(self.runtime.tracking_click(self._request(token, headers=[
+            (b"user-agent", b"Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36"),
+            (b"x-forwarded-for", b"203.0.113.77"),
+            (b"cf-ipcountry", b"IT"),
+        ])))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.headers["location"], destination)
+        invalid = asyncio.run(self.runtime.tracking_click(self._request(
+            "not-a-token", query=b"url=https%3A%2F%2Fevil.example%2F"
+        )))
+        self.assertEqual(invalid.status_code, 404)
+        self.assertNotIn("location", invalid.headers)
         events = links.list_click_events(delivery_id=delivery["id"])
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0]["event_type"], "link")
