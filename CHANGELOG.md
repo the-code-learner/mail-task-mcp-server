@@ -2,6 +2,33 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.0 - 2026-08-19
+
+### Added
+- Per-link HTTP/HTTPS click tracking with random opaque per-delivery occurrence tokens and the public `GET /t/c/<token>` redirect endpoint. Redirect destinations are resolved only from server-side records, so query parameters cannot turn the endpoint into a generic open redirect.
+- Additive `tracking_links` and `tracking_clicks` analytics tables with campaign/delivery/message correlation, recipient, original and normalized URL, destination host, anchor index/label, UTC timestamps and the existing country/source/browser/OS/User-Agent/fingerprint enrichment pipeline.
+- Stable unique-click definition: `delivery_id + link_id + client_fingerprint`, with the existing keyed fingerprint fallback when network/User-Agent inputs are unavailable.
+- Link analytics for total/unique clicks, unique recipients, first/last click, top links, campaign/delivery/link filtering and unified pixel/AMP/link event detail.
+- MCP read tools `get_tracking_summary`, `list_tracking_links` and `list_tracking_events`; existing `tracking_status` and `get_tracking_campaign` are extended without removing legacy tools.
+- Tracking dashboard `Top links` and unified `Tracking events` views while preserving the existing pixel/open dashboard sections.
+- Clean Sent-copy generation for individualized tracked/AMP deliveries. Recipient MIME keeps tracking instrumentation; archived Sent MIME keeps original links and omits recipient pixel/click/AMP callback instrumentation.
+- `build_status.link_tracking` and `build_status.sent_copy_tracking_sanitized` capability flags.
+- `docs/LINK_TRACKING.md` covering architecture, schema, unique clicks, Sent-clean behavior, Cloudflare Access and live deployment preflight.
+
+### Changed
+- Link instrumentation is applied to the same existing tracking opt-in used by `track_opens`, preserving current per-send/account-default privacy semantics rather than adding another required send parameter.
+- Tracked recipient and Sent MIME variants are built independently from the same canonical body/attachment inputs. `Message-ID`/`Date` are synchronized and normal threading headers are preserved; serialized MIME is not sanitized with fragile regex replacement.
+- The v9.3 single-YAML Portainer bootstrap remains unchanged. With `POSTMASTER_VERSION=latest` and `POSTMASTER_CHECK_UPDATES_ON_START=true`, a stack restart is sufficient to select v9.4.0 after the stable release is published.
+
+### Fixed
+- Viewing a newly generated tracked message in the sender's Sent mailbox no longer loads the recipient tracking pixel.
+- Clicking a link in a newly generated Sent copy no longer traverses the recipient `/t/c/<token>` URL, preventing sender self-clicks from being attributed to the recipient.
+
+### Security / deployment
+- Existing public pixel and AMP callback paths remain unchanged. v9.4 requires exactly one new anonymous Cloudflare Access bypass: `/t/c/*`.
+- `/mcp`, dashboard/admin/private APIs, mail/task/memory/skill/file-management routes and tracking analytics remain protected.
+- `/files/*` is a pre-existing v9.3 signed file-handoff concern and is not added to the v9.4 Cloudflare bypass policy.
+
 ## 9.3.0 - 2026-08-18
 
 ### Added
