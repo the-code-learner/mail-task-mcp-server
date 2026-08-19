@@ -2,6 +2,25 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.1 - 2026-08-20
+
+### Added
+- Query-time qualitative classification for link-click telemetry. Every returned `link` event can now include `provider_likelihood` (0-100), `provider_classification` (`likely_human`, `uncertain`, `likely_email_provider`, `known_email_proxy`), `provider_guess` (`google`, `microsoft`, `yahoo`, `other` or null) and human-readable `classification_reasons`.
+- Combined-evidence heuristic model: explicit `GoogleImageProxy`/Gmail proxy signatures are treated as known proxy evidence; near-simultaneous second requests on the same `delivery_id + link_id`, changed fingerprints, country/browser/User-Agent changes and proxy source metadata increase provider likelihood, while a fingerprint seen consistently across multiple links in the same delivery lowers it.
+- Qualitative unique-click summary fields including `likely_provider_unique_clicks`, `likely_human_or_unclassified_unique_clicks`, `uncertain_unique_clicks`, provider suspects and potential-provider share while preserving the original fingerprint unique count beside them.
+- Tracking dashboard qualitative summary plus per-link-event provider score, classification, provider guess and reasons.
+- `build_status.provider_qualitative_classification=true` and `tracking_status.link_tracking.provider_classification_query_time=true` capability reporting.
+- Ground-truth regression fixtures for the observed Gmail duplicate-fetch pattern, stable human fingerprints across multiple links, same-fingerprint Libero-style clicks and explicit `GoogleImageProxy` traffic.
+
+### Changed
+- Provider classification is recalculated from stored click evidence on every query instead of being persisted as authoritative database state, so historical events automatically benefit from future heuristic refinements.
+- `get_tracking_summary`, `get_tracking_campaign` and `list_tracking_events` expose the qualitative interpretation layer without removing or renaming the v9.4 analytics fields.
+
+### Compatibility / deployment
+- The v9.4 unique-click definition remains exactly `delivery_id + link_id + client_fingerprint`; suspicious events are never deleted, hidden or rewritten in `tracking_clicks`.
+- No tracking schema migration is required and the v9.3/v9.4 single-YAML Portainer bootstrap remains unchanged.
+- No new public HTTP endpoint is introduced. Cloudflare Access public bypass requirements remain `/track/open/*`, `/api/amp/*` and `/t/c/*` according to the features in use. `/files/*` remains the separate pre-existing signed file-handoff concern.
+
 ## 9.4.0 - 2026-08-19
 
 ### Added
