@@ -26,7 +26,7 @@ Postmaster MCP
         +-- encrypted multi-account storage
         +-- recipient safety policy
         +-- drafts, replies and attachments
-        +-- open + per-link analytics / AMP support
+        +-- open analytics / AMP support
         +-- persistent task registry
         +-- memories / skills / project context
         +-- lexical + semantic retrieval
@@ -44,8 +44,6 @@ The important v9 changes are:
 - improved MIME parsing for forwarded mail and HTML-heavy messages;
 - CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning;
 - persistent small-file storage plus native ChatGPT file inputs in v9.2;
-- native Postmaster-to-client file handoff in v9.3;
-- per-link click analytics plus clean Sent copies in v9.4;
 - semantic release history through `VERSION`, `CHANGELOG.md` and immutable `vX.Y.Z` release tags.
 
 ---
@@ -86,7 +84,7 @@ host :8787 -> container :8000
 
 ## 2. Choose the update policy
 
-The v9.2+ bootstrap uses one persistent YAML and a version policy:
+The v9.2 bootstrap uses one persistent YAML and a version policy:
 
 ```yaml
 POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
@@ -95,9 +93,11 @@ POSTMASTER_CHECK_UPDATES_ON_START: "true"
 POSTMASTER_FORCE_REFRESH: "false"
 ```
 
-`latest` follows the newest stable `vX.Y.Z` GitHub Release. With `POSTMASTER_CHECK_UPDATES_ON_START=true`, Postmaster resolves the newest stable application release at every container start and only downloads it when that release is not already cached. Set the switch to `false` to keep using the currently cached source without a remote update check; if no usable cache exists, Postmaster resolves `latest` once so first boot can succeed.
+`latest` follows the newest stable `vX.Y.Z` GitHub Release. With `POSTMASTER_CHECK_UPDATES_ON_START=true` (the default), Postmaster resolves the newest stable application release at every container start and only downloads it when that release is not already cached. Set `POSTMASTER_CHECK_UPDATES_ON_START=false` to keep using the currently cached source without contacting GitHub for an update check; if no usable cached source exists yet, Postmaster resolves `latest` once so the first boot can succeed.
 
-Explicit `vX.Y.Z`, `X.Y.Z` or immutable commit selections remain pinned. Existing deployments that still provide only `POSTMASTER_REF` remain supported as a compatibility fallback. Failed refreshes preserve the previously working cached release.
+To freeze a deployment independently of the update-check switch, use an exact release such as `v9.2.1` (or `9.2.1`), or an immutable commit SHA. Explicit versions never require a latest-release lookup. Existing deployments that still provide only `POSTMASTER_REF` remain supported as a compatibility fallback.
+
+If GitHub is temporarily unavailable during an enabled update check, a previously working cached release is kept and started instead of replacing it with an incomplete update. `POSTMASTER_FORCE_REFRESH=true` is separate: it deliberately redownloads the already selected revision and may therefore use the network even when update checking is disabled.
 
 ## 3. Open the dashboard
 
@@ -107,11 +107,25 @@ On a trusted network:
 http://YOUR_SERVER_IP:8787/
 ```
 
-The dashboard can configure mail accounts, recipient authorization, tasks, files, tracking and knowledge/context data.
+The dashboard can be used to configure mail accounts, recipient authorization, tasks and knowledge/context data.
 
 ## 4. Configure mail
 
-The public YAML intentionally contains no credentials. Account configuration includes IMAP/SMTP identity, hosts, ports/security, credentials and mailbox names. Passwords are encrypted before being written to persistent storage.
+The public YAML intentionally contains no credentials.
+
+You can configure an account from the dashboard with:
+
+```text
+Account ID / label
+From address
+IMAP host / port / security
+IMAP username / password
+SMTP host / port / security
+SMTP username / password
+Inbox / Sent / Draft / Junk mailboxes
+```
+
+Passwords are encrypted before being written to the persistent account database.
 
 Important files include:
 
@@ -120,24 +134,40 @@ Important files include:
 /data/mail-accounts.key
 ```
 
-Back up the key together with the database.
+Back up the key together with the database. Existing encrypted credentials cannot be recovered without the matching key.
 
 ---
 
 # Structural deployment model
 
-v9 separates **deployment** from **application source**. Portainer receives one small Compose YAML, `postmaster-mcp.yml`, containing the service definition, environment, persistent volumes, bootstrap command and health check.
+v9 deliberately separates **deployment** from **application source**.
 
-At startup:
+Portainer receives one small Compose YAML:
 
 ```text
-GitHub repository + version policy
+postmaster-mcp.yml
+```
+
+That YAML contains only:
+
+```text
+service definition
+environment
+persistent volumes
+bootstrap command
+health check
+```
+
+At startup the bootstrap:
+
+```text
+GitHub repository + ref
         |
         v
 safe staged archive download
         |
         v
-persistent versioned source cache
+persistent source cache
         |
         +--> persistent Python venv
         |
@@ -147,110 +177,322 @@ persistent versioned source cache
 Postmaster MCP runtime
 ```
 
-The downloaded archive is checked before extraction. Absolute paths, `..` traversal and archive links are rejected. A failed refresh does not replace a previously cached working source tree. Persistent code, virtual environment and data are kept in Docker volumes.
+The downloaded archive is checked before extraction. Absolute paths, `..` traversal and archive links are rejected. A failed refresh does not replace a previously cached working source tree.
+
+The repository itself remains a normal project:
+
+```text
+src/postmaster/
+    server.py
+    mail_bridge.py
+    mail_extensions.py
+    account_store.py
+    scheduler_engine.py
+    email_analytics.py
+    knowledge_store.py
+    context_engine.py
+    semantic_engine.py
+    file_store.py
+    remote_file.py
+
+scripts/
+    start.sh
+    prepare_context_model.py
+
+tests/
+docs/
+requirements.txt
+VERSION
+CHANGELOG.md
+postmaster-mcp.yml
+```
+
+Docker volumes:
+
+```text
+mcp_code   -> downloaded source releases
+mcp_venv   -> Python virtual environment
+mcp_data   -> databases, keys, model and persistent state
+```
+
+A source update therefore does not require rebuilding a giant Compose file, while a deployment still needs only one YAML.
 
 ---
 
 # Persistent memory, skills and project context
 
-v9 adds a persistent knowledge layer shared across conversations and MCP clients. Knowledge items can be `memory` or `skill`, scoped by owner/project, tagged, prioritized, enabled/disabled and revisioned. The store supports audit history, restore-to-new-revision behavior, import/export and chunked indexing.
+v9 adds a persistent knowledge layer shared across conversations and MCP clients.
 
-Persistent storage is kept in `/data/knowledge.db`.
+Knowledge items can be stored as:
+
+```text
+memory
+skill
+```
+
+and scoped by:
+
+```text
+owner
+project
+owner-global context
+```
+
+The store supports:
+
+- tags;
+- priority;
+- `always_include` context;
+- enabled/disabled state;
+- metadata;
+- immutable revision history;
+- restore-to-new-revision behavior;
+- audit events;
+- import/export;
+- chunked indexing.
+
+Project-scoped context can combine exact project knowledge with owner-global knowledge without mixing unrelated project data.
+
+Persistent storage is kept in:
+
+```text
+/data/knowledge.db
+```
+
+---
 
 # Hybrid retrieval
 
-Context retrieval combines SQLite FTS5 lexical search, compact multilingual embeddings, priority and scope through rank fusion. If semantic retrieval is unavailable, lexical FTS remains usable and the service continues to start.
+Context retrieval combines several signals rather than relying on one search method:
+
+```text
+SQLite FTS5 lexical search
+          +
+compact multilingual embeddings
+          +
+priority
+          +
+scope
+          |
+          v
+rank fusion
+          |
+          v
+project context
+```
+
+The default weighting is:
+
+```text
+semantic  0.60
+lexical   0.25
+priority  0.10
+scope     0.05
+```
+
+If semantic retrieval is unavailable, lexical FTS remains usable and the service continues to start.
+
+---
 
 # Compact multilingual context model
 
-The semantic runtime uses a compact derivative of `sentence-transformers/static-similarity-mrl-multilingual-v1`: 128 dimensions, int8 static embeddings, multilingual Model2Vec runtime and Apache-2.0 source license. The verified compressed release is approximately 9.9 MB and contains no user-specific training data.
+The v9 semantic runtime uses a compact derivative of:
 
-See `docs/context-model.md`.
+```text
+sentence-transformers/static-similarity-mrl-multilingual-v1
+```
+
+Runtime profile:
+
+```text
+128 dimensions
+int8 static embeddings
+multilingual, including Italian and English
+Model2Vec runtime
+Apache-2.0 source license
+```
+
+The verified release asset is:
+
+```text
+context-model-v1
+postmaster-context-mrl-128d-int8.tar.gz
+```
+
+Compressed size is approximately **9.9 MB**.
+
+SHA-256:
+
+```text
+33aebe14cc1cc8e506bca5f2d08fe243f94d4a716875f172f96229bb33bff632
+```
+
+On first start the provisioning script:
+
+1. downloads the compact release asset;
+2. verifies SHA-256;
+3. rejects unsafe archive paths/links;
+4. loads the model through the real Model2Vec runtime;
+5. validates a 128-dimensional inference probe;
+6. installs it atomically under `/data/models`.
+
+A pinned upstream-source rebuild is available as a fallback. No user email, project memory, conversation or other private data is used to construct the public model.
+
+See `docs/context-model.md` for details.
 
 ---
 
 # Email and MIME handling
 
-Postmaster supports plain text, HTML, attachments, drafts, replies and forwarded messages. v9 extracts plain/HTML alternatives independently, exposes `body_html`, preserves URLs when deriving readable text from HTML, traverses nested `message/rfc822` forwarded messages and avoids treating ordinary text attachments as the body.
+Postmaster MCP supports plain text, HTML, attachments, drafts, replies and forwarded messages.
 
-# Multi-account mail
+A normal multipart message may contain:
 
-Multiple IMAP/SMTP identities can be stored server-side. Mailbox tools accept an optional `account_id`; when omitted, the configured default account is used. Credentials are never returned through MCP tools.
+```text
+text/plain
+text/html
+```
 
-# Recipient safety
+v9 fixes an important forwarded-mail failure mode where a tiny generated `text/plain` part could hide the real HTML message.
 
-Sending is protected by exact-address/domain authorization plus optional previously-sent recipient history. Draft creation remains more permissive because a draft is not an external delivery and can be reviewed before sending.
+`get_email` now:
 
-# Persistent task registry
+- extracts plain and HTML alternatives independently;
+- exposes `body_html` in addition to the selected text body;
+- compares useful content instead of blindly preferring `text/plain`;
+- converts rich HTML to readable text when the HTML is the meaningful body;
+- preserves URLs when deriving text from HTML;
+- traverses nested `message/rfc822` forwarded messages;
+- does not treat ordinary text attachments as the message body;
+- reports body-source and forwarded-message metadata.
 
-The scheduler stores task definitions, recurrence and execution context while an MCP-capable AI client performs reasoning and explicit actions. This supports conditional follow-up, inbox/Junk review and other persistent workflows.
+This behavior is covered by regression tests.
 
 ---
 
-# Tracking and AMP
+# Multi-account mail
 
-Open tracking is configurable per account and overridable per send/reply:
+Multiple IMAP/SMTP identities can be stored on the server.
+
+Mailbox operations accept an optional:
+
+```text
+account_id
+```
+
+If omitted, the configured default account is used.
+
+Credentials remain server-side and are not returned through MCP tools.
+
+---
+
+# Recipient safety
+
+Sending is protected by an authorization policy.
+
+The public stack ships without private recipients or domains:
+
+```yaml
+SEND_RECIPIENT_ALLOWLIST: ''
+ALLOW_PREVIOUS_SENT_RECIPIENTS: 'true'
+```
+
+Recipients can be authorized by exact address or by domain. Previously sent recipients can optionally be accepted through history.
+
+Draft creation intentionally remains more permissive because a draft is not an external delivery and can be reviewed before sending.
+
+---
+
+# Persistent task registry
+
+The scheduler stores persistent task definitions, recurrence and execution context.
+
+The normal model is:
+
+```text
+Task registry
+    |
+    | due task / recurrence / context
+    v
+MCP-capable AI client
+    |
+    | reasons about current state
+    | performs explicit actions
+    v
+Postmaster MCP
+```
+
+This supports workflows such as:
+
+```text
+Follow up only if no reply has arrived.
+Review Junk and restore genuine false positives.
+Check unread mail and summarize messages requiring attention.
+```
+
+The server persists the task state; the AI client performs the reasoning and explicit action.
+
+---
+
+# Open tracking and AMP
+
+Open tracking can be configured per account and overridden for individual sends/replies.
 
 ```text
 track_opens: null   -> account default
-track_opens: true   -> enable tracking for this message
-track_opens: false  -> disable tracking for this message
+track_opens: true   -> enable for this message
+track_opens: false  -> disable for this message
 ```
 
-Tracked multi-recipient delivery uses a distinct delivery token per recipient while preserving visible `To`/`Cc`; `Bcc` stays hidden. Replies preserve normal threading headers. Open/click events are telemetry, not proof of human reading or intent; proxies, scanners, prefetching and image blocking can affect observations.
+Tracked multi-recipient delivery uses a distinct token per recipient while preserving visible `To` / `Cc` headers. `Bcc` remains hidden. Replies preserve normal threading headers.
 
-AMP for Email remains optional and uses separately scoped, time-limited delivery tokens.
+Open events are telemetry, not proof that a human read a message. Mail scanners, proxies, prefetching and image blocking can affect observations.
 
-## Per-link click tracking and clean Sent copies (v9.4)
-
-v9.4 rewrites eligible HTTP/HTTPS anchors in the **recipient** HTML to opaque URLs:
-
-```text
-https://<PUBLIC_EMAIL_HOST>/t/c/<token>
-```
-
-The token is random and resolves server-side to the delivery, logical link occurrence and exact original destination. `/t/c/<token>` records a `link` event using the existing country/source/browser/OS/User-Agent/fingerprint enrichment pipeline and immediately redirects to the server-stored `original_url`. Query parameters are never accepted as redirect destinations.
-
-`mailto:`, `tel:`, `cid:`, `data:`, `javascript:` and local `#fragment` links are not rewritten. Query strings/fragments are preserved. Repeated occurrences retain separate anchor positions and logical link IDs while normalized URL data allows aggregation.
-
-Unique click is defined as:
-
-```text
-delivery_id + link_id + client_fingerprint
-```
-
-v9.4 does not aggressively classify human/bot/scanner clicks. It keeps the raw telemetry fields needed for a later evidence-based classifier.
-
-The archived **Sent** copy is generated separately from the same canonical message. It contains the original URLs, no active recipient tracking pixel, no `/t/c/<token>` and no recipient AMP callback alternative. `Message-ID`, `Date`, subject/threading headers and attachment bytes are preserved. This prevents sender self-opens/self-clicks from being attributed to the recipient.
-
-New analytics include total/unique clicks, unique recipients, first/last click, top links, destination host and campaign/delivery/link filtering. Existing `tracking_status` and `get_tracking_campaign` are extended; v9.4 also adds `get_tracking_summary`, `list_tracking_links` and `list_tracking_events`. The dashboard keeps the existing pixel view and adds Top links plus unified pixel/AMP/link events.
-
-See `docs/LINK_TRACKING.md`.
+AMP for Email is optional and uses separately scoped, time-limited delivery tokens.
 
 ---
 
 # Security model
 
-Postmaster uses a split security perimeter: protect the whole application by default, then carve out only callback paths that cannot authenticate through the normal control plane.
+Postmaster MCP uses a split security perimeter:
 
-Existing public callback paths:
+```text
+                        Internet
+                           |
+                           v
+                   Cloudflare Access
+                   /               \
+                  /                 \
+                 v                   v
+      authenticated control     narrow callbacks
+              plane                 only
+          /          \           /       \
+         /            \         /         \
+        v              v       v           v
+   Dashboard          /mcp  /api/amp/*  /track/open/*
+         \              /       \           /
+          \            /         \         /
+                 Postmaster MCP
+```
+
+General rule:
+
+> **Protect the whole application by default, then carve out only the machine-to-machine callback paths that cannot authenticate through the normal user/OAuth flow.**
+
+The dashboard, MCP endpoint, mailbox operations, task management, analytics administration and write operations belong to the authenticated control plane.
+
+If AMP or tracking is enabled, only the required callback paths should receive a narrowly scoped Access bypass:
 
 ```text
 /api/amp/*
 /track/open/*
 ```
 
-v9.4 adds exactly one new required public callback path:
+Do not bypass authentication for `/`, `/mcp`, dashboard routes or general APIs.
 
-```text
-/t/c/*
-```
+The raw Docker port should not be exposed directly to the public Internet. Prefer Cloudflare Tunnel or another trusted reverse proxy and restrict origin access accordingly.
 
-**Cloudflare Access must bypass `/t/c/*` for link redirects to work.** Keep `/mcp`, dashboard/admin/private APIs, mail/task/memory/skill/file-management endpoints and tracking analytics protected. Do not disable Cloudflare Access globally.
-
-The raw Docker port should not be exposed directly to the public Internet; prefer Cloudflare Tunnel or another trusted reverse proxy and restrict origin access accordingly.
-
-The v9.3 `/files/{file_id}` signed HTTP handoff is a separate pre-existing deployment concern and is not automatically added to the v9.4 bypass list.
+The public callback URLs use random capability tokens and do not expose mailbox credentials or MCP administration.
 
 ---
 
@@ -267,57 +509,179 @@ Typical persistent files include:
 /data/email-analytics.key
 /data/knowledge.db
 /data/models/
-/data/files/
 ```
 
-Back up `mcp_data`, especially database/key pairs.
+Back up `mcp_data`, especially database/key pairs. Losing an encryption key can make the corresponding encrypted data unrecoverable.
+
+---
+
+# Updating v9
+
+During development you can point:
+
+```yaml
+POSTMASTER_REF: v9-structural-runtime
+POSTMASTER_REFRESH_ON_START: 'true'
+```
+
+and restart the container to fetch the latest branch revision.
+
+For a stable deployment, pin an immutable tag or commit:
+
+```yaml
+POSTMASTER_REF: v9.0.0
+```
+
+The bootstrap stages the new source before replacing the cached release. If refresh fails and an older cached copy exists, the previous copy is retained.
+
+Dependencies are installed into a persistent virtual environment and rebuilt only when `requirements.txt` changes.
 
 ---
 
 # CI and regression coverage
 
-The v9 runtime workflow validates source compilation, unit/regression tests, version/changelog consistency, provider-neutral public files, MIME handling, knowledge store, compact semantic model provisioning, full runtime import and single-YAML bootstrap behavior. v9.4 adds link rewrite/redirect/analytics tests and recipient-versus-Sent MIME regression coverage.
-
-The recommended policy is to protect `main`, require pull requests and require the v9 runtime status check before merging.
-
----
-
-# Native ChatGPT file upload (v9.2)
-
-The portable `save_file(content_base64=...)` tool remains available. ChatGPT clients can instead use `save_uploaded_file` or `save_uploaded_files` with `_meta["openai/fileParams"]`; temporary authorized downloads are streamed server-side through the same bounded FileStore path. Uploaded content is never executed or automatically added to Knowledge.
-
-# Native Postmaster file handoff (v9.3)
-
-`get_stored_file_resource(file_id, transport="auto")` returns a real MCP `ResourceLink` using the canonical FileStore `file_id`. The hierarchy is native ResourceLink/file reference, signed HTTPS streaming, MCP `resources/read`, Base64 fallback, inline Base64 only as a last resort.
-
-`postmaster://files/{file_id}` is registered as a resource template. `GET`/`HEAD /files/{file_id}` provide temporary HMAC-signed HTTPS capabilities with byte-range support and stream the original content-addressed blob without resizing, recompressing or transcoding it.
-
-The existing `PUBLIC_MCP_HOST` is reused as the default HTTPS base. Advanced deployments may optionally set `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET` and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS`; otherwise a persistent signing secret is generated under `/data` and TTL defaults to 900 seconds.
-
-See `docs/FILE_HANDOFF.md`.
-
----
-
-# Versioning and updates
-
-Stable releases use Semantic Versioning. `VERSION` contains the application version; GitHub release tags use `vX.Y.Z`.
+The v9 runtime workflow validates:
 
 ```text
-POSTMASTER_VERSION=latest   -> newest stable GitHub Release on restart
-POSTMASTER_VERSION=v9.4.0  -> exact immutable release
-POSTMASTER_VERSION=<SHA>    -> exact immutable commit
+Python source compilation
+MIME / forwarded-email regression tests
+knowledge-store CRUD / FTS / history / export
+real compact-model download
+SHA-256 model verification
+128d Model2Vec inference
+full MCP server import
+Portainer YAML structure
+bootstrap shell syntax
+Compose variable escaping
 ```
 
-With `POSTMASTER_VERSION=latest` and `POSTMASTER_CHECK_UPDATES_ON_START=true`, no YAML edit is needed for v9.4: after the stable release is published, restart the stack. `POSTMASTER_FORCE_REFRESH=true` remains an explicit redownload control, separate from update selection.
+The recommended repository policy is to protect `main`, require pull requests and require the v9 runtime status check before merging.
 
-Cloudflare Access is external to the container. The `/t/c/*` bypass must be configured manually before v9.4 link tracking is fully operational.
+---
+
+# Repository layout
+
+```text
+.
+├── postmaster-mcp.yml
+├── requirements.txt
+├── src/
+│   └── postmaster/
+├── scripts/
+├── tests/
+├── docs/
+├── .github/workflows/
+├── LICENSE
+├── NOTICE
+└── README.md
+```
+
+---
+
+# v8.7 migration note
+
+v8.7 used a monolithic Portainer stack where the Python application was embedded directly in Compose `configs:` entries.
+
+v9 keeps the same practical deployment goal — **paste one YAML into Portainer** — but the YAML is now only a bootstrap. Application code lives in the GitHub repository and is downloaded into a persistent source volume.
+
+Persistent data remains under `/data`; migrating an existing installation should preserve the data volume and its encryption keys.
+
+Before replacing a working v8.7 deployment, back up the persistent data volume and test v9 against your real mailboxes and reverse-proxy configuration.
 
 ---
 
 # Privacy and public distribution
 
-The public repository intentionally contains no mailbox credentials, private recipient allowlists, personal domains, private project context or conversation data. Deployment-specific secrets belong in the private Portainer stack or secret-management layer.
+The public repository intentionally contains no mailbox credentials, private recipient allowlists, personal domains, private project context or conversation data.
+
+The compact semantic model is derived only from a public Apache-2.0 source model and contains no user-specific training data.
+
+Deployment-specific secrets belong in your private Portainer stack or secret-management layer, not in the public repository.
+
+---
 
 # License
 
-Apache License 2.0. See `LICENSE` and `NOTICE`.
+Apache License 2.0. See:
+
+```text
+LICENSE
+NOTICE
+```
+
+
+## v9.1 small-file store
+
+v9.1 adds a private persistent store for small reference files. Metadata is kept in SQLite while file bytes are stored as SHA-256-addressed blobs under `/data/files`, so user-provided filenames never become filesystem paths. The default public stack limits individual files to 1 MiB, the logical store to 100 MiB and 1000 records; hard application caps prevent accidentally configuring unbounded values.
+
+MCP clients can save UTF-8 text directly or binary data as base64, list scoped metadata, read text with a character budget, retrieve binary content as base64, update metadata and delete files. Owner/project scopes reuse the scheduler registry. The WebGUI has a Files tab for upload, download and deletion. Downloads are forced as attachments with `X-Content-Type-Options: nosniff`; Postmaster never executes stored content and does not expose public file URLs.
+
+The file store is intentionally separate from Knowledge in v9.1. Uploading a document does not automatically inject it into semantic context; a later version can add explicit opt-in document extraction/indexing without making arbitrary uploads part of prompts by default.
+
+---
+
+# Versioning and updates
+
+Stable Postmaster releases use Semantic Versioning and are recorded in `CHANGELOG.md`. The repository `VERSION` file contains the application version, while GitHub release tags use `vX.Y.Z`.
+
+For a Portainer deployment:
+
+```text
+POSTMASTER_VERSION=latest   -> follow the latest stable GitHub Release on restart
+POSTMASTER_VERSION=v9.2.0  -> stay pinned to that exact release
+POSTMASTER_VERSION=<SHA>   -> stay pinned to an immutable commit
+```
+
+`build_status` reports the application `version`, the resolved running `build`, and the `requested_version` policy so an MCP client can distinguish `latest` from the concrete release actually running.
+
+# Native ChatGPT file upload (v9.2)
+
+The portable MCP `save_file(content_base64=...)` tool remains available. ChatGPT clients can instead use `save_uploaded_file` or `save_uploaded_files`; those tools declare `_meta["openai/fileParams"]`, so ChatGPT passes temporary authorized file download objects rather than forcing large Base64 strings through model context.
+
+Remote downloads are HTTPS-only, bounded by the same per-file store limit while streaming, limited in redirects and timeout, checked against non-public address resolution, and then stored through the same SHA-256 content-addressed `FileStore`. Uploaded content is never executed or automatically added to semantic Knowledge.
+
+# Native Postmaster file handoff (v9.3)
+
+v9.3 completes the reverse path from Postmaster to MCP clients. `get_stored_file_resource(file_id, transport="auto")` returns a real MCP `ResourceLink` content block using the canonical FileStore `file_id`; constructing the link reads metadata only and does not serialize the link into text or load the stored blob.
+
+The preferred hierarchy is native ResourceLink/file reference, signed HTTPS streaming, MCP `resources/read`, Base64 fallback, and inline Base64 only as a last resort. `postmaster://files/{file_id}` is registered as a resource template, and the SDK turns returned bytes into protocol `BlobResourceContents` when a client follows the MCP resource.
+
+`GET` and `HEAD /files/{file_id}` provide temporary HMAC-signed HTTPS capabilities with byte-range support. The HTTP path streams the original content-addressed blob directly: it does not resize, recompress, transcode, Base64-encode, or create a second transfer copy.
+
+The existing `PUBLIC_MCP_HOST` is reused as the normal HTTPS base for the same service, so the public `postmaster-mcp.yml` does not need new required variables. Advanced deployments may optionally override the file base or signing behavior with `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET`, and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS`; otherwise the signing secret is generated once and persisted at `/data/file-store-download.secret` and the TTL defaults to 900 seconds.
+
+An existing stack with `POSTMASTER_VERSION=latest` can therefore receive v9.3 by restarting after the stable release is published. If the external access layer protects the full app, ensure the signed `/files/*` route is reachable according to the deployment's proxy policy without weakening protection for `/mcp`, the dashboard, or unrelated routes.
+
+See `docs/FILE_HANDOFF.md` for the handoff hierarchy, security model, signed URL behavior and deployment details.
+
+# Per-link tracking and clean Sent copies (v9.4)
+
+v9.4 adds per-link HTTP/HTTPS click telemetry to the existing tracked-delivery pipeline while leaving the existing `/track/open/*` pixel behavior unchanged. Eligible recipient HTML anchors are rewritten to opaque URLs under:
+
+```text
+/t/c/<token>
+```
+
+The random token identifies a server-side link occurrence; recipient data and destination URLs are not encoded into it. The click endpoint resolves the stored record, records a `link` event with the existing country/source/browser/OS/User-Agent/client-fingerprint enrichment and immediately redirects to the exact stored `original_url`. Query parameters supplied to `/t/c/<token>` are never accepted as redirect destinations.
+
+The v9.4 unique-click definition is:
+
+```text
+delivery_id + link_id + client_fingerprint
+```
+
+Analytics expose total clicks, unique clicks, unique recipients, first/last click, destination host, per-campaign/per-delivery/per-link filtering and top links. Existing `tracking_status` and `get_tracking_campaign` are extended, while `get_tracking_summary`, `list_tracking_links` and `list_tracking_events` provide read-only link/event queries. Opaque tracking tokens are not returned by list/dashboard APIs.
+
+Recipient and Sent MIME are now generated separately from the same canonical body and attachment inputs. The recipient copy keeps the existing tracking pixel and tracked URLs; the archived Sent copy keeps original URLs and contains no active recipient pixel or `/t/c/<token>`. `Message-ID`, Date and normal threading headers are preserved and attachments reuse the same original bytes. This prevents sender self-opens/self-clicks from being attributed to the recipient for messages generated by v9.4+.
+
+The single-YAML bootstrap is unchanged. With `POSTMASTER_VERSION=latest` and `POSTMASTER_CHECK_UPDATES_ON_START=true`, restart the stack after the stable release is published.
+
+Cloudflare Access is external to the container. Keep the existing public bypasses for `/track/open/*` and `/api/amp/*`, and add exactly one new public bypass required by v9.4:
+
+```text
+/t/c/*
+```
+
+Do not expose `/mcp`, dashboard/admin/private APIs, mail/task/memory/skill/file-management endpoints or tracking analytics. The pre-existing v9.3 signed `/files/*` handoff remains a separate deployment-policy concern and is not added automatically as part of v9.4.
+
+See `docs/LINK_TRACKING.md` for architecture, schema, Sent-clean behavior, analytics and the live Cloudflare preflight.
