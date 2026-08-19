@@ -37,6 +37,15 @@ def _provider_hint(event: dict[str, Any]) -> str | None:
         return "microsoft"
     if "yahoo" in combined:
         return "yahoo"
+
+    recipient = str(event.get("recipient") or "").strip().lower()
+    domain = recipient.rsplit("@", 1)[-1] if "@" in recipient else ""
+    if domain in {"gmail.com", "googlemail.com"}:
+        return "google"
+    if domain in {"outlook.com", "hotmail.com", "live.com", "msn.com"}:
+        return "microsoft"
+    if domain == "yahoo.com" or domain.startswith("yahoo."):
+        return "yahoo"
     return None
 
 
