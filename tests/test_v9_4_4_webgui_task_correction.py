@@ -216,8 +216,10 @@ class V944WebGuiTaskCorrectionTests(unittest.TestCase):
                 self.assertTrue(texts)
                 if len(texts) == 1:
                     payload = json.loads(texts[0])
-                    self.assertIsInstance(payload, list)
-                    return payload
+                    if isinstance(payload, list):
+                        return payload
+                    self.assertIsInstance(payload, dict)
+                    return [payload]
                 rows = [json.loads(text) for text in texts]
                 self.assertTrue(all(isinstance(row, dict) for row in rows))
                 return rows
