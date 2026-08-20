@@ -42,11 +42,44 @@ def build_status():
     status["explicit_reply_follow_up_modes"] = True
     status["follow_up_email"] = True
     status["follow_up_draft"] = True
+    status["task_detail_view"] = True
+    status["completed_tasks_hidden_by_default"] = True
     return status
 
 mcp.remove_tool("build_status")
 mcp.add_tool(build_status, name="build_status")
 _base.build_status = build_status
+
+
+def list_jobs(
+    owner_id: str | None = None,
+    project_id: str | None = None,
+    status: str | None = None,
+    limit: int = 200,
+    include_completed: bool = False,
+):
+    """Read-only. List registered tasks. Completed tasks are hidden unless explicitly requested."""
+    rows = _base._safe_call(
+        _base.scheduler().list_jobs,
+        owner_id=owner_id,
+        project_id=project_id,
+        status=status,
+        limit=limit,
+        include_completed=include_completed,
+    )
+    if isinstance(rows, dict) and rows.get("ok") is False:
+        return {"ok": False, "error": rows.get("error", "Unable to list jobs"), "count": 0, "jobs": []}
+    return {"ok": True, "count": len(rows), "jobs": rows}
+
+mcp.remove_tool("list_jobs")
+mcp.add_tool(list_jobs, name="list_jobs")
+_base.list_jobs = list_jobs
+
+
+@mcp.tool()
+def get_job(job_id: str):
+    """Read-only. Return the complete stored record for one registered task."""
+    return _base._safe_call(_base.scheduler().get_job, job_id)
 
 
 @mcp.tool()
