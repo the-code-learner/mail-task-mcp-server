@@ -2,6 +2,31 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.2 - 2026-08-20
+
+### Added
+- Explicit outbound follow-up tools `follow_up_email` and `create_follow_up_draft`, mirroring the existing reply APIs while keeping inbound replies and outbound follow-ups as separate safety semantics.
+- Shared thread-recipient resolution for reply/follow-up mode. Inbound replies prefer a valid `Reply-To` and otherwise use `From`; outbound follow-ups reuse the original visible `To` and preserve the original visible `Cc` by default.
+- Direction guards: `reply_email` rejects messages clearly sent by the selected sender account and tells callers to use `follow_up_email`; `follow_up_email` rejects inbound messages and points callers to `reply_email`.
+- Regression coverage for recipient direction, sender/identity filtering, case-insensitive deduplication, Bcc non-disclosure, zero-recipient failures, threading headers, subject normalization, recipient authorization, drafts, tracked visible headers, clean Sent copies and attachment-byte identity.
+
+### Changed
+- Sender-owned identities are filtered from resolved `To`/`Cc` before authorization or delivery. The primary sender plus account-configured email identities are compared case-insensitively, and duplicate external recipients are removed while preserving a stable order.
+- Thread subjects now normalize repeated leading `Re:` prefixes to one `Re:`. `In-Reply-To` targets the selected message's `Message-ID`, while `References` are preserved and extended without duplicating that selected ID.
+- Follow-ups use the same existing outbound path as replies/sends. Tracked follow-ups therefore retain v9.4 individualized recipient MIME, visible `To`/`Cc`, clean archived Sent MIME, original URLs and identical attachment bytes without introducing a second tracking pipeline.
+
+### Fixed
+- Calling `reply_email` on an outbound/Sent message can no longer select the sender's own `From` address and create a self-reply.
+- Outbound follow-ups no longer authorize or validate the sender address in place of the original external recipients.
+- Original Bcc recipients are never rediscovered, inferred or re-exposed by follow-up resolution.
+- A follow-up with no external recipient left after sender/identity filtering fails before any SMTP delivery.
+
+### Compatibility / deployment
+- Existing `reply_email` and `create_reply_draft` signatures remain compatible; their safe direction semantics are now explicit.
+- No recipient-policy rule, tracking schema, environment variable, volume, port or public callback path changes are required.
+- `postmaster-mcp.yml` remains unchanged. Deployments using `POSTMASTER_VERSION=latest` with update checks enabled can select v9.4.2 on the normal restart/redeploy after the stable release is published.
+- No Cloudflare Access change is required for v9.4.2.
+
 ## 9.4.1 - 2026-08-20
 
 ### Added
