@@ -25,7 +25,7 @@ Postmaster MCP
         +-- IMAP / SMTP mail operations
         +-- encrypted multi-account storage
         +-- recipient safety policy
-        +-- drafts, replies and attachments
+        +-- drafts, replies, follow-ups and attachments
         +-- open analytics / AMP support
         +-- persistent task registry
         +-- memories / skills / project context
@@ -344,7 +344,7 @@ See `docs/context-model.md` for details.
 
 # Email and MIME handling
 
-Postmaster MCP supports plain text, HTML, attachments, drafts, replies and forwarded messages.
+Postmaster MCP supports plain text, HTML, attachments, drafts, replies, follow-ups and forwarded messages.
 
 A normal multipart message may contain:
 
@@ -383,6 +383,25 @@ account_id
 If omitted, the configured default account is used.
 
 Credentials remain server-side and are not returned through MCP tools.
+
+---
+
+# Reply vs follow-up (v9.4.2)
+
+Threaded mail actions deliberately separate inbound replies from outbound follow-ups:
+
+```text
+reply_email             -> reply to an inbound message
+create_reply_draft      -> draft a reply to an inbound message
+follow_up_email         -> follow up an outbound/Sent message
+create_follow_up_draft  -> draft a follow-up to an outbound/Sent message
+```
+
+For inbound messages, `reply_email` prefers a valid `Reply-To` and otherwise uses `From`. Calling it on a message clearly sent by the selected account is rejected with guidance to use `follow_up_email`, preventing self-replies.
+
+For outbound/Sent messages, `follow_up_email` reuses the original visible `To` and preserves the original visible `Cc` by default. The sender account and its configured email identities are removed case-insensitively, duplicates are removed while preserving order, and at least one external `To` recipient must remain. Original Bcc recipients are never rediscovered, inferred or exposed. Calling follow-up on an inbound message is rejected.
+
+Both modes preserve normal threading: one normalized `Re:` prefix, `In-Reply-To` pointing to the selected message's `Message-ID`, and `References` preserved/extended. Follow-up sending uses the same recipient-authorization, tracking, individualized-delivery and clean-Sent pipeline as existing sends/replies; it does not introduce a parallel tracking implementation.
 
 ---
 
@@ -436,7 +455,7 @@ The server persists the task state; the AI client performs the reasoning and exp
 
 # Open tracking and AMP
 
-Open tracking can be configured per account and overridden for individual sends/replies.
+Open tracking can be configured per account and overridden for individual sends/replies/follow-ups.
 
 ```text
 track_opens: null   -> account default
@@ -444,7 +463,7 @@ track_opens: true   -> enable for this message
 track_opens: false  -> disable for this message
 ```
 
-Tracked multi-recipient delivery uses a distinct token per recipient while preserving visible `To` / `Cc` headers. `Bcc` remains hidden. Replies preserve normal threading headers.
+Tracked multi-recipient delivery uses a distinct token per recipient while preserving visible `To` / `Cc` headers. `Bcc` remains hidden. Replies and follow-ups preserve normal threading headers.
 
 Open events are telemetry, not proof that a human read a message. Mail scanners, proxies, prefetching and image blocking can affect observations.
 
@@ -685,3 +704,9 @@ Cloudflare Access is external to the container. Keep the existing public bypasse
 Do not expose `/mcp`, dashboard/admin/private APIs, mail/task/memory/skill/file-management endpoints or tracking analytics. The pre-existing v9.3 signed `/files/*` handoff remains a separate deployment-policy concern and is not added automatically as part of v9.4.
 
 See `docs/LINK_TRACKING.md` for architecture, schema, Sent-clean behavior, analytics and the live Cloudflare preflight.
+
+# Explicit reply/follow-up semantics (v9.4.2)
+
+v9.4.2 prevents outbound messages from accidentally being replied back to the sender account. `reply_email` / `create_reply_draft` are inbound-only semantics, while `follow_up_email` / `create_follow_up_draft` operate on outbound/Sent messages and reuse the original visible recipients after sender-identity filtering. Source Bcc is never recovered.
+
+Tracked follow-ups reuse the v9.4 dual-MIME pipeline: recipient copies may contain the configured open/link instrumentation, while archived Sent copies keep original URLs and omit active recipient pixel, click-tracking URLs and recipient AMP callbacks. Visible `To` / `Cc`, threading headers and attachment bytes remain consistent. No new environment variables, ports, volumes, callback paths or Portainer YAML changes are required.
