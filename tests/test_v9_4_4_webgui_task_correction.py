@@ -136,8 +136,8 @@ class V944WebGuiTaskCorrectionTests(unittest.TestCase):
         try:
             import postmaster.runtime as runtime
 
-            runtime.scheduler.cache_clear()
-            runtime_engine = runtime.scheduler()
+            runtime._base.scheduler.cache_clear()
+            runtime_engine = runtime._base.scheduler()
             runtime_engine.create_project(
                 owner_id=runtime_engine.settings.default_owner_id,
                 project_id="runtime-project",
@@ -175,11 +175,13 @@ class V944WebGuiTaskCorrectionTests(unittest.TestCase):
                     (completed["id"],),
                 )
 
+            list_signature = inspect.signature(runtime._base.list_jobs)
             self.assertEqual(
-                list(inspect.signature(runtime.list_jobs).parameters),
+                list(list_signature.parameters),
                 ["owner_id", "project_id", "status", "limit"],
             )
-            self.assertNotIn("include_completed", inspect.signature(runtime.list_jobs).parameters)
+            self.assertNotIn("include_completed", list_signature.parameters)
+            self.assertEqual(list_signature.parameters["limit"].default, 200)
 
             async def exercise_mcp():
                 async with Client(runtime.mcp, raise_exceptions=True) as client:
@@ -236,6 +238,13 @@ class V944WebGuiTaskCorrectionTests(unittest.TestCase):
             detail_payload = json.loads(detail.content[0].text)
             self.assertEqual(detail_payload["id"], completed["id"])
 
+            server_source = Path(runtime._base.__file__).read_text(encoding="utf-8")
+            runtime_source = Path(runtime.__file__).read_text(encoding="utf-8")
+            runtime_core_source = Path(runtime._core.__file__).read_text(encoding="utf-8")
+            self.assertEqual(server_source.count("def get_job(job_id: str):"), 1)
+            self.assertNotIn("def get_job(job_id", runtime_source)
+            self.assertNotIn("def get_job(job_id", runtime_core_source)
+
             status = runtime.build_status()
             self.assertNotIn("task_detail_view", status)
             self.assertNotIn("completed_tasks_hidden_by_default", status)
@@ -243,7 +252,7 @@ class V944WebGuiTaskCorrectionTests(unittest.TestCase):
             try:
                 import postmaster.runtime as runtime
 
-                runtime.scheduler.cache_clear()
+                runtime._base.scheduler.cache_clear()
             except Exception:
                 pass
             if old_scheduler_db is None:
