@@ -1,348 +1,248 @@
 from __future__ import annotations
 
+import json
 import os
 from html import escape
-from typing import Any
+from urllib.parse import urlencode
 
 import uvicorn
-from mcp.types import CallToolResult
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, PlainTextResponse, RedirectResponse
-from starlette.routing import Mount, Route
+from starlette.responses import HTMLResponse
+from starlette.routing import Route
 
-from . import server as _base
-from .file_handoff import (
-    read_stored_file_resource,
-    stored_file_http_response,
-    stored_file_resource_result,
+from . import runtime_core as _core
+
+# v9.4.4 keeps the v9.4.2 task MCP/backend contract in runtime_core and layers
+# completed-task visibility/detail only onto the browser dashboard.
+for _name in dir(_core):
+    if _name.startswith("_"):
+        continue
+    globals()[_name] = getattr(_core, _name)
+
+_base = _core._base
+_tracking_dashboard_fragment = _core._tracking_dashboard_fragment
+_legacy_dashboard_home = _core.dashboard_home
+mcp = _core.mcp
+app = _core.app
+
+_TASK_DETAIL_FIELDS = (
+    "id",
+    "owner_id",
+    "project_id",
+    "title",
+    "description",
+    "action_type",
+    "execution_profile_id",
+    "schedule_type",
+    "schedule_value",
+    "timezone",
+    "approval_mode",
+    "status",
+    "next_run_utc",
+    "created_at",
+    "updated_at",
+    "last_run_utc",
+    "last_error",
+    "payload",
 )
-from .link_tracking import link_store
-from .link_tracking_html import eligible_web_url
-from .tracked_mail import LinkTrackingMailClient
-
-mcp = _base.mcp
-_legacy_build_status = _base.build_status
-_legacy_tracking_status = _base.tracking_status
-_legacy_get_tracking_campaign = _base.get_tracking_campaign
-_legacy_dashboard_home = _base.dashboard_home
 
 
-def mail_client(account_id: str | None = None) -> LinkTrackingMailClient:
-    return LinkTrackingMailClient(_base.account_store().settings(account_id))
-
-_base.mail_client = mail_client
-
-
-def build_status():
-    status = _legacy_build_status()
-    status["native_file_resource_handoff"] = True
-    status["link_tracking"] = True
-    status["sent_copy_tracking_sanitized"] = True
-    status["provider_qualitative_classification"] = True
-    status["explicit_reply_follow_up_modes"] = True
-    status["follow_up_email"] = True
-    status["follow_up_draft"] = True
-    status["task_detail_view"] = True
-    status["completed_tasks_hidden_by_default"] = True
-    return status
-
-mcp.remove_tool("build_status")
-mcp.add_tool(build_status, name="build_status")
-_base.build_status = build_status
+def _task_dashboard_url(
+    request: Request,
+    *,
+    show_completed: bool,
+    view_job: str | None = None,
+) -> str:
+    params: dict[str, str] = {}
+    account_id = (request.query_params.get("account") or "").strip()
+    if account_id:
+        params["account"] = account_id
+    if show_completed:
+        params["show_completed"] = "1"
+    if view_job:
+        params["view_job"] = view_job
+    query = urlencode(params)
+    return "/" + (("?" + query) if query else "") + "#scheduler"
 
 
-def list_jobs(
-    owner_id: str | None = None,
-    project_id: str | None = None,
-    status: str | None = None,
-    limit: int = 200,
-    include_completed: bool = False,
-):
-    """Read-only. List registered tasks. Completed tasks are hidden unless explicitly requested."""
-    rows = _base._safe_call(
-        _base.scheduler().list_jobs,
-        owner_id=owner_id,
-        project_id=project_id,
-        status=status,
-        limit=limit,
-        include_completed=include_completed,
+def _task_detail_html(request: Request, *, show_completed: bool) -> str:
+    job_id = (request.query_params.get("view_job") or "").strip()
+    if not job_id:
+        return ""
+
+    detail = _base._safe_call(_base.scheduler().get_job, job_id)
+    close_url = escape(
+        _task_dashboard_url(request, show_completed=show_completed),
+        quote=True,
     )
-    if isinstance(rows, dict) and rows.get("ok") is False:
-        return {"ok": False, "error": rows.get("error", "Unable to list jobs"), "count": 0, "jobs": []}
-    return {"ok": True, "count": len(rows), "jobs": rows}
+    if not isinstance(detail, dict) or detail.get("ok") is False:
+        message = "Task could not be loaded"
+        if isinstance(detail, dict):
+            message = str(detail.get("error") or message)
+        return f"""
+<section class="card wide">
+<div class="panel-title"><h2>Task detail</h2><a href="{close_url}"><button type="button">Close</button></a></div>
+<div class="flash">{escape(message)}</div>
+</section>
+"""
 
-mcp.remove_tool("list_jobs")
-mcp.add_tool(list_jobs, name="list_jobs")
-_base.list_jobs = list_jobs
-
-
-@mcp.tool()
-def get_job(job_id: str):
-    """Read-only. Return the complete stored record for one registered task."""
-    return _base._safe_call(_base.scheduler().get_job, job_id)
-
-
-@mcp.tool()
-def follow_up_email(
-    mailbox: str,
-    uid: str,
-    body: str = "",
-    cc: list[str] | None = None,
-    bcc: list[str] | None = None,
-    body_html: str | None = None,
-    attachments: list[dict[str, Any]] | None = None,
-    track_opens: bool | None = None,
-    campaign_id: str | None = None,
-    account_id: str | None = None,
-):
-    """
-    WRITE ACTION. Threaded follow-up to an outbound/Sent message from the selected account.
-
-    The original visible To/Cc recipients are reused after removing the sender account and
-    configured account identities. Original Bcc is never rediscovered or exposed. Inbound
-    messages are rejected and should use reply_email instead.
-
-    Tracking follows the same account-default/explicit override semantics and the same v9.4
-    recipient/Sent-clean pipeline as send_email and reply_email.
-    """
-    return _base._safe_call(
-        mail_client(account_id).follow_up_email,
-        mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
-        body_html=body_html, attachments=attachments,
-        track_opens=track_opens, campaign_id=campaign_id,
-    )
-
-
-@mcp.tool()
-def create_follow_up_draft(
-    mailbox: str,
-    uid: str,
-    body: str = "",
-    cc: list[str] | None = None,
-    bcc: list[str] | None = None,
-    body_html: str | None = None,
-    attachments: list[dict[str, Any]] | None = None,
-    account_id: str | None = None,
-):
-    """
-    WRITE ACTION. Save a threaded follow-up draft for an outbound/Sent message.
-
-    The draft reuses the original visible To/Cc after sender/alias filtering, never recovers
-    original Bcc, and rejects inbound messages so reply/follow-up semantics stay explicit.
-    """
-    return _base._safe_call(
-        mail_client(account_id).create_follow_up_draft,
-        mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
-        body_html=body_html, attachments=attachments,
-    )
-
-
-@mcp.tool()
-def get_stored_file_resource(file_id: str, transport: str = "auto") -> CallToolResult:
-    return stored_file_resource_result(_base.file_store(), file_id, transport)
-
-
-@mcp.resource(
-    "postmaster://files/{file_id}",
-    name="postmaster_stored_file",
-    description="Original bytes for a Postmaster FileStore file identified by canonical file_id.",
-)
-def stored_file_resource(file_id: str) -> bytes:
-    return read_stored_file_resource(_base.file_store(), file_id)
-
-
-def tracking_status():
-    base = _legacy_tracking_status()
-    if isinstance(base, dict) and base.get("ok"):
-        base["link_tracking"] = link_store().status()
-        base["link_tracking"]["provider_classification_query_time"] = True
-        base["event_types"] = ["pixel", "amp_xhr", "link"]
-    return base
-
-mcp.remove_tool("tracking_status")
-mcp.add_tool(tracking_status, name="tracking_status")
-_base.tracking_status = tracking_status
-
-
-def get_tracking_campaign(campaign_id: str):
-    base = _legacy_get_tracking_campaign(campaign_id)
-    if isinstance(base, dict) and base.get("ok") is False:
-        return base
-    try:
-        base["link_tracking"] = link_store().summary(campaign_id=campaign_id)
-        base["top_links"] = link_store().top_links(campaign_id=campaign_id, limit=25)
-    except Exception as exc:
-        base["link_tracking_error"] = f"{type(exc).__name__}: {exc}"
-    return base
-
-mcp.remove_tool("get_tracking_campaign")
-mcp.add_tool(get_tracking_campaign, name="get_tracking_campaign")
-_base.get_tracking_campaign = get_tracking_campaign
-
-
-@mcp.tool()
-def get_tracking_summary(
-    campaign_id: str | None = None,
-    delivery_id: str | None = None,
-    link_id: str | None = None,
-    account_id: str | None = None,
-):
-    """Read-only click summary with stable fingerprint uniques plus query-time provider estimates."""
-    return _base._safe_call(
-        link_store().summary,
-        campaign_id=campaign_id, delivery_id=delivery_id, link_id=link_id, account_id=account_id,
-    )
-
-
-@mcp.tool()
-def list_tracking_links(
-    campaign_id: str | None = None,
-    delivery_id: str | None = None,
-    link_id: str | None = None,
-    account_id: str | None = None,
-    clicked_only: bool = False,
-    limit: int = 500,
-):
-    """Read-only tracked link occurrences and aggregates; opaque tokens are never returned."""
-    return _base._safe_call(
-        link_store().list_links,
-        campaign_id=campaign_id, delivery_id=delivery_id, link_id=link_id,
-        account_id=account_id, clicked_only=clicked_only, limit=limit,
-    )
-
-
-@mcp.tool()
-def list_tracking_events(
-    delivery_id: str | None = None,
-    campaign_id: str | None = None,
-    link_id: str | None = None,
-    recipient: str | None = None,
-    account_id: str | None = None,
-    event_type: str | None = None,
-    limit: int = 500,
-):
-    """Read-only unified tracking events. Link rows include query-time provider classification fields."""
-    return _base._safe_call(
-        link_store().unified_events,
-        delivery_id=delivery_id, campaign_id=campaign_id, link_id=link_id,
-        recipient=recipient, account_id=account_id, event_type=event_type, limit=limit,
-    )
-
-
-async def public_stored_file_download(request: Request):
-    return stored_file_http_response(request, _base.file_store(), require_signature=True)
-
-
-async def dashboard_file_download(request: Request):
-    return stored_file_http_response(request, _base.file_store(), require_signature=False)
-
-
-async def tracking_click(request: Request):
-    token = str(request.path_params.get("token", ""))
-    try:
-        link = link_store().get_by_token(token)
-        destination = str(link.get("original_url") or "")
-        if not eligible_web_url(destination):
-            raise ValueError("Stored link destination is not an HTTP/HTTPS URL")
-    except Exception:
-        return PlainTextResponse("Not found", status_code=404, headers={"Cache-Control": "no-store"})
-
-    forwarded = request.headers.get("x-forwarded-for", "")
-    client_ip = forwarded.split(",", 1)[0].strip() if forwarded else ""
-    if not client_ip and request.client:
-        client_ip = request.client.host or ""
-    try:
-        link_store().record_click(
-            link,
-            user_agent=request.headers.get("user-agent", ""),
-            client_ip=client_ip,
-            country_code=request.headers.get("cf-ipcountry", ""),
-        )
-    except Exception:
-        _base.logger.info("Link click could not be recorded", exc_info=True)
-
-    response = RedirectResponse(destination, status_code=302)
-    response.headers["Cache-Control"] = "private, no-store, no-cache, max-age=0"
-    response.headers["Pragma"] = "no-cache"
-    return response
-
-
-def _tracking_dashboard_fragment(account_id: str | None = None) -> str:
-    summary = link_store().summary(account_id=account_id)
-    qualitative = summary.get("qualitative_estimate") or {}
-    share = qualitative.get("potential_provider_share") or {}
-    top = link_store().top_links(account_id=account_id, limit=20)
-    events = link_store().unified_events(account_id=account_id, limit=100)
-    top_rows = []
-    for row in top:
-        label = str(row.get("anchor_text") or row.get("destination_host") or row.get("original_url") or "")
-        top_rows.append(
-            "<tr>"
-            f"<td><code>{escape(str(row.get('link_id','')))}</code></td>"
-            f"<td>{escape(label)}</td>"
-            f"<td>{escape(str(row.get('destination_host','')))}</td>"
-            f"<td>{int(row.get('total_clicks') or 0)}</td>"
-            f"<td>{int(row.get('unique_clicks') or 0)}</td>"
-            f"<td>{int(row.get('unique_recipients') or 0)}</td>"
-            f"<td>{escape(str(row.get('first_click') or ''))}</td>"
-            f"<td>{escape(str(row.get('last_click') or ''))}</td></tr>"
-        )
-    if not top_rows:
-        top_rows.append('<tr><td colspan="8" class="muted">No link clicks recorded yet.</td></tr>')
-
-    event_rows = []
-    for row in events:
-        source = " / ".join(x for x in (str(row.get("country_code") or ""), str(row.get("client_source") or "")) if x)
-        browser_os = " / ".join(x for x in (str(row.get("browser") or ""), str(row.get("os") or "")) if x)
-        label = str(row.get("anchor_text") or row.get("destination_host") or "")
-        ua = str(row.get("user_agent") or "")[:180]
-        provider_class = str(row.get("provider_classification") or "")
-        provider_likelihood = str(row.get("provider_likelihood") if row.get("provider_likelihood") is not None else "")
-        provider_guess = str(row.get("provider_guess") or "")
-        reasons = "; ".join(str(x) for x in (row.get("classification_reasons") or []))
-        event_rows.append(
-            "<tr>"
-            f"<td><strong>{escape(str(row.get('event_type') or ''))}</strong></td>"
-            f"<td>{escape(str(row.get('recipient') or ''))}</td>"
-            f"<td>{escape(str(row.get('observed_at') or ''))}</td>"
-            f"<td>{escape(source)}</td><td>{escape(browser_os)}</td>"
-            f"<td>{escape(str(row.get('campaign_id') or ''))}<br><span class=\"muted\">{escape(str(row.get('delivery_id') or ''))}</span></td>"
-            f"<td>{escape(str(row.get('client_fingerprint') or ''))}</td>"
-            f"<td>{escape(provider_likelihood)}</td><td>{escape(provider_class)}</td><td>{escape(provider_guess)}</td>"
-            f"<td title=\"{escape(reasons, quote=True)}\">{escape(reasons[:180])}</td>"
-            f"<td>{escape(label)}</td><td>{escape(str(row.get('link_id') or ''))}</td>"
-            f"<td>{escape(str(row.get('destination_host') or ''))}</td>"
-            f"<td>{escape(str(row.get('position') if row.get('position') is not None else ''))}</td>"
-            f"<td title=\"{escape(str(row.get('user_agent') or ''), quote=True)}\">{escape(ua)}</td></tr>"
-        )
-    if not event_rows:
-        event_rows.append('<tr><td colspan="16" class="muted">No tracking events recorded yet.</td></tr>')
-
-    unique_clicks = int(summary.get("unique_clicks") or 0)
-    likely_provider = int(qualitative.get("likely_provider_unique_clicks") or 0)
-    human_or_unclassified = int(qualitative.get("likely_human_or_unclassified_unique_clicks") or 0)
-    uncertain = int(qualitative.get("uncertain_unique_clicks") or 0)
-    share_percent = float(share.get("percent") or 0.0)
-    suspects = qualitative.get("provider_suspects") or {}
-    suspect_text = ", ".join(f"{key}: {value}" for key, value in suspects.items()) or "none"
+    rows: list[str] = []
+    for field in _TASK_DETAIL_FIELDS:
+        value = detail.get(field)
+        if field == "payload":
+            try:
+                rendered = json.dumps(
+                    value if value is not None else {},
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                    default=str,
+                )
+            except Exception:
+                rendered = str(value)
+            cell = (
+                '<pre class="mono small" style="white-space:pre-wrap;overflow-wrap:anywhere;margin:0">'
+                + escape(rendered)
+                + "</pre>"
+            )
+        elif value is None or value == "":
+            cell = '<span class="muted">—</span>'
+        elif field == "description":
+            cell = (
+                '<div style="white-space:pre-wrap;overflow-wrap:anywhere">'
+                + escape(str(value))
+                + "</div>"
+            )
+        else:
+            cell = '<span class="mono">' + escape(str(value)) + "</span>"
+        rows.append(f"<tr><th>{escape(field)}</th><td>{cell}</td></tr>")
 
     return f"""
 <section class="card wide">
-<div class="panel-title"><h2>Qualitative click estimate</h2><span class="small muted">v9.4.1 query-time heuristic</span></div>
-<p class="small">Stable fingerprint uniques remain unchanged. Provider likelihood is recalculated from stored evidence and never deletes or rewrites raw events.</p>
-<p><strong>{unique_clicks}</strong> unique fingerprint clicks &nbsp;·&nbsp; <strong>{likely_provider}</strong> likely provider/proxy &nbsp;·&nbsp; <strong>{human_or_unclassified}</strong> likely human or unclassified &nbsp;·&nbsp; <strong>{uncertain}</strong> uncertain</p>
-<p class="small">Potential provider share: <strong>{likely_provider}/{unique_clicks}</strong> ({share_percent:.1f}%). Provider suspects: {escape(suspect_text)}. Confidence: {escape(str(qualitative.get('confidence') or 'low'))}.</p>
-</section>
-<section class="card wide">
-<div class="panel-title"><h2>Top links</h2><span class="small muted">v9.4 click analytics</span></div>
-<p class="small">Unique click = <code>delivery_id + link_id + client_fingerprint</code>. The qualitative classifier is an additive interpretation layer and does not change these totals.</p>
-<div class="scroll"><table><thead><tr><th>Link ID</th><th>Label</th><th>Destination host</th><th>Total</th><th>Unique</th><th>Recipients</th><th>First click</th><th>Last click</th></tr></thead><tbody>{''.join(top_rows)}</tbody></table></div>
-</section>
-<section class="card wide">
-<div class="panel-title"><h2>Tracking events</h2><span class="small muted">pixel / AMP / link</span></div>
-<div class="scroll"><table><thead><tr><th>Type</th><th>Recipient</th><th>Observed UTC</th><th>Country / source</th><th>Browser / OS</th><th>Campaign / delivery</th><th>Client fingerprint</th><th>Provider %</th><th>Classification</th><th>Provider guess</th><th>Reasons</th><th>Link label</th><th>Link ID</th><th>Destination</th><th>Position</th><th>User-Agent</th></tr></thead><tbody>{''.join(event_rows)}</tbody></table></div>
+<div class="panel-title"><h2>Task detail</h2><a href="{close_url}"><button type="button">Close</button></a></div>
+<div class="scroll"><table><tbody>{''.join(rows)}</tbody></table></div>
 </section>
 """
+
+
+def _task_dashboard_fragment(request: Request) -> str:
+    show_completed = request.query_params.get("show_completed") == "1"
+    listed = _base._safe_call(_base.scheduler().list_jobs, limit=1000)
+    all_jobs = listed if isinstance(listed, list) else []
+    visible_jobs = (
+        all_jobs
+        if show_completed
+        else [job for job in all_jobs if str(job.get("status") or "") != "completed"]
+    )
+
+    status_result = _base._safe_call(_base.scheduler().status)
+    job_counts = (
+        status_result.get("job_counts") or {}
+        if isinstance(status_result, dict)
+        else {}
+    )
+    completed_count = int(job_counts.get("completed") or 0)
+    stored_count = sum(int(value or 0) for value in job_counts.values())
+    if stored_count == 0 and all_jobs:
+        stored_count = len(all_jobs)
+        completed_count = sum(
+            1 for job in all_jobs if str(job.get("status") or "") == "completed"
+        )
+
+    due_result = _base._safe_call(_base.scheduler().list_due_jobs, limit=1000)
+    due_count = len(due_result) if isinstance(due_result, list) else 0
+
+    toggle_url = escape(
+        _task_dashboard_url(request, show_completed=not show_completed),
+        quote=True,
+    )
+    toggle_label = "Hide completed" if show_completed else f"Show completed ({completed_count})"
+    if show_completed:
+        count_text = (
+            f"{len(visible_jobs)} shown · {completed_count} completed · "
+            f"{due_count} due · {stored_count} stored"
+        )
+    else:
+        count_text = (
+            f"{len(visible_jobs)} shown · {completed_count} completed hidden · "
+            f"{due_count} due · {stored_count} stored"
+        )
+
+    job_rows: list[str] = []
+    for job in visible_jobs:
+        raw_id = str(job.get("id") or "")
+        job_id = escape(raw_id)
+        status = escape(str(job.get("status") or ""))
+        title = escape(str(job.get("title") or ""))
+        owner = escape(str(job.get("owner_id") or ""))
+        project = escape(str(job.get("project_id") or ""))
+        action = escape(str(job.get("action_type") or ""))
+        next_run = escape(str(job.get("next_run_utc") or "—"))
+        payload = job.get("payload") or {}
+        account_ref = (
+            escape(str(payload.get("account_id") or ""))
+            if isinstance(payload, dict)
+            else ""
+        )
+        view_url = escape(
+            _task_dashboard_url(
+                request,
+                show_completed=show_completed,
+                view_job=raw_id,
+            ),
+            quote=True,
+        )
+        buttons = f'<a href="{view_url}"><button type="button">View</button></a>'
+        if status == "paused":
+            buttons += f"""<form method="post" action="/dashboard/job/resume">
+<input type="hidden" name="csrf" value="{escape(_base._csrf_value())}"><input type="hidden" name="job_id" value="{job_id}">
+<button class="ok" type="submit">Resume</button></form>"""
+        elif status != "completed":
+            buttons += f"""<form method="post" action="/dashboard/job/pause">
+<input type="hidden" name="csrf" value="{escape(_base._csrf_value())}"><input type="hidden" name="job_id" value="{job_id}">
+<button type="submit">Pause</button></form>"""
+        account_note = (
+            f'<div class="small muted">account ref: <span class="mono">{account_ref}</span></div>'
+            if account_ref
+            else ""
+        )
+        job_rows.append(
+            f"""<tr>
+<td><strong>{title}</strong><div class="small muted mono">{job_id}</div></td>
+<td>{owner}<br><span class="muted">{project}</span>{account_note}</td>
+<td>{action}</td><td><span class="badge">{status}</span></td><td class="mono">{next_run}</td>
+<td class="actions">{buttons}</td></tr>"""
+        )
+
+    detail_html = _task_detail_html(request, show_completed=show_completed)
+    empty_text = (
+        "No tasks registered"
+        if show_completed
+        else "No non-completed tasks registered"
+    )
+    return f"""
+<section class="tab-panel" id="panel-scheduler" data-panel="scheduler">
+<div class="grid">
+{detail_html}
+<section class="card wide">
+<div class="panel-title"><h2>Task registry</h2><div class="row"><span class="badge">{escape(count_text)}</span><a href="{toggle_url}"><button type="button">{escape(toggle_label)}</button></a></div></div>
+<p class="small muted"><strong>No cron worker runs here.</strong> Dates and recurrence are stored only so an AI or user can query what is due. Tasks never send email or execute actions by themselves. Completed tasks remain stored; the default hiding on this page is WebGUI-only.</p>
+<div class="scroll"><table><thead><tr><th>Task</th><th>Owner / project</th><th>Type</th><th>Status</th><th>Due / next UTC</th><th></th></tr></thead>
+<tbody>{''.join(job_rows) or f'<tr><td colspan="6" class="muted">{escape(empty_text)}</td></tr>'}</tbody></table></div>
+</section>
+</div>
+</section>
+"""
+
+
+def _replace_task_dashboard(body: str, fragment: str) -> str:
+    start_marker = '<section class="tab-panel" id="panel-scheduler" data-panel="scheduler">'
+    end_marker = "\n<script>\n(() => {"
+    start = body.find(start_marker)
+    end = body.find(end_marker, start + 1) if start >= 0 else -1
+    if start < 0 or end < 0:
+        return body
+    return body[:start] + fragment + body[end:]
 
 
 async def dashboard_home(request: Request):
@@ -351,40 +251,28 @@ async def dashboard_home(request: Request):
         return response
     try:
         body = response.body.decode("utf-8")
-        fragment = _tracking_dashboard_fragment(request.query_params.get("account") or None)
-        marker = '<section class="card">\n<h2>Accuracy / privacy model</h2>'
-        if marker in body:
-            body = body.replace(marker, fragment + marker, 1)
-        elif "</main>" in body:
-            body = body.replace("</main>", fragment + "</main>", 1)
-        else:
-            body += fragment
-        return HTMLResponse(body, status_code=response.status_code)
+        body = _replace_task_dashboard(body, _task_dashboard_fragment(request))
+        return HTMLResponse(body, status_code=response.status_code, headers={
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() != "content-length"
+        })
     except Exception:
-        _base.logger.info("Could not augment tracking dashboard", exc_info=True)
+        _base.logger.info("Could not augment task dashboard", exc_info=True)
         return response
 
 
-_routes = _base.app.router.routes
-for index, route in enumerate(list(_routes)):
-    if isinstance(route, Route) and route.path == "/dashboard/files/{file_id}/download":
-        _routes[index] = Route("/dashboard/files/{file_id}/download", dashboard_file_download, methods=["GET", "HEAD"])
-    elif isinstance(route, Route) and route.path == "/":
-        _routes[index] = Route("/", dashboard_home, methods=["GET"])
+_routes = app.router.routes
+for _index, _route in enumerate(list(_routes)):
+    if isinstance(_route, Route) and _route.path == "/":
+        _routes[_index] = Route("/", dashboard_home, methods=["GET"])
+        break
 
-mount_index = next((i for i, route in enumerate(_routes) if isinstance(route, Mount)), len(_routes))
-if not any(isinstance(route, Route) and route.path == "/t/c/{token}" for route in _routes):
-    _routes.insert(mount_index, Route("/t/c/{token}", tracking_click, methods=["GET"]))
-    mount_index += 1
-if not any(isinstance(route, Route) and route.path == "/files/{file_id}" for route in _routes):
-    _routes.insert(mount_index, Route("/files/{file_id}", public_stored_file_download, methods=["GET", "HEAD"]))
-
-app = _base.app
-
-for _name in dir(_base):
-    if _name.startswith("_") or _name in globals():
-        continue
-    globals()[_name] = getattr(_base, _name)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host=os.getenv("MCP_HOST", "0.0.0.0"), port=int(os.getenv("MCP_PORT", "8000")), log_level="info")
+    uvicorn.run(
+        app,
+        host=os.getenv("MCP_HOST", "0.0.0.0"),
+        port=int(os.getenv("MCP_PORT", "8000")),
+        log_level="info",
+    )

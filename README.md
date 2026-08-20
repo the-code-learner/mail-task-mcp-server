@@ -44,7 +44,7 @@ The important v9 changes are:
 - improved MIME parsing for forwarded mail and HTML-heavy messages;
 - CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning;
 - persistent small-file storage plus native ChatGPT file inputs in v9.2;
-- task list/detail UX with completed tasks hidden by default and explicit retrieval in v9.4.3;
+- WebGUI-only task list/detail UX in v9.4.4, while the public task MCP/API contract is restored to v9.4.2 compatibility;
 - semantic release history through `VERSION`, `CHANGELOG.md` and immutable `vX.Y.Z` release tags.
 
 ---
@@ -450,18 +450,18 @@ Review Junk and restore genuine false positives.
 Check unread mail and summarize messages requiring attention.
 ```
 
-From v9.4.3 the task read UX mirrors the Memory/Skill list/detail pattern. Completed tasks remain stored with the persistent status `completed`, but they are hidden from the normal list unless the caller asks for them explicitly:
+v9.4.4 deliberately restores the public task MCP/API behavior to the v9.4.2 contract:
 
 ```text
-list_jobs()                         -> non-completed tasks only
-list_jobs(include_completed=true)   -> non-completed + completed tasks
-list_jobs(status="completed")       -> completed tasks explicitly
-get_job(job_id)                     -> complete record for one task
+list_jobs(owner_id=None, project_id=None, status=None, limit=200)
+get_job(job_id)
 ```
 
-`list_jobs` returns one structured MCP result with `{ok, count, jobs}`. The individual job objects keep their existing fields for compatibility, while `get_job` is the full detail view with owner/project, description, action type, execution profile, schedule, approval mode, status, timestamps, last error and payload. Owner/project/status filters still combine normally, and the result `limit` is applied after completed tasks are excluded.
+There is no `include_completed` parameter. `list_jobs()` includes completed tasks by default, an explicit `status="completed"` filter still selects completed records, and the MCP output uses the same pre-v9.4.3 serialization rather than a `{ok, count, jobs}` wrapper. `get_job` is not new in v9.4.4; it is the original read-only v9.4.2 task lookup and is registered only once.
 
-Hiding a completed task is presentation only: no record is renamed to `done`, archived, deleted or migrated. `scheduler_status` still counts completed tasks, and `get_job` can read a completed task directly by ID. The server persists the task state; the AI client performs the reasoning and explicit action.
+The completed-task UX now exists **only in the WebGUI**. On the Tasks page, rows with the persistent status `completed` are hidden by default, `Show completed (N)` reveals them, and `Hide completed` returns to the default view. Each displayed task has a `View` action, and the detail view shows the complete stored task record including owner/project, description, action type, execution profile, schedule, approval mode, status, timestamps, last error and safely rendered payload. A completed task can be opened directly with the dashboard-local `view_job=<id>` query even while completed rows are hidden from the list.
+
+Hiding a completed task is presentation only: no record is renamed to `done`, archived, deleted or migrated. `scheduler_status` still counts completed tasks, MCP callers still receive them from the default `list_jobs()`, and the server remains a passive task registry; the AI client performs the reasoning and explicit action.
 
 ---
 
@@ -618,113 +618,3 @@ v9 keeps the same practical deployment goal — **paste one YAML into Portainer*
 Persistent data remains under `/data`; migrating an existing installation should preserve the data volume and its encryption keys.
 
 Before replacing a working v8.7 deployment, back up the persistent data volume and test v9 against your real mailboxes and reverse-proxy configuration.
-
----
-
-# Privacy and public distribution
-
-The public repository intentionally contains no mailbox credentials, private recipient allowlists, personal domains, private project context or conversation data.
-
-The compact semantic model is derived only from a public Apache-2.0 source model and contains no user-specific training data.
-
-Deployment-specific secrets belong in your private Portainer stack or secret-management layer, not in the public repository.
-
----
-
-# License
-
-Apache License 2.0. See:
-
-```text
-LICENSE
-NOTICE
-```
-
-
-## v9.1 small-file store
-
-v9.1 adds a private persistent store for small reference files. Metadata is kept in SQLite while file bytes are stored as SHA-256-addressed blobs under `/data/files`, so user-provided filenames never become filesystem paths. The default public stack limits individual files to 1 MiB, the logical store to 100 MiB and 1000 records; hard application caps prevent accidentally configuring unbounded values.
-
-MCP clients can save UTF-8 text directly or binary data as base64, list scoped metadata, read text with a character budget, retrieve binary content as base64, update metadata and delete files. Owner/project scopes reuse the scheduler registry. The WebGUI has a Files tab for upload, download and deletion. Downloads are forced as attachments with `X-Content-Type-Options: nosniff`; Postmaster never executes stored content and does not expose public file URLs.
-
-The file store is intentionally separate from Knowledge in v9.1. Uploading a document does not automatically inject it into semantic context; a later version can add explicit opt-in document extraction/indexing without making arbitrary uploads part of prompts by default.
-
----
-
-# Versioning and updates
-
-Stable Postmaster releases use Semantic Versioning and are recorded in `CHANGELOG.md`. The repository `VERSION` file contains the application version, while GitHub release tags use `vX.Y.Z`.
-
-For a Portainer deployment:
-
-```text
-POSTMASTER_VERSION=latest   -> follow the latest stable GitHub Release on restart
-POSTMASTER_VERSION=v9.2.0  -> stay pinned to that exact release
-POSTMASTER_VERSION=<SHA>   -> stay pinned to an immutable commit
-```
-
-`build_status` reports the application `version`, the resolved running `build`, and the `requested_version` policy so an MCP client can distinguish `latest` from the concrete release actually running.
-
-# Native ChatGPT file upload (v9.2)
-
-The portable MCP `save_file(content_base64=...)` tool remains available. ChatGPT clients can instead use `save_uploaded_file` or `save_uploaded_files`; those tools declare `_meta["openai/fileParams"]`, so ChatGPT passes temporary authorized file download objects rather than forcing large Base64 strings through model context.
-
-Remote downloads are HTTPS-only, bounded by the same per-file store limit while streaming, limited in redirects and timeout, checked against non-public address resolution, and then stored through the same SHA-256 content-addressed `FileStore`. Uploaded content is never executed or automatically added to semantic Knowledge.
-
-# Native Postmaster file handoff (v9.3)
-
-v9.3 completes the reverse path from Postmaster to MCP clients. `get_stored_file_resource(file_id, transport="auto")` returns a real MCP `ResourceLink` content block using the canonical FileStore `file_id`; constructing the link reads metadata only and does not serialize the link into text or load the stored blob.
-
-The preferred hierarchy is native ResourceLink/file reference, signed HTTPS streaming, MCP `resources/read`, Base64 fallback, and inline Base64 only as a last resort. `postmaster://files/{file_id}` is registered as a resource template, and the SDK turns returned bytes into protocol `BlobResourceContents` when a client follows the MCP resource.
-
-`GET` and `HEAD /files/{file_id}` provide temporary HMAC-signed HTTPS capabilities with byte-range support. The HTTP path streams the original content-addressed blob directly: it does not resize, recompress, transcode, Base64-encode, or create a second transfer copy.
-
-The existing `PUBLIC_MCP_HOST` is reused as the normal HTTPS base for the same service, so the public `postmaster-mcp.yml` does not need new required variables. Advanced deployments may optionally override the file base or signing behavior with `FILE_STORE_PUBLIC_BASE_URL`, `FILE_STORE_DOWNLOAD_SECRET`, and `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS`; otherwise the signing secret is generated once and persisted at `/data/file-store-download.secret` and the TTL defaults to 900 seconds.
-
-An existing stack with `POSTMASTER_VERSION=latest` can therefore receive v9.3 by restarting after the stable release is published. If the external access layer protects the full app, ensure the signed `/files/*` route is reachable according to the deployment's proxy policy without weakening protection for `/mcp`, the dashboard, or unrelated routes.
-
-See `docs/FILE_HANDOFF.md` for the handoff hierarchy, security model, signed URL behavior and deployment details.
-
-# Per-link tracking and clean Sent copies (v9.4)
-
-v9.4 adds per-link HTTP/HTTPS click telemetry to the existing tracked-delivery pipeline while leaving the existing `/track/open/*` pixel behavior unchanged. Eligible recipient HTML anchors are rewritten to opaque URLs under:
-
-```text
-/t/c/<token>
-```
-
-The random token identifies a server-side link occurrence; recipient data and destination URLs are not encoded into it. The click endpoint resolves the stored record, records a `link` event with the existing country/source/browser/OS/User-Agent/client-fingerprint enrichment and immediately redirects to the exact stored `original_url`. Query parameters supplied to `/t/c/<token>` are never accepted as redirect destinations.
-
-The v9.4 unique-click definition is:
-
-```text
-delivery_id + link_id + client_fingerprint
-```
-
-Analytics expose total clicks, unique clicks, unique recipients, first/last click, destination host, per-campaign/per-delivery/per-link filtering and top links. Existing `tracking_status` and `get_tracking_campaign` are extended, while `get_tracking_summary`, `list_tracking_links` and `list_tracking_events` provide read-only link/event queries. Opaque tracking tokens are not returned by list/dashboard APIs.
-
-Recipient and Sent MIME are now generated separately from the same canonical body and attachment inputs. The recipient copy keeps the existing tracking pixel and tracked URLs; the archived Sent copy keeps original URLs and contains no active recipient pixel or `/t/c/<token>`. `Message-ID`, Date and normal threading headers are preserved and attachments reuse the same original bytes. This prevents sender self-opens/self-clicks from being attributed to the recipient for messages generated by v9.4+.
-
-The single-YAML bootstrap is unchanged. With `POSTMASTER_VERSION=latest` and `POSTMASTER_CHECK_UPDATES_ON_START=true`, restart the stack after the stable release is published.
-
-Cloudflare Access is external to the container. Keep the existing public bypasses for `/track/open/*` and `/api/amp/*`, and add exactly one new public bypass required by v9.4:
-
-```text
-/t/c/*
-```
-
-Do not expose `/mcp`, dashboard/admin/private APIs, mail/task/memory/skill/file-management endpoints or tracking analytics. The pre-existing v9.3 signed `/files/*` handoff remains a separate deployment-policy concern and is not added automatically as part of v9.4.
-
-See `docs/LINK_TRACKING.md` for architecture, schema, Sent-clean behavior, analytics and the live Cloudflare preflight.
-
-# Explicit reply/follow-up semantics (v9.4.2)
-
-v9.4.2 prevents outbound messages from accidentally being replied back to the sender account. `reply_email` / `create_reply_draft` are inbound-only semantics, while `follow_up_email` / `create_follow_up_draft` operate on outbound/Sent messages and reuse the original visible recipients after sender-identity filtering. Source Bcc is never recovered.
-
-Tracked follow-ups reuse the v9.4 dual-MIME pipeline: recipient copies may contain the configured open/link instrumentation, while archived Sent copies keep original URLs and omit active recipient pixel, click-tracking URLs and recipient AMP callbacks. Visible `To` / `Cc`, threading headers and attachment bytes remain consistent. No new environment variables, ports, volumes, callback paths or Portainer YAML changes are required.
-
-# Task list/detail UX (v9.4.3)
-
-v9.4.3 makes task reads behave more like persistent Memory and Skill reads. `list_jobs()` is now the scannable list view and hides stored `completed` tasks by default; callers can opt back into all records with `include_completed=true` or request completed tasks directly with `status="completed"`. The persisted database value remains `completed` and is never renamed to `done`.
-
-`get_job(job_id)` is the full read-only detail view and remains able to open a completed task directly. The list response is a single structured `{ok, count, jobs}` envelope while each job record preserves its existing fields. Completed rows remain in the registry and remain part of `scheduler_status` counts. No task-state migration or deployment configuration change is required.

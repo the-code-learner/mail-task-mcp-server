@@ -2,6 +2,25 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.4 - 2026-08-20
+
+### Fixed
+- Restored the public task MCP/API contract to v9.4.2 compatibility. `list_jobs(owner_id=None, project_id=None, status=None, limit=200)` again has no `include_completed` parameter, includes `status=completed` records by default, and uses the pre-v9.4.3 MCP serialization without the `{ok, count, jobs}` wrapper.
+- Restored `SchedulerEngine.list_jobs` to the v9.4.2 signature and semantics. Completed-task visibility is no longer a scheduler/backend default and explicit owner/project/status filters behave as they did in v9.4.2.
+- Removed the duplicate runtime `get_job` registration that could log `Tool already exists: get_job`. The original read-only `get_job(job_id)` tool from v9.4.2 remains the single canonical registration.
+- Removed the v9.4.3 `build_status.task_detail_view` and `build_status.completed_tasks_hidden_by_default` capability flags, because completed visibility/detail is now strictly a WebGUI presentation concern.
+
+### Added
+- WebGUI-only Tasks filtering: completed tasks remain in the database and MCP results, but the Tasks page hides them by default and offers `Show completed (N)` / `Hide completed` controls.
+- A `View` action for every displayed task and a read-only task-detail panel showing id, owner/project, title/description, action type, execution profile, schedule, timezone, approval mode, status, timestamps, last error and safely rendered payload.
+- Dashboard-local `show_completed=1` and `view_job=<id>` navigation that preserves the Tasks tab. A completed task can be opened directly by ID even while completed rows remain hidden from the default list.
+- Regression coverage for the v9.4.2 MCP schema/output contract, completed visibility in MCP versus WebGUI, single `get_job` registration, safe detail rendering, counts, Pause/Resume, scheduler status, due jobs, completion and recurring advancement.
+
+### Compatibility / deployment
+- `create_job`, `update_job`, `pause_job`, `resume_job`, `complete_job`, `delete_job`, `get_job_history`, `list_due_jobs`, `scheduler_status`, recurrence advancement, approval/security and persistent task storage are unchanged.
+- No scheduler/database migration, environment variable, port, volume or Cloudflare rule is introduced.
+- `postmaster-mcp.yml` remains byte-for-byte unchanged. Existing `POSTMASTER_VERSION=latest` deployments with update checks enabled can select v9.4.4 with the normal restart/redeploy after the stable release is published.
+
 ## 9.4.3 - 2026-08-20
 
 ### Added
