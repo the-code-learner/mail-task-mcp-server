@@ -669,7 +669,7 @@ class SchedulerEngine:
         with self._connect() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
-            raise SchedulerError(f"Unknown job: {job_id}")
+            raise SchedulerError(f"Job not found: {job_id}")
         return self._row_to_job(row)
 
     def list_jobs(
@@ -679,6 +679,7 @@ class SchedulerEngine:
         project_id: str | None = None,
         status: str | None = None,
         limit: int = 200,
+        include_completed: bool = False,
     ) -> list[dict[str, Any]]:
         limit = max(1, min(limit, 1000))
         q = "SELECT * FROM jobs"
@@ -695,6 +696,9 @@ class SchedulerEngine:
                 raise SchedulerError(f"Unknown status: {status}")
             clauses.append("status=?")
             args.append(status)
+        elif not include_completed:
+            clauses.append("status<>?")
+            args.append("completed")
         if clauses:
             q += " WHERE " + " AND ".join(clauses)
         q += " ORDER BY COALESCE(next_run_utc, '9999') ASC, created_at DESC LIMIT ?"
