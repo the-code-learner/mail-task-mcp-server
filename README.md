@@ -44,6 +44,7 @@ The important v9 changes are:
 - improved MIME parsing for forwarded mail and HTML-heavy messages;
 - CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning;
 - persistent small-file storage plus native ChatGPT file inputs in v9.2;
+- task list/detail UX with completed tasks hidden by default and explicit retrieval in v9.4.3;
 - semantic release history through `VERSION`, `CHANGELOG.md` and immutable `vX.Y.Z` release tags.
 
 ---
@@ -449,7 +450,18 @@ Review Junk and restore genuine false positives.
 Check unread mail and summarize messages requiring attention.
 ```
 
-The server persists the task state; the AI client performs the reasoning and explicit action.
+From v9.4.3 the task read UX mirrors the Memory/Skill list/detail pattern. Completed tasks remain stored with the persistent status `completed`, but they are hidden from the normal list unless the caller asks for them explicitly:
+
+```text
+list_jobs()                         -> non-completed tasks only
+list_jobs(include_completed=true)   -> non-completed + completed tasks
+list_jobs(status="completed")       -> completed tasks explicitly
+get_job(job_id)                     -> complete record for one task
+```
+
+`list_jobs` returns one structured MCP result with `{ok, count, jobs}`. The individual job objects keep their existing fields for compatibility, while `get_job` is the full detail view with owner/project, description, action type, execution profile, schedule, approval mode, status, timestamps, last error and payload. Owner/project/status filters still combine normally, and the result `limit` is applied after completed tasks are excluded.
+
+Hiding a completed task is presentation only: no record is renamed to `done`, archived, deleted or migrated. `scheduler_status` still counts completed tasks, and `get_job` can read a completed task directly by ID. The server persists the task state; the AI client performs the reasoning and explicit action.
 
 ---
 
@@ -710,3 +722,9 @@ See `docs/LINK_TRACKING.md` for architecture, schema, Sent-clean behavior, analy
 v9.4.2 prevents outbound messages from accidentally being replied back to the sender account. `reply_email` / `create_reply_draft` are inbound-only semantics, while `follow_up_email` / `create_follow_up_draft` operate on outbound/Sent messages and reuse the original visible recipients after sender-identity filtering. Source Bcc is never recovered.
 
 Tracked follow-ups reuse the v9.4 dual-MIME pipeline: recipient copies may contain the configured open/link instrumentation, while archived Sent copies keep original URLs and omit active recipient pixel, click-tracking URLs and recipient AMP callbacks. Visible `To` / `Cc`, threading headers and attachment bytes remain consistent. No new environment variables, ports, volumes, callback paths or Portainer YAML changes are required.
+
+# Task list/detail UX (v9.4.3)
+
+v9.4.3 makes task reads behave more like persistent Memory and Skill reads. `list_jobs()` is now the scannable list view and hides stored `completed` tasks by default; callers can opt back into all records with `include_completed=true` or request completed tasks directly with `status="completed"`. The persisted database value remains `completed` and is never renamed to `done`.
+
+`get_job(job_id)` is the full read-only detail view and remains able to open a completed task directly. The list response is a single structured `{ok, count, jobs}` envelope while each job record preserves its existing fields. Completed rows remain in the registry and remain part of `scheduler_status` counts. No task-state migration or deployment configuration change is required.
