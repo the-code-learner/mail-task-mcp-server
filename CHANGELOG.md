@@ -2,6 +2,26 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.3 - 2026-08-20
+
+### Added
+- New read-only MCP tool `get_job(job_id)` as the task-detail equivalent of `get_memory` / `get_skill`, returning the complete stored task record including schedule, status, timestamps, errors, execution-profile reference and decoded payload.
+- `list_jobs(..., include_completed=False)` visibility control. Completed tasks are hidden by default, while `include_completed=true` restores the combined active + completed view and an explicit `status="completed"` filter always returns completed tasks.
+- Structured MCP list serialization for tasks as one `{ok, count, jobs}` result instead of a concatenation of individual JSON objects. Existing job record fields are preserved inside `jobs` for compatibility.
+- `build_status.task_detail_view=true` and `build_status.completed_tasks_hidden_by_default=true` capability reporting.
+- Regression coverage for default/explicit completed visibility, status and owner/project filters, post-filter limits, full task detail, not-found handling, persistence/counting of completed records, due-task behavior, create/complete behavior, recurring advancement and MCP serialization.
+
+### Changed
+- `list_jobs()` now treats `completed` as a read-time visibility filter only. The persisted status remains `completed`; completed records are not renamed, deleted, archived or migrated.
+- The task-list `limit` is applied after completed-task visibility and all explicit owner/project/status filters, so hidden completed rows cannot consume the requested result limit.
+- The dashboard's normal task listing inherits the same default completed-task hiding through the shared scheduler list implementation.
+
+### Compatibility / deployment
+- `create_job`, `complete_job`, recurring schedule advancement, `list_due_jobs`, approval/security behavior, task persistence and registry-only scheduler execution semantics are unchanged. `scheduler_status` continues to count completed records.
+- No scheduler database migration is required and existing task records/payloads remain readable through `get_job`.
+- `postmaster-mcp.yml` remains unchanged: no new environment variables, ports, volumes, bootstrap logic or Cloudflare changes are required.
+- Deployments using `POSTMASTER_VERSION=latest` with update checks enabled can select v9.4.3 through the normal restart/redeploy after the stable release is published.
+
 ## 9.4.2 - 2026-08-20
 
 ### Added
