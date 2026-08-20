@@ -44,7 +44,7 @@ The important v9 changes are:
 - improved MIME parsing for forwarded mail and HTML-heavy messages;
 - CI coverage for the bootstrap, MIME parser, knowledge store and semantic-model provisioning;
 - persistent small-file storage plus native ChatGPT file inputs in v9.2;
-- task list/detail UX with completed tasks hidden by default and explicit retrieval in v9.4.3;
+- WebGUI-only task list/detail UX in v9.4.4, while the public task MCP/API contract is restored to v9.4.2 compatibility;
 - semantic release history through `VERSION`, `CHANGELOG.md` and immutable `vX.Y.Z` release tags.
 
 ---
@@ -450,18 +450,18 @@ Review Junk and restore genuine false positives.
 Check unread mail and summarize messages requiring attention.
 ```
 
-From v9.4.3 the task read UX mirrors the Memory/Skill list/detail pattern. Completed tasks remain stored with the persistent status `completed`, but they are hidden from the normal list unless the caller asks for them explicitly:
+v9.4.4 deliberately restores the public task MCP/API behavior to the v9.4.2 contract:
 
 ```text
-list_jobs()                         -> non-completed tasks only
-list_jobs(include_completed=true)   -> non-completed + completed tasks
-list_jobs(status="completed")       -> completed tasks explicitly
-get_job(job_id)                     -> complete record for one task
+list_jobs(owner_id=None, project_id=None, status=None, limit=200)
+get_job(job_id)
 ```
 
-`list_jobs` returns one structured MCP result with `{ok, count, jobs}`. The individual job objects keep their existing fields for compatibility, while `get_job` is the full detail view with owner/project, description, action type, execution profile, schedule, approval mode, status, timestamps, last error and payload. Owner/project/status filters still combine normally, and the result `limit` is applied after completed tasks are excluded.
+There is no `include_completed` parameter. `list_jobs()` includes completed tasks by default, an explicit `status="completed"` filter still selects completed records, and the MCP output uses the same pre-v9.4.3 serialization rather than a `{ok, count, jobs}` wrapper. `get_job` is not new in v9.4.4; it is the original read-only v9.4.2 task lookup and is registered only once.
 
-Hiding a completed task is presentation only: no record is renamed to `done`, archived, deleted or migrated. `scheduler_status` still counts completed tasks, and `get_job` can read a completed task directly by ID. The server persists the task state; the AI client performs the reasoning and explicit action.
+The completed-task UX now exists **only in the WebGUI**. On the Tasks page, rows with the persistent status `completed` are hidden by default, `Show completed (N)` reveals them, and `Hide completed` returns to the default view. Each displayed task has a `View` action, and the detail view shows the complete stored task record including owner/project, description, action type, execution profile, schedule, approval mode, status, timestamps, last error and safely rendered payload. A completed task can be opened directly with the dashboard-local `view_job=<id>` query even while completed rows are hidden from the list.
+
+Hiding a completed task is presentation only: no record is renamed to `done`, archived, deleted or migrated. `scheduler_status` still counts completed tasks, MCP callers still receive them from the default `list_jobs()`, and the server remains a passive task registry; the AI client performs the reasoning and explicit action.
 
 ---
 
