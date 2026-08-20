@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from html import escape
+from typing import Any
 
 import uvicorn
 from mcp.types import CallToolResult
@@ -38,11 +39,69 @@ def build_status():
     status["link_tracking"] = True
     status["sent_copy_tracking_sanitized"] = True
     status["provider_qualitative_classification"] = True
+    status["explicit_reply_follow_up_modes"] = True
+    status["follow_up_email"] = True
+    status["follow_up_draft"] = True
     return status
 
 mcp.remove_tool("build_status")
 mcp.add_tool(build_status, name="build_status")
 _base.build_status = build_status
+
+
+@mcp.tool()
+def follow_up_email(
+    mailbox: str,
+    uid: str,
+    body: str = "",
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    body_html: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    track_opens: bool | None = None,
+    campaign_id: str | None = None,
+    account_id: str | None = None,
+):
+    """
+    WRITE ACTION. Threaded follow-up to an outbound/Sent message from the selected account.
+
+    The original visible To/Cc recipients are reused after removing the sender account and
+    configured account identities. Original Bcc is never rediscovered or exposed. Inbound
+    messages are rejected and should use reply_email instead.
+
+    Tracking follows the same account-default/explicit override semantics and the same v9.4
+    recipient/Sent-clean pipeline as send_email and reply_email.
+    """
+    return _base._safe_call(
+        mail_client(account_id).follow_up_email,
+        mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
+        body_html=body_html, attachments=attachments,
+        track_opens=track_opens, campaign_id=campaign_id,
+    )
+
+
+@mcp.tool()
+def create_follow_up_draft(
+    mailbox: str,
+    uid: str,
+    body: str = "",
+    cc: list[str] | None = None,
+    bcc: list[str] | None = None,
+    body_html: str | None = None,
+    attachments: list[dict[str, Any]] | None = None,
+    account_id: str | None = None,
+):
+    """
+    WRITE ACTION. Save a threaded follow-up draft for an outbound/Sent message.
+
+    The draft reuses the original visible To/Cc after sender/alias filtering, never recovers
+    original Bcc, and rejects inbound messages so reply/follow-up semantics stay explicit.
+    """
+    return _base._safe_call(
+        mail_client(account_id).create_follow_up_draft,
+        mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
+        body_html=body_html, attachments=attachments,
+    )
 
 
 @mcp.tool()

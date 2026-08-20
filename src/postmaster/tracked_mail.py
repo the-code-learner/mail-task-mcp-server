@@ -14,6 +14,8 @@ from .email_analytics import analytics_store
 from .link_tracking import link_store
 from .mail_bridge import MailBridgeError
 from .mail_extensions import EnhancedMailClient, _plain_to_html
+from .thread_recipients import ThreadRecipientsMixin
+
 
 def _sent_clean_html(body_html: str, delivery: dict[str, Any]) -> str:
     """Render recipient-visible placeholders without retaining recipient telemetry URLs."""
@@ -42,7 +44,7 @@ def _synchronize_transport_headers(outbound: EmailMessage, sent_copy: EmailMessa
         sent_copy[header] = str(outbound[header])
 
 
-class LinkTrackingMailClient(EnhancedMailClient):
+class LinkTrackingMailClient(ThreadRecipientsMixin, EnhancedMailClient):
     """v9.4 delivery variant: tracked recipient MIME plus clean archived Sent MIME."""
 
     def _send_message_with_clean_sent(self, outbound: EmailMessage, sent_copy: EmailMessage, recipients: list[str]) -> dict[str, Any]:
