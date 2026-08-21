@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import contextlib
+import os
 import smtplib
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from postmaster.delivery_reliability import ReliabilityStore, RetryPolicy, ThrottleController
 from postmaster.mail_bridge import MailBridgeError, Settings
@@ -15,8 +18,19 @@ class DummyFileStore:
 
 
 class CaptureClient(PostmasterV950MailClient):
+    @staticmethod
+    def _captured_result(msg, recipients):
+        return {
+            "sent": True,
+            "to": list(recipients),
+            "captured_headers": {name.lower(): str(value) for name, value in msg.items()},
+        }
+
+    def _send_message(self, msg, recipients):
+        return self._captured_result(msg, recipients)
+
     def _send_individualized(self, **kwargs):
-        msg, _, _ = self._build_message(
+        msg, recipients, _ = self._build_message(
             to=kwargs["to"],
             cc=kwargs.get("cc"),
             subject=kwargs["subject"],
@@ -27,11 +41,9 @@ class CaptureClient(PostmasterV950MailClient):
             in_reply_to=kwargs.get("in_reply_to", ""),
             references=kwargs.get("references", ""),
         )
-        return {
-            "sent": True,
-            "captured_headers": {name.lower(): str(value) for name, value in msg.items()},
-            "tracked": bool(kwargs.get("track_opens")),
-        }
+        result = self._captured_result(msg, recipients)
+        result["tracked"] = bool(kwargs.get("track_opens"))
+        return result
 
 
 class FakeSMTP:
@@ -73,7 +85,13 @@ class FakeSMTP:
 class ClientFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        db = str(Path(self.tmp.name) / "analytics.db")
+        root = Path(self.tmp.name)
+        db = str(root / "analytics.db")
+        self.env = patch.dict(
+            os.environ,
+            {"RECIPIENT_POLICY_DB_PATH": str(root / "mail_policy.db")},
+        )
+        self.env.start()
         self.store = ReliabilityStore(db_path=db)
         self.settings = Settings(
             email_address="sender@example.com",
@@ -89,6 +107,7 @@ class ClientFixture(unittest.TestCase):
         )
 
     def tearDown(self):
+        self.env.stop()
         self.tmp.cleanup()
 
     def client(self, cls=PostmasterV950MailClient, **kwargs):
@@ -112,8 +131,7 @@ class NewsletterTests(ClientFixture):
             body="body",
             track_opens=False,
         )
-        headers = result["captured_headers"] if "captured_headers" in result else {}
-        # Non-tracked sends use the group transport, so validate the MIME builder directly.
+        self.assertTrue(result["sent"])
         with client._delivery_options():
             msg, _, _ = client._build_message(to=["person@example.net"], subject="hello", body="body")
         self.assertNotIn("List-Unsubscribe", msg)
@@ -175,8 +193,7 @@ class NewsletterTests(ClientFixture):
             unsubscribe_url="https://example.com/u/abc",
             one_click_unsubscribe=True,
         )
-        # Ordinary non-tracked path does not go through CaptureClient override, so
-        # inspect the builder under the same explicit context.
+        self.assertTrue(result["sent"])
         with client._delivery_options(
             newsletter_mode=True,
             unsubscribe_url="https://example.com/u/abc",
@@ -214,13 +231,13 @@ class SMTPTransportTests(ClientFixture):
         client = self.client()
         smtp = FakeSMTP(features={"dsn":"", "size":"100000", "auth":"PLAIN"})
         client._smtp_connect = lambda: (smtp, "plain")
-        token = _DELIVERY_ID.set("delivery-123")
-        try:
-            with client._delivery_options():
+        with client._delivery_options():
+            token = _DELIVERY_ID.set("delivery-123")
+            try:
                 msg, recipients, _ = client._build_message(to=["person@example.net"], subject="hello", body="body")
                 result = client._send_message(msg, recipients)
-        finally:
-            _DELIVERY_ID.reset(token)
+            finally:
+                _DELIVERY_ID.reset(token)
         self.assertTrue(result["dsn_supported"])
         self.assertIn("ENVID=delivery-123", smtp.mail_calls[0][1])
         self.assertIn("NOTIFY=FAILURE,DELAY", smtp.rcpt_calls[0][1])
@@ -231,13 +248,13 @@ class SMTPTransportTests(ClientFixture):
         client = self.client()
         smtp = FakeSMTP(features={"dsn":""})
         client._smtp_connect = lambda: (smtp, "plain")
-        token = _DELIVERY_ID.set("delivery-123")
-        try:
-            with client._delivery_options(dsn_notify_success=True):
+        with client._delivery_options(dsn_notify_success=True):
+            token = _DELIVERY_ID.set("delivery-123")
+            try:
                 msg, recipients, _ = client._build_message(to=["person@example.net"], subject="hello", body="body")
                 client._send_message(msg, recipients)
-        finally:
-            _DELIVERY_ID.reset(token)
+            finally:
+                _DELIVERY_ID.reset(token)
         self.assertIn("NOTIFY=FAILURE,DELAY,SUCCESS", smtp.rcpt_calls[0][1])
 
     def test_dsn_unsupported_falls_back_without_error(self):
@@ -295,6 +312,31 @@ class SMTPTransportTests(ClientFixture):
                 msg, recipients, _ = client._build_message(to=["person@example.net"], subject="hello", body="body")
                 client._send_message(msg, recipients)
         self.assertEqual(called, [])
+
+
+class InboundSearchTests(ClientFixture):
+    def test_process_inbound_changes_uses_uid_search_criteria_arguments(self):
+        client = self.client()
+        calls = []
+
+        class FakeIMAP:
+            def uid(self, *args):
+                calls.append(args)
+                return "OK", [b""]
+
+        fake = FakeIMAP()
+
+        @contextlib.contextmanager
+        def fake_imap():
+            yield fake
+
+        client._imap = fake_imap
+        client._select = lambda *args, **kwargs: None
+        client._inbound_highwater["sender"] = 10
+        result = client.process_inbound_changes()
+        self.assertEqual(calls, [("SEARCH", None, "UID", "11:*")])
+        self.assertFalse(result["initialized"])
+        self.assertEqual(result["highwater_uid"], 10)
 
 
 if __name__ == "__main__":
