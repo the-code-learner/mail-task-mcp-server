@@ -6,6 +6,7 @@ import uvicorn
 
 from . import runtime_core as _core
 from .runtime_v946 import install_runtime_v946
+from .runtime_v950 import install_runtime_v950
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 
@@ -28,6 +29,9 @@ def _task_dashboard_fragment(request):
 dashboard_home = install_webgui_v945(app, _base, _core.dashboard_home)
 dashboard_home, build_status, mail_client = install_runtime_v946(
     app, _base, _core, dashboard_home
+)
+dashboard_home, build_status, mail_client = install_runtime_v950(
+    app, _base, _core, dashboard_home, build_status
 )
 link_store = _core.link_store
 
