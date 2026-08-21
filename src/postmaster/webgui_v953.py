@@ -7,7 +7,7 @@ from urllib.parse import urlencode
 
 from starlette.background import BackgroundTask
 from starlette.requests import Request
-from starlette.responses import RedirectResponse
+from starlette.responses import PlainTextResponse, RedirectResponse
 from starlette.routing import Mount, Route
 
 from . import runtime_control
@@ -82,8 +82,16 @@ def _selected_account_id(base: Any, request: Request) -> tuple[list[dict[str, An
     return accounts, requested if requested in valid else _default_account_id(accounts)
 
 
-def _account_select(accounts: list[dict[str, Any]], selected: str | None, *, name: str = "account_id") -> str:
+def _account_select(
+    accounts: list[dict[str, Any]],
+    selected: str | None,
+    *,
+    name: str = "account_id",
+    include_all: bool = False,
+) -> str:
     options = []
+    if include_all:
+        options.append(f'<option value=""{" selected" if selected is None else ""}>All accounts</option>')
     for row in accounts:
         account_id = _account_id(row)
         if not account_id:
@@ -282,7 +290,7 @@ def render_inbox(base: Any, request: Request) -> str:
             f'<p><a href="{escape(back, quote=True)}">← Back to results</a></p>'
             f'<div class="v951-pagehead"><div><h3>{subject}</h3><p>Mailbox {escape(mailbox)} · UID {escape(uid)}</p></div></div>'
             f'<section class="card"><pre class="v951-message">{escape(text[:20000])}</pre></section>'
-            f'<div class="v951-grid">{"".join(diagnostics)}</div>{v951._details(detail)}'
+            f'<div class="v951-grid'>{"".join(diagnostics)}</div>{v951._details(detail)}'
         )
     checked = " checked" if params.get("unread_only") == "1" else ""
     return f'''
@@ -360,7 +368,7 @@ def render_tracking_summary(base: Any, core: Any, request: Request) -> str:
         '<p>Observed events filtered by persisted timestamps; account identity remains visible alongside stable color cues.</p></div>'
         + v951.range_bar(request, "tracking", "tracking") + '</div>'
         '<form method="get" action="/" class="v951-toolbar"><input type="hidden" name="ui_view" value="tracking">'
-        f'<label>Account {_account_select(accounts, selected, name="account")}</label><button type="submit">Filter</button></form>'
+        f'<label>Account {_account_select(accounts, selected, name="account", include_all=True)}</label><button type="submit">Filter</button></form>'
         + account_cards
         + '<div class="v951-metrics">'
         + v951._metric("Campaigns", len(rows["campaigns"]), v951.WINDOW_LABELS[window])
@@ -547,7 +555,9 @@ def install_webgui_v953(
     mount_index = next((i for i, route in enumerate(routes) if isinstance(route, Mount)), len(routes))
 
     async def runtime_route(request: Request):
+        if request.method != "POST":
+            return PlainTextResponse("Method Not Allowed", status_code=405, headers={"Allow": "POST"})
         return await system_runtime_action(base, request, callback)
 
-    routes.insert(mount_index, Route("/dashboard/system/runtime", runtime_route, methods=["POST"]))
+    routes.insert(mount_index, Route("/dashboard/system/runtime", runtime_route, methods=["GET", "POST"]))
     return legacy_dashboard
