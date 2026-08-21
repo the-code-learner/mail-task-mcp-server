@@ -5,6 +5,7 @@ import os
 import smtplib
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -129,9 +130,9 @@ class ClientFixture(unittest.TestCase):
         self.env.stop()
         self.tmp.cleanup()
 
-    def client(self, cls=PostmasterV950MailClient, **kwargs):
+    def client(self, cls=PostmasterV950MailClient, settings=None, **kwargs):
         return cls(
-            self.settings,
+            settings or self.settings,
             file_store=DummyFileStore(),
             reliability=self.store,
             retry_policy=kwargs.pop("retry_policy", RetryPolicy(max_attempts=3, base_delay_seconds=0, max_delay_seconds=0, jitter_min=1, jitter_max=1)),
@@ -289,8 +290,8 @@ class SMTPTransportTests(ClientFixture):
         self.assertTrue(result["sent"])
 
     def test_starttls_preserves_pre_and_post_tls_capabilities(self):
-        client = self.client()
-        self.settings.smtp_security = "starttls"
+        starttls_settings = replace(self.settings, smtp_security="starttls")
+        client = self.client(settings=starttls_settings)
         smtp = StartTLSFakeSMTP()
         with patch("postmaster.mail_v950.smtplib.SMTP", return_value=smtp):
             connected, security = client._smtp_connect()
