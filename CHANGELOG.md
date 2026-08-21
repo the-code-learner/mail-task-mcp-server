@@ -2,6 +2,37 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.5.0 - 2026-08-21
+
+### Added
+- Provider-independent SMTP capability discovery for `SIZE`, `8BITMIME`, `SMTPUTF8`, `PIPELINING`, `DSN`, `STARTTLS`, advertised AUTH mechanisms and unknown extensions, plus IMAP capability discovery for `IDLE`, `MOVE`, `UIDPLUS`, `SPECIAL-USE`, `NAMESPACE`, `QUOTA`, `CONDSTORE`, `QRESYNC`, `SORT`, `THREAD` and unknown capabilities.
+- RFC 3461 DSN support with xtext encoding, `ENVID`, per-recipient `ORCPT`, default `NOTIFY=FAILURE,DELAY`, explicit-only `SUCCESS`, graceful fallback when a server does not advertise DSN, multipart/report parsing and conservative textual bounce fallback.
+- Provider-independent sender/mailbox health covering MX, SPF and recursive lookup count, DMARC, selector-explicit DKIM, MTA-STS, TLS-RPT, DANE TLSA, optional BIMI, IMAP quota, TLS socket/cipher/certificate metadata and cached account diagnostics. STARTTLS reports both pre-TLS and post-TLS SMTP capability snapshots.
+- Delivery reliability state with bounded exponential retry/backoff, global/account/domain throttling, SMTP failure classification, post-DATA delivery-uncertainty protection, local idempotency guard, delivery-attempt history, recipient suppressions, DSN correlation, human-reply versus auto-reply state, delivery/reply/suppression/domain metrics and IMAP IDLE with reconnect/re-IDLE/poll fallback.
+- MIME/header diagnostics for authentication results, List-* fields, observed spam/junk metadata and sent-versus-received comparison. The WebGUI adds authenticated mail-health and suppression controls using the existing CSRF verification pattern.
+- Regression coverage for newsletter headers, tracking without newsletter semantics, DSN options/correlation/fallback, retry/permanent/uncertain failures, suppression policy, IMAP IDLE lifecycle/timing, UID range searches, SMTP/IMAP capabilities, STARTTLS pre/post observations, truthful latency semantics, CSRF and MCP surface preservation.
+
+### Changed
+- Existing `test_email_account` and `mailbox_status` diagnostics are extended with capability, quota, DNS and TLS health instead of adding parallel MCP commands.
+- Existing `send_email`, `reply_email`, `follow_up_email`, `create_draft`, `create_reply_draft` and `create_follow_up_draft` accept additive explicit newsletter/unsubscribe options. Send/reply/follow-up also accept an additive explicit DSN-success request; default DSN notification remains failure/delay only.
+- `List-Unsubscribe` and `List-Unsubscribe-Post` are emitted only from explicit newsletter context. **Tracking alone does not imply newsletter.** One-click unsubscribe requires an explicit HTTPS unsubscribe URL and explicit one-click configuration.
+- Existing `list_tracking_deliveries`, `get_tracking_summary`, `tracking_status` and `build_status` are enriched with delivery/reliability state while preserving the existing open/click telemetry and query-time provider-classification model.
+- SMTP/IMAP latency reporting distinguishes an observed TCP connection probe from protocol connection/auth/TLS aggregates. Pure TLS handshake latency is intentionally not fabricated; STARTTLS exposes the observed upgrade command-plus-handshake latency while the pure handshake field remains unavailable.
+
+### Schema / compatibility
+- `tracking_deliveries` receives additive idempotent fields when that table exists: `delivery_state`, `attempt_count`, `last_attempt_at`, `next_retry_at`, `last_error_classification`, `bounce_classification`, `bounce_status`, `bounce_diagnostic`, `conversation_state`, `replied_at`, `auto_reply_at` and `correlation_confidence`.
+- New additive reliability tables are `delivery_attempts`, `recipient_suppressions`, `suppression_events` and `conversation_events`.
+- Hard bounce/user-unknown may suppress a recipient. One soft bounce does not create permanent suppression; repeated soft bounces can suppress only after the configured threshold. `delivery_uncertain` is not automatically retried when duplicate delivery is possible.
+- Observability keeps `observed`, `inferred` and `estimated` semantics distinct. Pixel opens remain telemetry rather than proof of human reading, provider inference remains query-time interpretation, and an absent DKIM selector is not represented as a DKIM failure.
+- No MCP command names are added by v9.5.0; the tranche replaces/extends existing registrations and structured outputs/options additively.
+
+### Security / deployment
+- Dashboard POST forms added by v9.5.0 carry the existing CSRF token and continue through `_verified_form`; the security check is not weakened.
+- The public tree remains provider-neutral and contains no deployment credentials or private recipient/domain configuration. Provider-specific spam headers are treated only as observed message metadata, not architecture or persisted provider truth.
+- `dnspython>=2.6,<3` is added through `requirements.txt`; the existing requirements-hash persistent-venv rebuild installs it on source update.
+- `postmaster-mcp.yml` is intentionally unchanged. No new port, volume, public callback path, Cloudflare rule or deployment procedure is required by this tranche.
+- Known limits: DKIM DNS verification requires an explicitly supplied selector; pure TLS-handshake latency is not isolated from the standard library protocol setup; optional controlled seed-account inbox-placement testing is not implemented.
+
 ## 9.4.6 - 2026-08-21
 
 ### Added
