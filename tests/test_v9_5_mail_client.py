@@ -82,6 +82,25 @@ class FakeSMTP:
         pass
 
 
+class StartTLSFakeSMTP(FakeSMTP):
+    def __init__(self):
+        super().__init__(features={"starttls": "", "size": "100000"})
+        self.ehlo_calls = 0
+        self.starttls_calls = 0
+
+    def ehlo(self):
+        self.ehlo_calls += 1
+        if self.ehlo_calls == 1:
+            self.esmtp_features = {"starttls": "", "size": "100000"}
+        else:
+            self.esmtp_features = {"dsn": "", "auth": "PLAIN", "size": "100000"}
+        return 250, b"ok"
+
+    def starttls(self, context=None):
+        self.starttls_calls += 1
+        return 220, b"ready"
+
+
 class ClientFixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -268,6 +287,34 @@ class SMTPTransportTests(ClientFixture):
         self.assertEqual(smtp.mail_calls[0][1], [])
         self.assertEqual(smtp.rcpt_calls[0][1], [])
         self.assertTrue(result["sent"])
+
+    def test_starttls_preserves_pre_and_post_tls_capabilities(self):
+        client = self.client()
+        self.settings.smtp_security = "starttls"
+        smtp = StartTLSFakeSMTP()
+        with patch("postmaster.mail_v950.smtplib.SMTP", return_value=smtp):
+            connected, security = client._smtp_connect()
+        self.assertIs(connected, smtp)
+        self.assertEqual(security, "starttls")
+        self.assertEqual(smtp.starttls_calls, 1)
+        self.assertEqual(smtp.ehlo_calls, 2)
+        self.assertIn("starttls", smtp._postmaster_pre_tls_features)
+        self.assertIn("dsn", smtp._postmaster_post_tls_features)
+        self.assertNotIn("starttls", smtp._postmaster_post_tls_features)
+
+    def test_smtp_health_labels_tcp_and_tls_latency_semantics(self):
+        client = self.client()
+        smtp = FakeSMTP(features={"auth": "PLAIN"})
+        client._smtp_connect = lambda: (smtp, "plain")
+        with patch(
+            "postmaster.mail_v950.timed_tcp_connect",
+            return_value={"ok": True, "connection_latency_ms": 12.5},
+        ):
+            health = client._smtp_health()
+        self.assertEqual(health["connection_latency_ms"], 12.5)
+        self.assertIsNone(health["tls_handshake_latency_ms"])
+        self.assertIn("observed separate TCP probe", health["latency_semantics"]["connection_latency_ms"])
+        self.assertIn("not reported separately", health["latency_semantics"]["tls_handshake_latency_ms"])
 
     def test_4xx_data_response_retries(self):
         client = self.client(retry_policy=RetryPolicy(max_attempts=3, base_delay_seconds=0, max_delay_seconds=0, jitter_min=1, jitter_max=1))
