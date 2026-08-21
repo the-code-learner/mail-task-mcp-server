@@ -2,6 +2,27 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.5 - 2026-08-21
+
+### Added
+- Query-time `multi-link burst` evidence for link telemetry: two or more distinct tracked links fetched with the same delivery/fingerprint within two seconds are now strong scanner/provider evidence, with sub-100 ms and sub-250 ms bursts weighted most strongly.
+- WebGUI task editing for the fields already supported by `SchedulerEngine.update_job`: title, description, payload, schedule type/value, timezone and approval mode. Owner/project/action/profile identity remains read-only and completed tasks remain immutable.
+- Read-only Knowledge `View` for memories and skills with sanitized Markdown rendering for headings, lists, emphasis, fenced code, links and tables. Raw source remains available through the existing Edit workflow.
+- Project filters for Tasks, Knowledge and Files plus a Projects overview that combines one project's tasks, project-scoped knowledge and project-scoped files with counts and direct View/Edit/Open actions.
+- Regression coverage for AMD/QNAP-style millisecond multi-link bursts, Libero-style separated manual clicks, Markdown sanitization, runtime-derived version titles, task editing and project-centric WebGUI filtering.
+
+### Changed
+- The WebGUI browser title and visible heading derive from the runtime `VERSION`/build identity instead of the historical static `v9.1` literal.
+- Same-fingerprint cross-link consistency still lowers provider likelihood for separated/manual-looking clicks, but a cross-link burst within two seconds overrides that mitigation. The unique-click key remains `delivery_id + link_id + client_fingerprint`, raw rows remain unchanged and classification remains query-time.
+- The v9.4.5 WebGUI layer is split into dedicated helper/task/knowledge/project modules so the MCP runtime composition stays isolated from presentation-only behavior.
+- Safe Markdown rendering uses Mistune plus Bleach; this changes `requirements.txt` and therefore triggers the existing hash-based persistent-venv refresh on the next release start.
+
+### Compatibility / deployment
+- Public MCP tool names, registrations and input signatures are unchanged from v9.4.4. In particular the v9.4.2-compatible task MCP contract remains `list_jobs(owner_id=None, project_id=None, status=None, limit=200)` plus the existing single `get_job(job_id)` registration.
+- Existing tracking MCP commands are unchanged; only the qualitative provider classification values/reasons returned by those existing read paths can differ because the query-time heuristic was refined.
+- The new `/dashboard/job/update` route is authenticated WebGUI plumbing, not an MCP command or public callback endpoint.
+- No database migration, environment variable, port, volume or Cloudflare rule is introduced. `postmaster-mcp.yml` remains unchanged.
+
 ## 9.4.4 - 2026-08-20
 
 ### Fixed
