@@ -61,6 +61,16 @@ class FailureClassificationTests(unittest.TestCase):
         self.assertFalse(result["temporary"])
         self.assertEqual(result["classification"], "authentication_failure")
 
+    def test_unsupported_capability_is_permanent(self):
+        result = classify_smtp_failure(
+            smtplib.SMTPNotSupportedError("SMTPUTF8 is required"),
+            phase="mail_from",
+        )
+        self.assertFalse(result["temporary"])
+        self.assertTrue(result["permanent"])
+        self.assertFalse(result["uncertain"])
+        self.assertEqual(result["classification"], "unsupported_smtp_capability")
+
     def test_connect_timeout_is_retryable(self):
         result = classify_smtp_failure(socket.timeout("timed out"), phase="connect")
         self.assertTrue(result["temporary"])
