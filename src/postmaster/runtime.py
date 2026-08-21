@@ -13,6 +13,7 @@ from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
 from .webgui_v952 import install_webgui_v952
 from .webgui_v953 import install_webgui_v953
+from .webgui_v954 import install_webgui_v954
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -41,6 +42,7 @@ build_status = install_runtime_v953(_base, _core, build_status)
 dashboard_home = install_webgui_v951(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v952(app, _base, dashboard_home)
 dashboard_home = install_webgui_v953(app, _base, _core, dashboard_home)
+dashboard_home = install_webgui_v954(app, _base, _core, dashboard_home)
 link_store = _core.link_store
 
 
