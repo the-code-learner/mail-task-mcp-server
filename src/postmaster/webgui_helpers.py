@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from html import escape
+from typing import Any, Iterable
 from urllib.parse import urlencode
-from typing import Any
 
 import bleach
 import mistune
@@ -21,6 +22,7 @@ MARKDOWN_ATTRS = {
     "th": ["align"],
     "td": ["align"],
 }
+PROJECT_COLOR_COUNT = 8
 
 
 def runtime_version(base: Any) -> str:
@@ -42,6 +44,45 @@ def selected_project(request: Request) -> str | None:
 def project_rows(base: Any) -> list[dict[str, Any]]:
     result = base._safe_call(base.scheduler().list_projects)
     return result if isinstance(result, list) else []
+
+
+def project_color_class(project_id: str | None) -> str:
+    """Return a deterministic presentation-only project color class."""
+    value = str(project_id or "").strip()
+    if not value:
+        return "project-color-global"
+    digest = hashlib.sha256(value.encode("utf-8")).digest()
+    return f"project-color-{digest[0] % PROJECT_COLOR_COUNT}"
+
+
+def project_label_html(label: str, project_id: str | None, *, compact: bool = False) -> str:
+    role = "project-scope" if compact else "project-name"
+    return (
+        f'<span class="{role} {project_color_class(project_id)}">'
+        f'{escape(str(label or ""))}</span>'
+    )
+
+
+def project_legend_html(
+    projects: list[dict[str, Any]], project_ids: Iterable[str | None],
+) -> str:
+    names = {
+        str(row.get("id") or ""): str(row.get("name") or row.get("id") or "")
+        for row in projects
+    }
+    seen: set[str] = set()
+    labels: list[str] = []
+    for raw in project_ids:
+        project_id = str(raw or "").strip()
+        key = project_id or "__global__"
+        if key in seen:
+            continue
+        seen.add(key)
+        label = names.get(project_id, project_id) if project_id else "global"
+        labels.append(project_label_html(label, project_id or None, compact=True))
+    if not labels:
+        return ""
+    return f'<div class="project-key">{"".join(labels)}</div>'
 
 
 def dashboard_url(
@@ -164,9 +205,10 @@ def decorate_version(body: str, version: str) -> str:
 
 
 def decorate_styles(body: str) -> str:
-    if ".markdown-viewer" in body or "</style>" not in body:
+    if "/* webgui-v951-foundation */" in body or "</style>" not in body:
         return body
     style = '''
+/* webgui-v951-foundation */
 .project-filter { margin:0 0 14px; }
 .markdown-viewer { margin-top:16px; line-height:1.6; overflow-wrap:anywhere; }
 .markdown-viewer h1 { font-size:24px; margin:20px 0 10px; }
@@ -180,5 +222,49 @@ def decorate_styles(body: str) -> str:
 .project-summary > div { border:1px solid var(--line); border-radius:10px; padding:10px; }
 .project-summary strong { display:block; font-size:20px; }
 .project-summary span { color:var(--muted); font-size:12px; }
+.project-key { display:flex; gap:7px; align-items:center; flex-wrap:wrap; margin:8px 0; }
+.project-name { display:inline-block; padding:5px 8px; border-radius:8px; font-weight:750; line-height:1.25; border:1px solid transparent; white-space:normal; }
+.project-scope { display:inline-flex; align-items:center; padding:3px 7px; border-radius:999px; font-size:11px; font-weight:700; border:1px solid transparent; }
+.project-color-0 { color:#93c5fd; background:rgba(37,99,235,.16); border-color:rgba(96,165,250,.36); }
+.project-color-1 { color:#d8b4fe; background:rgba(126,34,206,.16); border-color:rgba(192,132,252,.36); }
+.project-color-2 { color:#99f6e4; background:rgba(13,148,136,.16); border-color:rgba(94,234,212,.36); }
+.project-color-3 { color:#fde68a; background:rgba(202,138,4,.16); border-color:rgba(250,204,21,.36); }
+.project-color-4 { color:#fda4af; background:rgba(225,29,72,.16); border-color:rgba(251,113,133,.36); }
+.project-color-5 { color:#a5f3fc; background:rgba(8,145,178,.16); border-color:rgba(103,232,249,.36); }
+.project-color-6 { color:#bef264; background:rgba(101,163,13,.16); border-color:rgba(163,230,53,.36); }
+.project-color-7 { color:#fdba74; background:rgba(234,88,12,.16); border-color:rgba(251,146,60,.36); }
+.project-color-global { color:var(--muted); background:rgba(127,127,127,.11); border-color:var(--line); }
+.task-view-toggle { display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+.task-view-toggle a { display:inline-block; padding:7px 10px; color:var(--muted); text-decoration:none; border-right:1px solid var(--line); }
+.task-view-toggle a:last-child { border-right:0; }
+.task-view-toggle a.active { color:var(--accent); background:rgba(104,160,255,.12); font-weight:750; }
+.task-calendar-toolbar { display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 10px; }
+.task-calendar-month { font-size:17px; font-weight:800; }
+.task-calendar-controls { display:flex; gap:6px; }
+.task-calendar-shell { overflow:auto; }
+.task-calendar-head, .task-calendar-grid { display:grid; grid-template-columns:repeat(7,minmax(120px,1fr)); min-width:840px; }
+.task-calendar-head { border:1px solid var(--line); border-bottom:0; border-radius:10px 10px 0 0; overflow:hidden; }
+.task-calendar-head > div { padding:8px; color:var(--muted); font-size:11px; font-weight:800; text-transform:uppercase; border-right:1px solid var(--line); }
+.task-calendar-head > div:last-child { border-right:0; }
+.task-calendar-grid { border:1px solid var(--line); border-radius:0 0 10px 10px; overflow:hidden; }
+.task-calendar-day { min-height:116px; padding:7px; border-right:1px solid var(--line); border-bottom:1px solid var(--line); }
+.task-calendar-day:nth-child(7n) { border-right:0; }
+.task-calendar-day.outside { opacity:.62; background:rgba(127,127,127,.04); }
+.task-calendar-day.today { box-shadow:inset 0 0 0 2px var(--accent); }
+.task-calendar-date { font-size:11px; font-weight:800; margin-bottom:6px; }
+.task-calendar-event { display:block; width:100%; padding:5px 6px; margin:4px 0; border:1px solid transparent; border-radius:7px; text-decoration:none; font-size:11px; font-weight:750; line-height:1.25; }
+.task-calendar-event small { display:block; opacity:.82; font-weight:600; margin-top:2px; }
+.task-calendar-outside-list { margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
+.task-calendar-outside-list .row { align-items:center; }
+@media (prefers-color-scheme: light) {
+  .project-color-0 { color:#1d4ed8; }
+  .project-color-1 { color:#7e22ce; }
+  .project-color-2 { color:#0f766e; }
+  .project-color-3 { color:#a16207; }
+  .project-color-4 { color:#be123c; }
+  .project-color-5 { color:#0e7490; }
+  .project-color-6 { color:#4d7c0f; }
+  .project-color-7 { color:#c2410c; }
+}
 '''
     return body.replace("</style>", style + "\n</style>", 1)
