@@ -728,3 +728,23 @@ Tracked follow-ups reuse the v9.4 dual-MIME pipeline: recipient copies may conta
 v9.4.3 makes task reads behave more like persistent Memory and Skill reads. `list_jobs()` is now the scannable list view and hides stored `completed` tasks by default; callers can opt back into all records with `include_completed=true` or request completed tasks directly with `status="completed"`. The persisted database value remains `completed` and is never renamed to `done`.
 
 `get_job(job_id)` is the full read-only detail view and remains able to open a completed task directly. The list response is a single structured `{ok, count, jobs}` envelope while each job record preserves its existing fields. Completed rows remain in the registry and remain part of `scheduler_status` counts. No task-state migration or deployment configuration change is required.
+
+# Provider-independent mail standards and reliability (v9.5)
+
+v9.5 extends the existing mail commands rather than adding a parallel MCP surface. `test_email_account` and `mailbox_status` now expose provider-independent SMTP/IMAP capabilities, quota, DNS and TLS health. `send_email`, `reply_email`, `follow_up_email`, `create_draft`, `create_reply_draft` and `create_follow_up_draft` accept additive explicit newsletter/unsubscribe options; send/reply/follow-up also support an explicit DSN-success request.
+
+Newsletter semantics are deliberately separate from telemetry: **tracking alone does not imply newsletter**. `List-Unsubscribe` is emitted only when `newsletter_mode=true` has valid unsubscribe configuration. `List-Unsubscribe-Post: List-Unsubscribe=One-Click` additionally requires explicit one-click configuration and an HTTPS unsubscribe URL.
+
+DSN defaults to failure/delay notification only and uses RFC 3461 `ENVID`/`ORCPT` when the SMTP server advertises DSN. `SUCCESS` is opt-in. Servers without DSN continue through a standards-compatible fallback. SMTPUTF8 is negotiated from advertised capability; unsupported required capabilities are permanent/non-retryable failures.
+
+Delivery reliability adds bounded retry/backoff for retryable failures, global/account/domain throttling, idempotency state, delivery uncertainty protection after ambiguous DATA failures, hard/repeated-soft-bounce suppression policy, DSN correlation and human-reply versus auto-reply state. A single soft bounce never creates permanent suppression.
+
+The analytics database is migrated additively. Existing `tracking_deliveries` rows gain delivery/retry/bounce/conversation fields when that table exists, and v9.5 adds `delivery_attempts`, `recipient_suppressions`, `suppression_events` and `conversation_events`. Existing open/click data and query-time provider/scanner classification remain authoritative in their original layer; v9.5 enriches them rather than rewriting observed tracking rows.
+
+Health diagnostics cover MX, SPF recursive lookup count, DMARC, selector-explicit DKIM, MTA-STS, TLS-RPT, DANE TLSA, optional BIMI, TLS metadata, IMAP quota and capability discovery. STARTTLS keeps pre-TLS and post-TLS capability snapshots. Connection latency is reported from a separate observed TCP probe; protocol/TLS/auth aggregates remain separately labelled. Pure TLS-handshake latency is not fabricated when the standard library cannot isolate it, while STARTTLS can expose command-plus-handshake upgrade latency.
+
+Inbound processing can use bounded IMAP IDLE watchers with re-IDLE, reconnect and polling fallback. `get_email` adds MIME/header diagnostics including authentication results, List-* fields and provider-specific spam/junk headers strictly as observed metadata. Observability keeps `observed`, `inferred` and `estimated` meanings separate: pixel opens are telemetry, provider inference is not persisted as fact, and an omitted DKIM selector is not a DKIM failure.
+
+The WebGUI exposes authenticated health refresh and local suppression controls using the existing CSRF verification path. No new MCP command names, ports, public callback paths, volumes or Cloudflare rules are introduced by v9.5. `dnspython>=2.6,<3` is installed through the existing requirements-hash persistent-venv mechanism, so `postmaster-mcp.yml` remains unchanged.
+
+Known limits: DKIM DNS verification requires an explicitly supplied selector; pure TLS-handshake latency is not isolated from standard-library protocol setup; optional controlled seed-account inbox-placement testing is not implemented.
