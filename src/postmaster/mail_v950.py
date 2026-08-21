@@ -25,7 +25,7 @@ from .delivery_reliability import (
 )
 from .email_analytics import EmailAnalyticsStore, analytics_store
 from .mail_bridge import MailBridgeError, _message_to_dict
-from .mail_health import DNSHealthChecker, socket_tls_info
+from .mail_health import DNSHealthChecker, socket_tls_info, timed_tcp_connect
 from .mail_protocols import (
     build_dsn_options,
     message_diagnostics,
@@ -257,9 +257,18 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
         else:
             raise MailBridgeError(f"Unsupported SMTP security mode: {security}")
         smtp.ehlo()
+        pre_tls_features = dict(getattr(smtp, "esmtp_features", {})) if security == "starttls" else {}
+        setattr(smtp, "_postmaster_pre_tls_features", pre_tls_features)
         if security == "starttls":
+            upgrade_started = time.perf_counter()
             smtp.starttls(context=context)
+            setattr(
+                smtp,
+                "_postmaster_starttls_upgrade_latency_ms",
+                round((time.perf_counter() - upgrade_started) * 1000.0, 2),
+            )
             smtp.ehlo()
+        setattr(smtp, "_postmaster_post_tls_features", dict(getattr(smtp, "esmtp_features", {})))
         return smtp, security
 
     def _smtp_send_once(self, msg: EmailMessage, recipients: list[str], delivery_id: str) -> dict[str, Any]:
@@ -269,6 +278,8 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
         try:
             smtp, security = self._smtp_connect()
             capabilities = parse_smtp_capabilities(getattr(smtp, "esmtp_features", {}))
+            pre_tls_raw = getattr(smtp, "_postmaster_pre_tls_features", {})
+            pre_tls_capabilities = parse_smtp_capabilities(pre_tls_raw) if pre_tls_raw else None
             username = self.settings.smtp_username or self.settings.email_address
             password = self.settings.smtp_password or self.settings.email_password
             phase = "auth"
@@ -318,6 +329,8 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
                 "dsn_envid": delivery_id if dsn_enabled and delivery_id else "",
                 "dsn_notify": "FAILURE,DELAY,SUCCESS" if dsn_enabled and notify_success else ("FAILURE,DELAY" if dsn_enabled else ""),
                 "smtp_capabilities": capabilities,
+                "smtp_capabilities_pre_tls": pre_tls_capabilities,
+                "smtp_capabilities_post_tls": capabilities,
                 "smtp_security": security,
                 "smtp_tls": socket_tls_info(
                     getattr(smtp, "sock", None),
@@ -470,6 +483,7 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
         return result
 
     def _imap_health(self) -> dict[str, Any]:
+        tcp_probe = timed_tcp_connect(self.settings.imap_host, self.settings.imap_port, timeout=10.0)
         started = time.perf_counter()
         with self._imap() as conn:
             latency_ms = round((time.perf_counter() - started) * 1000.0, 2)
@@ -500,19 +514,30 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
                 "host": self.settings.imap_host,
                 "port": self.settings.imap_port,
                 "security": security,
+                "connection_latency_ms": tcp_probe.get("connection_latency_ms"),
+                "tcp_probe": tcp_probe,
                 "connection_and_auth_latency_ms": latency_ms,
+                "tls_handshake_latency_ms": None,
+                "latency_semantics": {
+                    "connection_latency_ms": "observed separate TCP probe",
+                    "connection_and_auth_latency_ms": "observed IMAP connection/TLS/authentication aggregate",
+                    "tls_handshake_latency_ms": "not separately isolated by the standard imaplib connection path",
+                },
                 "capabilities": caps,
                 "quota": quota,
                 "tls": tls,
             }
 
     def _smtp_health(self) -> dict[str, Any]:
+        tcp_probe = timed_tcp_connect(self.settings.smtp_host, self.settings.smtp_port, timeout=10.0)
         started = time.perf_counter()
         smtp = None
         try:
             smtp, security = self._smtp_connect()
             connected_ms = round((time.perf_counter() - started) * 1000.0, 2)
             caps = parse_smtp_capabilities(getattr(smtp, "esmtp_features", {}))
+            pre_tls_raw = getattr(smtp, "_postmaster_pre_tls_features", {})
+            pre_tls_caps = parse_smtp_capabilities(pre_tls_raw) if pre_tls_raw else None
             auth_started = time.perf_counter()
             smtp.login(
                 self.settings.smtp_username or self.settings.email_address,
@@ -533,9 +558,21 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
                 "host": self.settings.smtp_host,
                 "port": self.settings.smtp_port,
                 "security": security,
+                "connection_latency_ms": tcp_probe.get("connection_latency_ms"),
+                "tcp_probe": tcp_probe,
                 "connection_and_tls_latency_ms": connected_ms,
+                "starttls_upgrade_latency_ms": getattr(smtp, "_postmaster_starttls_upgrade_latency_ms", None),
+                "tls_handshake_latency_ms": None,
+                "latency_semantics": {
+                    "connection_latency_ms": "observed separate TCP probe",
+                    "connection_and_tls_latency_ms": "observed SMTP connection/EHLO/TLS aggregate",
+                    "starttls_upgrade_latency_ms": "observed STARTTLS command plus TLS handshake when STARTTLS is used",
+                    "tls_handshake_latency_ms": "not reported separately because standard smtplib does not isolate it from protocol setup",
+                },
                 "auth_latency_ms": auth_ms,
                 "capabilities": caps,
+                "capabilities_pre_tls": pre_tls_caps,
+                "capabilities_post_tls": caps,
                 "tls": tls,
                 "warnings": warnings,
             }
