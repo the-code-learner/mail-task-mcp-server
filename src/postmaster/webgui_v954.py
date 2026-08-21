@@ -173,7 +173,8 @@ def _build_tracking_read_model(
 
 
 def _metric(label: str, value: Any) -> str:
-    text = str(value or "").strip() or "—"
+    text = "" if value is None else str(value).strip()
+    text = text or "—"
     return f'<div class="v954-metric"><strong>{escape(label)}</strong>{escape(text)}</div>'
 
 
