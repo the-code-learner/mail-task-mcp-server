@@ -9,7 +9,7 @@ class V943SupersededContractTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         version = (root / "VERSION").read_text(encoding="utf-8").strip()
         changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
-        self.assertEqual(version, "9.4.4")
+        self.assertGreaterEqual(tuple(int(part) for part in version.split(".")), (9, 4, 4))
         self.assertIn("Restored the public task MCP/API contract to v9.4.2 compatibility", changelog)
         self.assertIn("WebGUI-only Tasks filtering", changelog)
 
