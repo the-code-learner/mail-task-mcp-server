@@ -7,6 +7,15 @@ import unittest
 from postmaster.imap_idle import IMAPIdleManager, IMAPIdleWatcher, IdleSettings
 
 
+def wait_until(predicate, timeout=0.5):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.005)
+    return bool(predicate())
+
+
 class FakeConnection:
     def __init__(self, *, capabilities=(b"IMAP4rev1", b"IDLE"), events=None, fail=False):
         self.capabilities = capabilities
@@ -63,9 +72,10 @@ class IMAPIdleTests(unittest.TestCase):
         )
         thread = threading.Thread(target=watcher.run)
         thread.start()
-        time.sleep(0.03)
+        self.assertTrue(wait_until(lambda: conn.idle_calls >= 2))
         stop.set()
         thread.join(1)
+        self.assertFalse(thread.is_alive())
         self.assertEqual(seen, [])
 
     def test_reidle_periodically(self):
@@ -80,9 +90,10 @@ class IMAPIdleTests(unittest.TestCase):
         )
         thread = threading.Thread(target=watcher.run)
         thread.start()
-        time.sleep(0.04)
+        self.assertTrue(wait_until(lambda: conn.idle_calls >= 2))
         stop.set()
         thread.join(1)
+        self.assertFalse(thread.is_alive())
         self.assertGreaterEqual(conn.idle_calls, 2)
 
     def test_reconnect_after_failure(self):
@@ -137,7 +148,7 @@ class IMAPIdleTests(unittest.TestCase):
             settings=IdleSettings(reidle_seconds=0.01),
         )
         manager.start([watcher])
-        time.sleep(0.02)
+        self.assertTrue(wait_until(lambda: manager.status()["watchers"][0]["thread_alive"]))
         manager.stop(join_timeout=1)
         status = manager.status()
         self.assertEqual(len(status["watchers"]), 1)
@@ -150,7 +161,7 @@ class IMAPIdleTests(unittest.TestCase):
             for name in ("a", "b")
         ]
         manager.start(watchers)
-        time.sleep(0.01)
+        self.assertTrue(wait_until(lambda: len(manager.status()["watchers"]) == 1))
         manager.stop(join_timeout=1)
         self.assertEqual(len(manager.status()["watchers"]), 1)
 
