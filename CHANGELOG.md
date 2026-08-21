@@ -2,6 +2,27 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.5.1 - 2026-08-21
+
+### Added
+- WebGUI-only navigation and information architecture aligned with the approved redesign: Dashboard, Accounts, Mail Health, Inbox, Compose, Tracking, Deliveries, Suppressions, Projects, Tasks, Knowledge, Files, Security, AMP, System and MCP Coverage, while keeping the pre-existing domain/recipient controls reachable.
+- Tasks Agenda/Calendar presentation over the same real task-registry rows and persisted `next_run_utc`, with deterministic project colors shared across Tasks, Knowledge, Files and Projects. Calendar rendering does not synthesize recurring executions or imply an autonomous scheduler.
+- Shared 1D / 7D / 30D / 90D / All time controls for genuinely chronological Dashboard, Tracking and Deliveries data. Filtering uses existing persisted campaign, delivery, open/link-event and retry-attempt timestamps; point-in-time inventories and runtime/store status remain unfiltered snapshots.
+- Structured Mail Health cards with Raw / Details troubleshooting, Inbox search/message presentation, existing-send Compose UI, delivery/retry views, current suppressions, Security summary, System snapshots and an explicit MCP Coverage map of the existing 90-function surface.
+- WebGUI regression coverage for navigation, chronological-window/All-time behavior, snapshot preservation, tracking truthfulness, CSRF-protected Compose reuse, deterministic project colors and provider-neutral presentation.
+
+### Changed
+- Tracking now surfaces range-filtered observed activity while keeping raw events authoritative, the unique-click definition `delivery_id + link_id + client_fingerprint` unchanged, provider/scanner classification query-time only, and pixel/open telemetry explicitly described as not proof of human reading.
+- Mail Health presentation distinguishes capability/configuration observations from runtime failures and does not fabricate DKIM failures, optional-standard failures, pure TLS-handshake latency or historical health series.
+- Suppressions remain a current inventory because the existing v9.5.0 service does not expose suppression-event history through a read API; the WebGUI does not reconstruct or invent that history.
+- The v9.5.1 layer composes the existing server-rendered dashboard incrementally instead of replacing backend services or introducing a parallel runtime.
+
+### Compatibility / security / deployment
+- **WebGUI-only patch:** no MCP command names are added, removed or renamed; mail, tracking, suppression, scheduler, Knowledge, File Store, account-store and security-policy semantics are unchanged.
+- The Compose presentation reuses the existing `send_email` path and existing recipient authorization/suppression/retry/DSN/newsletter semantics; the new WebGUI POST continues through `_verified_form` and carries the existing CSRF token.
+- No database schema change, migration, new worker, new dependency, new public callback path, environment variable, deployment/bootstrap change or production update is introduced.
+- The public tree remains provider-neutral and uses synthetic test data. `postmaster-mcp.yml` is intentionally byte-for-byte unchanged.
+
 ## 9.5.0 - 2026-08-21
 
 ### Added
@@ -177,7 +198,6 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - Clean Sent-copy generation for individualized tracked/AMP deliveries. Recipient MIME keeps tracking instrumentation; archived Sent MIME keeps original links and omits recipient pixel/click/AMP callback instrumentation.
 - `build_status.link_tracking` and `build_status.sent_copy_tracking_sanitized` capability flags.
 - `docs/LINK_TRACKING.md` covering architecture, schema, unique clicks, Sent-clean behavior, Cloudflare Access and live deployment preflight.
-
 ### Changed
 - Link instrumentation is applied to the same existing tracking opt-in used by `track_opens`, preserving current per-send/account-default privacy semantics rather than adding another required send parameter.
 - Tracked recipient and Sent MIME variants are built independently from the same canonical body/attachment inputs. `Message-ID`/`Date` are synchronized and normal threading headers are preserved; serialized MIME is not sanitized with fragile regex replacement.
