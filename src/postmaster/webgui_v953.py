@@ -290,7 +290,7 @@ def render_inbox(base: Any, request: Request) -> str:
             f'<p><a href="{escape(back, quote=True)}">← Back to results</a></p>'
             f'<div class="v951-pagehead"><div><h3>{subject}</h3><p>Mailbox {escape(mailbox)} · UID {escape(uid)}</p></div></div>'
             f'<section class="card"><pre class="v951-message">{escape(text[:20000])}</pre></section>'
-            f'<div class="v951-grid'>{"".join(diagnostics)}</div>{v951._details(detail)}'
+            f'<div class="v951-grid">{"".join(diagnostics)}</div>{v951._details(detail)}'
         )
     checked = " checked" if params.get("unread_only") == "1" else ""
     return f'''
