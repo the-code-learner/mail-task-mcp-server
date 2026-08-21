@@ -2,6 +2,27 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.5.3 - 2026-08-21
+
+### Fixed
+- Replaced free-text account IDs in Inbox, Mail Health and Compose with enabled-account selectors backed by the existing account store. Selectors show human-readable labels/email addresses, submit canonical account IDs, select the configured default account, and never render credentials.
+- Inbox now automatically loads the configured default account when the Inbox view is opened, reuses the existing `search_emails`/`get_email` paths, offers real mailbox choices from `list_mailboxes`, and keeps account/mailbox/filter/detail/back state coherent when accounts change.
+- Removed decorative/stale WebGUI release labels from the sidebar and tracking presentation while preserving semantic query-time provider/scanner descriptions and the unchanged unique-click definition `delivery_id + link_id + client_fingerprint`.
+- Added deterministic, dark-theme-safe account colors plus visible account text to Tracking account cards so multiple accounts are distinguishable without using color as the only signal.
+- Redesigned System around a concise runtime summary, store/runtime health, collapsed advanced diagnostics and truthful configuration status instead of presenting structural capability flags as fake toggles.
+
+### Runtime administration
+- Added authenticated POST + CSRF System controls for restarting the currently running stable release, requesting the latest stable application release, or selecting a specific stable `vX.Y.Z` release. Drafts, prereleases and unrelated/model releases are excluded from the selectable stable-release set; explicit downgrades require an acknowledgement warning.
+- Added a small persistent runtime-control intent under the existing `/opt/postmaster` volume. The existing single-YAML bootstrap consumes only `latest` or stable `vX.Y.Z` selectors plus one-shot restart/update flags. It does not expose the Docker socket, Portainer/Cloudflare credentials or host-level privilege.
+- `Restart current` uses a one-shot concrete stable ref so the restart cannot accidentally become an update. `Update to latest` forces one stable-release check. The app sends the HTTP response before terminating its own process; the already-existing `restart: unless-stopped` policy performs the container restart.
+- The bootstrap remains the sole source/version installer and retains stable-release filtering, immutable release downloads, cached current/last-known-good fallback, atomic staging and the existing requirements-hash virtualenv behavior. `build_status` keeps its existing MCP name and now reports the effective bootstrap-requested selector truthfully.
+
+### Compatibility / security / deployment
+- No new MCP command names are added, removed or renamed; the mapped MCP surface remains 90 functions and `new_mail_mcp_commands` remains `0`.
+- SMTP/IMAP protocol implementation, DSN, retry/backoff, throttling, suppression, MIME parsing, tracking calculations/raw rows, scheduler, Knowledge, File Store, recipient policy and database schemas are unchanged. No dependency or `requirements.txt` change is required.
+- `postmaster-mcp.yml` changes only to let the existing bootstrap read/clear the safe runtime-control intent before executing the same release selection/download/start path. No new port, volume, public callback endpoint or secret is introduced.
+- Production release/deployment remain separate; this release work does not itself redeploy or restart production.
+
 ## 9.5.2 - 2026-08-21
 
 ### Fixed
