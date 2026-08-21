@@ -11,3 +11,5 @@ numpy>=1.26,<3
 safetensors>=0.4,<1
 huggingface-hub>=0.24,<2
 tokenizers>=0.20,<1
+mistune>=3,<4
+bleach>=6.2,<7
