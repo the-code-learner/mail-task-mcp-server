@@ -7,8 +7,9 @@ from typing import Any
 from starlette.requests import Request
 
 from .webgui_helpers import (
-    dashboard_url, owner_options, project_filter_html, project_options,
-    project_rows, render_markdown_safe, selected_project,
+    dashboard_url, owner_options, project_filter_html, project_label_html,
+    project_legend_html, project_options, project_rows, render_markdown_safe,
+    selected_project,
 )
 
 
@@ -36,10 +37,11 @@ def _view(base: Any, request: Request, project: str | None) -> str:
         dashboard_url(request, tab="knowledge", project=project, extra={"edit_knowledge": item_id}),
         quote=True,
     )
-    title = escape(str(item.get("title") or ""))
+    project_id = str(item.get("project_id") or "") or None
+    title = project_label_html(str(item.get("title") or ""), project_id)
     kind = escape(str(item.get("kind") or ""))
     owner = escape(str(item.get("owner_id") or ""))
-    scope = escape(str(item.get("project_id") or "global"))
+    scope = project_label_html(project_id or "global", project_id, compact=True)
     tags = escape(", ".join(item.get("tags") or []))
     rendered = render_markdown_safe(str(item.get("content") or ""))
     return f'''<section class="card wide">
@@ -51,6 +53,10 @@ def _view(base: Any, request: Request, project: str | None) -> str:
 def knowledge_fragment(base: Any, request: Request) -> str:
     project = selected_project(request)
     projects = project_rows(base)
+    project_names = {
+        str(row.get("id") or ""): str(row.get("name") or row.get("id") or "")
+        for row in projects
+    }
     owners_result = base._safe_call(base.scheduler().list_owners)
     owners = owners_result if isinstance(owners_result, list) else []
     status = base._safe_call(base.context_engine().status)
@@ -80,15 +86,22 @@ def knowledge_fragment(base: Any, request: Request) -> str:
     for item in items:
         item_id = str(item.get("id") or "")
         kind = str(item.get("kind") or "")
+        project_id = str(item.get("project_id") or "") or None
         view = escape(dashboard_url(request, tab="knowledge", project=project, extra={"view_knowledge": item_id}), quote=True)
         edit = escape(dashboard_url(request, tab="knowledge", project=project, extra={"edit_knowledge": item_id}), quote=True)
         flags = []
         if item.get("always_include"):
             flags.append('<span class="badge warn">always</span>')
         flags.append('<span class="badge ok">enabled</span>' if item.get("enabled") else '<span class="badge">disabled</span>')
+        title = project_label_html(str(item.get("title") or ""), project_id)
+        scope = project_label_html(
+            project_names.get(project_id or "", project_id or "global"),
+            project_id,
+            compact=True,
+        )
         rows.append(
-            f'<tr><td><strong>{escape(str(item.get("title") or ""))}</strong><div class="small muted mono">{escape(item_id)}</div><div class="small muted">{escape(", ".join(item.get("tags") or []))}</div></td>'
-            f'<td><span class="badge">{escape(kind)}</span></td><td>{escape(str(item.get("owner_id") or ""))}<div class="small muted">{escape(str(item.get("project_id") or "global"))}</div></td>'
+            f'<tr><td>{title}<div class="small muted mono">{escape(item_id)}</div><div class="small muted">{escape(", ".join(item.get("tags") or []))}</div></td>'
+            f'<td><span class="badge">{escape(kind)}</span></td><td>{escape(str(item.get("owner_id") or ""))}<div class="small muted">{scope}</div></td>'
             f'<td>{float(item.get("priority") or 0.0):.2f}<div>{" ".join(flags)}</div></td>'
             f'<td class="actions"><a href="{view}"><button type="button">View</button></a><a href="{edit}"><button type="button">Edit</button></a>'
             f'<form method="post" action="/dashboard/knowledge/delete" onsubmit="return confirm(\'Delete this memory/skill?\');"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="item_id" value="{escape(item_id)}"><button class="danger" type="submit">Delete</button></form></td></tr>'
@@ -97,8 +110,10 @@ def knowledge_fragment(base: Any, request: Request) -> str:
     search_rows = []
     for item in search_results:
         iid = escape(str(item.get("item_id") or item.get("id") or ""))
+        project_id = str(item.get("project_id") or "") or None
+        title = project_label_html(str(item.get("title") or ""), project_id)
         search_rows.append(
-            f'<tr><td><strong>{escape(str(item.get("title") or ""))}</strong><div class="small muted mono">{iid}</div></td>'
+            f'<tr><td>{title}<div class="small muted mono">{iid}</div></td>'
             f'<td><span class="badge">{escape(str(item.get("kind") or ""))}</span></td>'
             f'<td>{float(item.get("score") or 0.0):.5f}</td>'
             f'<td class="small">{escape(str(item.get("best_chunk") or item.get("content") or "")[:500])}</td></tr>'
@@ -132,6 +147,7 @@ def knowledge_fragment(base: Any, request: Request) -> str:
     if account:
         hidden += f'<input type="hidden" name="account" value="{escape(account)}">'
     semantic_badge = '<span class="badge ok">Model2Vec ready</span>' if semantic.get("available") else '<span class="badge warn">Model2Vec unavailable / FTS fallback</span>'
+    legend = project_legend_html(projects, [item.get("project_id") for item in items])
 
     return f'''<section class="tab-panel" id="panel-knowledge" data-panel="knowledge"><div class="grid">
 {_view(base, request, project)}
@@ -153,5 +169,5 @@ def knowledge_fragment(base: Any, request: Request) -> str:
 {('<div class="scroll" style="margin-top:12px"><table><thead><tr><th>Item</th><th>Kind</th><th>Score</th><th>Best chunk</th></tr></thead><tbody>' + (''.join(search_rows) or '<tr><td colspan="4" class="muted">No matches</td></tr>') + '</tbody></table></div>' if query else '')}</section>
 
 <section class="card wide"><div class="panel-title"><h2>Memories + Skills</h2><span class="badge">{len(items)} shown</span></div>
-<div class="scroll"><table><thead><tr><th>Item</th><th>Kind</th><th>Owner / project</th><th>Priority</th><th></th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="5" class="muted">No persistent context in this project filter</td></tr>'}</tbody></table></div></section>
+{legend}<div class="scroll"><table><thead><tr><th>Item</th><th>Kind</th><th>Owner / project</th><th>Priority</th><th></th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="5" class="muted">No persistent context in this project filter</td></tr>'}</tbody></table></div></section>
 </div></section>'''
