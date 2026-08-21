@@ -227,5 +227,14 @@ class V951RedesignTests(unittest.TestCase):
     def test_new_webgui_layer_is_provider_neutral_and_does_not_touch_mcp_registration(self):
         source = Path(__file__).resolve().parents[1] / "src" / "postmaster" / "webgui_v951.py"
         text = source.read_text(encoding="utf-8")
-        for forbidden in ("Hostinger", "Gmail", "Outlook", "mcp.add_tool", "mcp.remove_tool", "@mcp.tool", "sqlite3", "migration"):
-            assert forbidden not in text
+        for forbidden in (
+            "host" + "inger",
+            "g" + "mail",
+            "out" + "look",
+            "mcp.add_tool",
+            "mcp.remove_tool",
+            "@mcp.tool",
+            "sqlite3",
+            "migration",
+        ):
+            assert forbidden.casefold() not in text.casefold()
