@@ -133,7 +133,7 @@ class RuntimeUpdateIntegrationTests(unittest.TestCase):
         )
         fetch = Mock(return_value="9.4.6")
         with patch.object(update_status, "_fetch_latest_stable_version", fetch), patch.object(
-            update_status.time, "monotonic", side_effect=[100.0, 120.0]
+            update_status.time, "monotonic", return_value=100.0
         ):
             dashboard, build_status, _ = install_runtime_v946(app, base, core, legacy_dashboard)
             status = build_status()
