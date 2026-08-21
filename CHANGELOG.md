@@ -2,6 +2,19 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.5.2 - 2026-08-21
+
+### Fixed
+- Fixed the Mail Health browser refresh flow by registering the authenticated dashboard route before the catch-all MCP mount. Refresh remains a CSRF-verified POST, reuses the existing `test_email_account` diagnostics with `refresh=True`, and returns to the structured Mail Health view; defensive GET navigation redirects without executing a refresh.
+- Fixed Inbox search and message-detail browser navigation to reuse the existing `search_emails` and `get_email` paths with real message UIDs while preserving account, mailbox, subject, text, since-days and unread-only state across View and Back-to-results navigation.
+- Fixed dashboard URL composition so empty query parameters are removed, query strings precede fragments, Inbox does not inherit project scope, and project-scoped Tasks / Knowledge / Files / Projects views retain their non-empty project filter.
+- Added route-level browser regression coverage for Mail Health POST/GET behavior and CSRF, Inbox argument forwarding and UID/detail navigation, state preservation, URL canonicalization and route ordering before the catch-all mount.
+
+### Compatibility / security / deployment
+- **WebGUI-only patch:** no MCP command names are added, removed or renamed; SMTP/IMAP protocol, DSN, retry/backoff, throttling, suppression, tracking, MIME, scheduler, Knowledge, File Store, account-store and recipient-policy semantics are unchanged.
+- No database schema or migration, dependency/`requirements.txt`, workflow, environment variable, port, volume, Cloudflare, Portainer/bootstrap or `postmaster-mcp.yml` change is introduced.
+- No new public callback endpoint is added. The Inbox search helper is authenticated dashboard navigation only, and Mail Health continues through the existing CSRF verification path.
+
 ## 9.5.1 - 2026-08-21
 
 ### Added
