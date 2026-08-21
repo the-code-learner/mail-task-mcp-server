@@ -16,6 +16,7 @@ for _name in dir(_core):
 _base = _core._base
 mcp = _core.mcp
 app = _core.app
+_tracking_dashboard_fragment = _core._tracking_dashboard_fragment
 
 
 def _task_dashboard_fragment(request):
