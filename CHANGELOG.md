@@ -2,6 +2,34 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.4.6 - 2026-08-21
+
+### Added
+- Persistent File Store attachments through the existing `attachments` structure using `{"file_id":"..."}` with optional MIME-only `filename` and `media_type` overrides. File bytes are resolved exclusively server-side from the canonical persistent blob and never require Base64, MCP resource handoff, or signed download URLs.
+- Tracked Persistent File Store downloads through the existing `/t/c/<opaque-token>` public tracking infrastructure. Internal `postmaster-file:<file_id>` links in existing `body_html` are resolved before delivery and the recipient receives only a cryptographically random per-delivery tracking token.
+- Lazy on-demand stable-release checks shared by `build_status` and the WebGUI footer with a 60-second process cache. `build_status` now adds `latest_version`, `update_available`, `update_checked_at`, `update_last_attempt_at`, `update_check_status` and the cache TTL without changing its name or inputs.
+- WebGUI footer update status: `Postmaster vX.Y.Z · Up to date`, `Update available: vX.Y.Z`, or a non-false-negative unavailable/last-known state after remote failures.
+- Regression coverage for all three attachment sources, metadata defaults/overrides, missing/unauthorized/corrupt stored files, size limits, mixed attachments, reply/follow-up drafts and sends, opaque tracked downloads, revocation/expiry/unavailable targets, tracking/provider classification, and the shared 60-second version cache.
+
+### Changed
+- The common v9.4.6 runtime mail client resolves Persistent File Store attachment records in the order record → owner/project authorization → canonical blob → validated filename/MIME → MIME attachment, so `create_draft`, `create_reply_draft`, `create_follow_up_draft`, `send_email`, `reply_email` and `follow_up_email` inherit the new source without parallel per-command implementations.
+- `tracking_links` receives an automatic, idempotent additive migration for `target_type`, internal stored-file reference, download filename/media type, status, expiry and revocation timestamps. Existing URL rows default to `target_type='url'`; click rows, the historical `event_type='link'`, the unique-click key and query-time provider/scanner classification remain unchanged.
+- Stored-file public download targets reuse the existing campaign/delivery/link association and `record_click` pipeline. Unknown, revoked, expired and unavailable tokens intentionally return the same non-descriptive public 404 response.
+- The latest-version checker preserves the last known good remote version when a refresh fails. With no previous successful value, `update_available` is unknown (`null`) rather than falsely reporting `false`. Explicitly pinned deployments still report a newer stable release when one exists but never auto-upgrade at runtime.
+
+### Security / deployment
+- Public stored-file URLs never contain `file_id` in the path, query string or reversible encoding. There is no public `?file_id=` lookup and no new public File Store endpoint.
+- The existing `/t/c/*` Cloudflare exposure, public base URL, opaque token generator, event/fingerprint pipeline and provider classification are reused. No new port, domain, Cloudflare rule, mandatory environment variable or signed File Store URL is introduced.
+- The pre-existing `/files/*` signed handoff remains a separate client-download feature and is not used by File Store → email attachment or tracked stored-file delivery.
+- The Persistent File Store and analytics schema remain under the existing `/data` volumes. The migration is backward-compatible and idempotent for existing databases.
+- `postmaster-mcp.yml` is unchanged. No new dependency is added; the existing hash-based persistent virtualenv/bootstrap behavior is unchanged.
+
+### MCP compatibility
+- **No MCP commands added, removed or renamed.**
+- Existing email command names and signatures remain unchanged. The only backward-compatible structured input extension is that `attachments[]` may now use `{"file_id":"..."}` with optional `filename` / `media_type` MIME-only overrides; existing `content_base64` and `source_mailbox` + `source_uid` sources continue unchanged.
+- The internal `postmaster-file:<file_id>` href is interpreted inside the already-existing `body_html` string and does not add a command or a new input parameter.
+- `build_status` keeps the same name and zero-input signature; only informational output fields are added.
+
 ## 9.4.5 - 2026-08-21
 
 ### Added
