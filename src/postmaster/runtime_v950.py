@@ -43,6 +43,7 @@ def _safe_json(value: Any) -> str:
 
 def _standards_panel(base: Any) -> str:
     suppressions = reliability_store().list_suppressions(active_only=True, limit=100)
+    csrf = escape(str(base._csrf_value()))
     rows = "".join(
         "<tr>"
         f"<td>{escape(str(row.get('recipient') or ''))}</td>"
@@ -51,6 +52,7 @@ def _standards_panel(base: Any) -> str:
         f"<td>{escape(str(row.get('updated_at') or ''))}</td>"
         "<td>"
         '<form method="post" action="/dashboard/suppression/unsuppress" style="display:inline">'
+        f'<input type="hidden" name="csrf" value="{csrf}">'
         f'<input type="hidden" name="recipient" value="{escape(str(row.get("recipient") or ""), quote=True)}">'
         '<button type="submit">Unsuppress</button></form>'
         "</td></tr>"
@@ -64,12 +66,14 @@ def _standards_panel(base: Any) -> str:
   <p>Provider-independent SMTP/IMAP capability discovery, TLS, DNS, quota, DSN, retry and local suppression diagnostics.</p>
   <p><strong>Tracking and newsletter mode are independent.</strong> Open/click tracking never enables unsubscribe headers automatically.</p>
   <form method="post" action="/dashboard/mail-health/refresh" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+    <input type="hidden" name="csrf" value="{csrf}">
     <label>Account ID <input name="account_id" placeholder="default"></label>
     <label>DKIM selector (optional) <input name="dkim_selector" placeholder="selector"></label>
     <button type="submit">Refresh health</button>
   </form>
   <h3 style="margin-top:18px">Local suppression</h3>
   <form method="post" action="/dashboard/suppression/suppress" style="display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+    <input type="hidden" name="csrf" value="{csrf}">
     <label>Recipient <input name="recipient" type="email" required placeholder="person@example.com"></label>
     <label>Reason
       <select name="reason"><option value="manual">manual</option><option value="unsubscribe">unsubscribe</option></select>
