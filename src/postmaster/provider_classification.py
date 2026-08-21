@@ -12,6 +12,8 @@ PROVIDER_CLASSIFICATIONS = {
     "known_email_proxy",
 }
 
+_MULTI_LINK_BURST_SECONDS = 2.0
+
 
 def _parse_time(value: Any) -> float | None:
     text = str(value or "").strip()
@@ -64,11 +66,79 @@ def _changed_nonempty(left: Any, right: Any) -> bool:
     return bool(a and b and a != b)
 
 
+def _multi_link_burst_points(delta_seconds: float) -> int:
+    """Score same-fingerprint fetches of distinct links that are too fast for manual clicks."""
+    if delta_seconds <= 0.100:
+        return 95
+    if delta_seconds <= 0.250:
+        return 90
+    if delta_seconds <= 1.000:
+        return 80
+    if delta_seconds <= _MULTI_LINK_BURST_SECONDS:
+        return 70
+    return 0
+
+
+def _multi_link_burst_evidence(
+    events: list[dict[str, Any]],
+) -> dict[int, tuple[float, str]]:
+    """Return symmetric cross-link burst evidence indexed by source row.
+
+    A burst requires the same delivery and fingerprint but a different logical link.
+    Evidence is query-time only and does not mutate stored rows or the unique-click key.
+    """
+    grouped: dict[tuple[str, str], list[tuple[int, dict[str, Any], float]]] = defaultdict(list)
+    for index, event in enumerate(events):
+        delivery_id = str(event.get("delivery_id") or "")
+        fingerprint = str(event.get("client_fingerprint") or "")
+        link_id = str(event.get("link_id") or "")
+        observed = _parse_time(event.get("observed_at"))
+        if delivery_id and fingerprint and link_id and observed is not None:
+            grouped[(delivery_id, fingerprint)].append((index, event, observed))
+
+    evidence: dict[int, tuple[float, str]] = {}
+    for rows in grouped.values():
+        ordered = sorted(rows, key=lambda item: (item[2], int(item[1].get("id") or 0)))
+        for pos, (index, event, observed) in enumerate(ordered):
+            link_id = str(event.get("link_id") or "")
+            best: tuple[float, str] | None = None
+            left = pos - 1
+            while left >= 0:
+                _other_index, other, other_time = ordered[left]
+                delta = observed - other_time
+                if delta > _MULTI_LINK_BURST_SECONDS:
+                    break
+                other_link = str(other.get("link_id") or "")
+                if other_link and other_link != link_id:
+                    best = (delta, other_link)
+                    break
+                left -= 1
+
+            right = pos + 1
+            while right < len(ordered):
+                _other_index, other, other_time = ordered[right]
+                delta = other_time - observed
+                if delta > _MULTI_LINK_BURST_SECONDS:
+                    break
+                other_link = str(other.get("link_id") or "")
+                if other_link and other_link != link_id:
+                    if best is None or delta < best[0]:
+                        best = (delta, other_link)
+                    break
+                right += 1
+
+            if best is not None:
+                evidence[index] = best
+    return evidence
+
+
 def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return click events enriched with a reversible, query-time provider likelihood.
 
     The raw event rows are never mutated or discarded. The heuristic intentionally combines
     multiple weak signals instead of treating timing, geography or User-Agent as proof on its own.
+    Cross-link same-fingerprint bursts within two seconds are treated as strong scanner/provider
+    evidence because distinct manual clicks cannot plausibly occur milliseconds apart.
     """
     source_rows = [dict(event) for event in events]
 
@@ -79,6 +149,8 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
         link_id = str(event.get("link_id") or "")
         if delivery_id and fingerprint and link_id:
             fingerprint_links[(delivery_id, fingerprint)].add(link_id)
+
+    burst_evidence = _multi_link_burst_evidence(source_rows)
 
     grouped: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = defaultdict(list)
     for index, event in enumerate(source_rows):
@@ -146,10 +218,19 @@ def classify_click_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
                         score += 10
                         reasons.append("User-Agent changed")
 
+                burst = burst_evidence.get(index)
+                if burst is not None:
+                    burst_delta, other_link = burst
+                    score += _multi_link_burst_points(burst_delta)
+                    reasons.append(
+                        "multi-link burst: same fingerprint fetched distinct links "
+                        f"{burst_delta:.3f}s apart (other link {other_link})"
+                    )
+
                 delivery_id = str(event.get("delivery_id") or "")
                 fingerprint = str(event.get("client_fingerprint") or "")
                 consistent_links = len(fingerprint_links.get((delivery_id, fingerprint), set())) if fingerprint else 0
-                if consistent_links >= 2:
+                if consistent_links >= 2 and burst is None:
                     score -= 25
                     reasons.append(f"fingerprint observed consistently across {consistent_links} links in same delivery")
 
