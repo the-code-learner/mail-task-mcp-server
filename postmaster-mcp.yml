@@ -119,7 +119,7 @@ services:
             payload = json.load(handle)
         if not isinstance(payload, dict):
             raise RuntimeError("runtime control must be an object")
-        stable = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+        stable = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
         selector = str(payload.get("selector") or "").strip()
         restart_ref = str(payload.get("restart_ref_once") or "").strip()
         if selector and selector != "latest" and not stable.fullmatch(selector):
