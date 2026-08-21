@@ -642,7 +642,7 @@ class PostmasterV950MailClient(PostmasterV946MailClient):
             return {"initialized": True, "highwater_uid": self.initialize_inbound_highwater(), "processed": []}
         with self._imap() as conn:
             self._select(conn, self.settings.inbox_mailbox, readonly=True)
-            typ, data = conn.uid("SEARCH", None, f"UID {previous + 1}:*")
+            typ, data = conn.uid("SEARCH", None, "UID", f"{previous + 1}:*")
             if typ != "OK":
                 raise MailBridgeError("IMAP search failed for inbound changes")
             uids = [value for value in (data[0].decode().split() if data and data[0] else []) if value.isdigit()]
