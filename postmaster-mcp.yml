@@ -101,8 +101,49 @@ services:
         REQUESTED="$${POSTMASTER_VERSION:-$${POSTMASTER_REF:-latest}}"
         CHECK_UPDATES="$${POSTMASTER_CHECK_UPDATES_ON_START:-true}"
         FORCE_REFRESH="$${POSTMASTER_FORCE_REFRESH:-$${POSTMASTER_REFRESH_ON_START:-false}}"
+        CONTROL_FILE="$${POSTMASTER_RUNTIME_CONTROL_PATH:-$$APP_ROOT/.postmaster-runtime-control.json}"
+        CONTROL_RESTART_REF=""
+        CONTROL_CHECK_ONCE="false"
         CURRENT="$$APP_ROOT/current"
         mkdir -p "$$APP_ROOT/releases"
+
+        if [ -s "$$CONTROL_FILE" ]; then
+          export CONTROL_FILE
+          if CONTROL_VALUES="$$(python - <<'PY'
+        import json
+        import os
+        import re
+
+        path = os.environ["CONTROL_FILE"]
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            raise RuntimeError("runtime control must be an object")
+        stable = re.compile(r"^v[0-9]+\.[0-9]+\.[0-9]+$")
+        selector = str(payload.get("selector") or "").strip()
+        restart_ref = str(payload.get("restart_ref_once") or "").strip()
+        if selector and selector != "latest" and not stable.fullmatch(selector):
+            raise RuntimeError("invalid runtime control selector")
+        if restart_ref and not stable.fullmatch(restart_ref):
+            raise RuntimeError("invalid one-shot restart ref")
+        print(selector)
+        print(restart_ref)
+        print("true" if payload.get("check_updates_once") is True else "false")
+        PY
+          )"; then
+            CONTROL_REQUESTED="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '1p')"
+            CONTROL_RESTART_REF="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '2p')"
+            CONTROL_CHECK_ONCE="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '3p')"
+            if [ -n "$$CONTROL_REQUESTED" ]; then
+              REQUESTED="$$CONTROL_REQUESTED"
+            fi
+            if [ "$$CONTROL_CHECK_ONCE" = "true" ]; then
+              CHECK_UPDATES="true"
+            fi
+          else
+            echo "WARNING: ignoring invalid Postmaster runtime control state." >&2
+          fi
+        fi
 
         case "$$CHECK_UPDATES" in
           true|false) ;;
@@ -113,8 +154,8 @@ services:
           [0-9]*.[0-9]*.[0-9]*) REQUESTED="v$$REQUESTED" ;;
         esac
 
-        REF=""
-        if [ "$$REQUESTED" = "latest" ]; then
+        REF="$$CONTROL_RESTART_REF"
+        if [ -z "$$REF" ] && [ "$$REQUESTED" = "latest" ]; then
           if [ "$$CHECK_UPDATES" = "false" ] && [ -x "$$CURRENT/scripts/start.sh" ] && [ -s "$$CURRENT/.postmaster-source-ready" ]; then
             REF="$$(sed -n '1p' "$$CURRENT/.postmaster-source-ready" | tr -d '\r\n')"
             if [ -n "$$REF" ]; then
@@ -171,7 +212,7 @@ services:
               exit 1
             fi
           fi
-        else
+        elif [ -z "$$REF" ]; then
           REF="$$REQUESTED"
         fi
 
@@ -252,6 +293,28 @@ services:
 
         rm -f "$$CURRENT"
         ln -s "$$TARGET" "$$CURRENT"
+
+        if [ -s "$$CONTROL_FILE" ] && { [ -n "$$CONTROL_RESTART_REF" ] || [ "$$CONTROL_CHECK_ONCE" = "true" ]; }; then
+          export CONTROL_FILE
+          if ! python - <<'PY'
+        import json
+        import os
+        import pathlib
+
+        path = pathlib.Path(os.environ["CONTROL_FILE"])
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            payload.pop("restart_ref_once", None)
+            payload.pop("check_updates_once", None)
+            temporary = path.with_name(path.name + ".tmp")
+            temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+            temporary.replace(path)
+        PY
+          then
+            echo "WARNING: could not clear one-shot Postmaster runtime control state." >&2
+          fi
+        fi
+
         exec "$$CURRENT/scripts/start.sh"
     healthcheck:
       test:
