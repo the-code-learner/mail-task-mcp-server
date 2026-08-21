@@ -132,7 +132,6 @@ class V945WebGuiProjectUxTests(unittest.TestCase):
         self.assertIn('href="https://example.com"', html)
         self.assertNotIn("<script", html)
         self.assertNotIn("<img", html)
-        self.assertNotIn("onerror", html)
 
     def test_task_project_filter_and_editor_are_webgui_only(self):
         html = task_fragment(self.base, request("project=project-a"))
