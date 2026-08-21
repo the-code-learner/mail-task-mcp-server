@@ -68,6 +68,10 @@ def _editor(base: Any, request: Request, project: str | None, show_completed: bo
         return f'<section class="card wide"><div class="panel-title"><h2>Edit task</h2><a href="{close}"><button type="button">Close</button></a></div><div class="flash">Completed tasks are immutable.</div></section>'
     payload = json.dumps(item.get("payload") or {}, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     approval = str(item.get("approval_mode") or "approval_required")
+    approval_options = "".join(
+        f'<option value="{value}"{" selected" if approval == value else ""}>{value}</option>'
+        for value in ("approval_required", "automatic", "manual_only")
+    )
     return f'''<section class="card wide">
 <div class="panel-title"><h2>Edit task</h2><a href="{close}"><button type="button">Cancel</button></a></div>
 <p class="small muted">WebGUI editor only. It uses the existing scheduler update fields; the public MCP/API task contract is unchanged.</p>
@@ -84,8 +88,7 @@ def _editor(base: Any, request: Request, project: str | None, show_completed: bo
 </div>
 <div class="field" style="margin-top:10px"><label>Description</label><textarea name="description" rows="4">{escape(str(item.get("description") or ""))}</textarea></div>
 <div class="field" style="margin-top:10px"><label>Payload (JSON)</label><textarea name="payload" rows="8">{escape(payload)}</textarea></div>
-<div class="row" style="margin-top:10px"><div class="field"><label>Approval mode</label>
-<select name="approval_mode"><option value="approval_required"{" selected" if approval == "approval_required" else ""}>approval_required</option><option value="automatic"{" selected" if approval == "automatic" else ""}>automatic</option></select></div>
+<div class="row" style="margin-top:10px"><div class="field"><label>Approval mode</label><select name="approval_mode">{approval_options}</select></div>
 <div class="field grow"><label>Read-only identity</label><div class="mono small">{escape(str(item.get("owner_id") or ""))} / {escape(str(item.get("project_id") or ""))} · {escape(str(item.get("action_type") or ""))}</div></div>
 <button class="primary" type="submit">Save task</button></div>
 </form></section>'''
