@@ -2,6 +2,20 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.5.4 - 2026-08-22
+
+### Added
+- Integrated existing outbound tracking into `Sent`, `INBOX.Sent` and each account's configured Sent mailbox in the WebGUI. Sent rows now show `Non tracciata`, `Nessuna attività`, `Apertura rilevata`, `Link cliccato`, or multi-recipient aggregates such as `Aperti 2/3 · Click 1/3`.
+- Added a read-only Tracking section to Sent message detail, grouped by delivery/recipient and showing recipient role, delivery/conversation state, observed open counts and timestamps, total/unique click metrics, first/last click, and clicked links with anchor text and original destination.
+
+### Tracking semantics / compatibility
+- Sent correlation is strictly `account_id + Message-ID`; no heuristic matching by subject, recipients or timestamps is introduced. Campaign expansion is used only after an exact correlated delivery is found so multi-recipient sends retain per-delivery detail.
+- Open telemetry remains observed activity rather than proof of human reading. Existing query-time provider/scanner interpretation remains separate from authoritative raw events, and the unique-click definition remains `delivery_id + link_id + client_fingerprint`.
+- The sender clean Sent copy remains free of active recipient tracking pixels and tracking redirects; SMTP/IMAP behavior, tracking storage/schema, DSN, retry/backoff, throttling, suppression, MIME, scheduler, Knowledge, File Store and recipient policy are unchanged.
+- No MCP command names are added, removed or renamed; the mapped MCP surface remains 90 functions and `new_mail_mcp_commands` remains `0`.
+- No database migration, dependency/`requirements.txt` change or `postmaster-mcp.yml` change is required.
+- Release and production deployment remain separate; this source release does not itself restart, deploy or switch production.
+
 ## 9.5.3 - 2026-08-21
 
 ### Fixed
