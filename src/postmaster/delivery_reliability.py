@@ -65,6 +65,10 @@ def classify_smtp_failure(exc: BaseException, *, phase: str = "connect") -> dict
         classification = "authentication_failure"
         temporary = False
         uncertain = False
+    elif isinstance(exc, smtplib.SMTPNotSupportedError):
+        classification = "unsupported_smtp_capability"
+        temporary = False
+        uncertain = False
     elif isinstance(exc, smtplib.SMTPRecipientsRefused):
         codes = []
         for _, response in getattr(exc, "recipients", {}).items():
@@ -483,7 +487,7 @@ class ReliabilityStore:
             if row.get("conversation_state") == "replied":
                 item["replies"] += 1
         temporary_attempts = sum(1 for row in attempts if row["classification"] in {"temporary_smtp_failure", "timeout", "connection_failure"})
-        permanent_attempts = sum(1 for row in attempts if row["classification"] in {"permanent_smtp_failure", "authentication_failure"})
+        permanent_attempts = sum(1 for row in attempts if row["classification"] in {"permanent_smtp_failure", "authentication_failure", "unsupported_smtp_capability"})
         return {
             "observed": {"deliveries": total, "hard_bounces": hard, "soft_bounces": soft, "human_replies": len(human_replies), "auto_replies": len(auto_replies), "active_suppressions": int(suppressions), "temporary_failure_attempts": temporary_attempts, "permanent_failure_attempts": permanent_attempts},
             "rates": {"bounce_rate": round(((hard + soft) / total) * 100.0, 2) if total else 0.0, "hard_bounce_rate": round((hard / total) * 100.0, 2) if total else 0.0, "soft_bounce_rate": round((soft / total) * 100.0, 2) if total else 0.0, "human_response_rate": round((len(human_replies) / total) * 100.0, 2) if total else 0.0, "auto_reply_rate": round((len(auto_replies) / total) * 100.0, 2) if total else 0.0},
