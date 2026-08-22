@@ -111,6 +111,42 @@ class OutboundSafetyV960Tests(unittest.TestCase):
         self.assertTrue(first["sent"])
         self.assertTrue(forced["sent"])
 
+        keyed_payload = {
+            "to": ["b@example.net"],
+            "subject": "B",
+            "body": "same visible message with fresh keys",
+        }
+        self.store.execute(
+            account_id="sender",
+            action="send_email",
+            payload=keyed_payload,
+            duplicate_payload=keyed_payload,
+            callback=self.smtp_send,
+            idempotency_key="guard-key-1",
+        )
+        guarded_with_fresh_key = self.store.execute(
+            account_id="sender",
+            action="send_email",
+            payload=keyed_payload,
+            duplicate_payload=keyed_payload,
+            callback=self.smtp_send,
+            idempotency_key="guard-key-2",
+        )
+        self.assertEqual(self.calls, 3)
+        self.assertTrue(guarded_with_fresh_key["duplicate_guard_replay"])
+        self.assertFalse(guarded_with_fresh_key["smtp_send_performed"])
+        forced_with_fresh_key = self.store.execute(
+            account_id="sender",
+            action="send_email",
+            payload=keyed_payload,
+            duplicate_payload=keyed_payload,
+            callback=self.smtp_send,
+            idempotency_key="guard-key-3",
+            force_send=True,
+        )
+        self.assertEqual(self.calls, 4)
+        self.assertTrue(forced_with_fresh_key["smtp_send_performed"])
+
     def test_delivery_uncertain_never_auto_retries(self):
         calls = 0
 
