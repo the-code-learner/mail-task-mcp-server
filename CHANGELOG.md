@@ -2,6 +2,35 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.0 - 2026-08-23
+
+### Added
+- Persistent outbound safety reservations in `outbound_operations`, created atomically before the underlying SMTP/send backend. Caller-supplied idempotency keys replay the prior result for the same payload, reject key reuse with a different payload, and preserve conservative `delivery_uncertain` behavior without automatic resend.
+- A short-window duplicate fingerprint guard for equivalent visible outbound messages plus explicit `force_send` override for that heuristic guard only.
+- Static inbound privacy inspection for remote images, tracking pixels, remote CSS/backgrounds, links/domains, redirectors, tracking parameters, anchor-text/href mismatches, `cid:`/`data:` resources and MIME/header indicators. Inspection performs no URL GET/HEAD/DNS lookups and provides Bleach-sanitized HTML.
+- IMAP Special-Use/logical mailbox roles, Seen/Unseen listing state and IMAP timing metadata while preserving legacy mailbox/list contracts by default.
+- Automatic signed delivery-scoped unsubscribe URLs, non-destructive GET confirmation, suppression-list POST handling and RFC One-Click `List-Unsubscribe-Post` support. Public unsubscribe URLs reuse the canonical `PUBLIC_EMAIL_BASE_URL` with `PUBLIC_MCP_HOST` fallback; no parallel public-URL configuration is introduced.
+- Real many-to-many Knowledge scopes through `knowledge_item_scopes` plus `knowledge_scope_audit`, automatic legacy-primary backfill, primary owner/project reassignment and OR multi-project filtering. The WebGUI can edit additional owner/project scope pairs while retaining the legacy primary scope.
+- Server-rendered Inbox/Sent/Spam/Drafts/Trash role UX with full-row navigation, unread emphasis, safe inline Reader / Privacy / Links / Headers / MIME panes, Sent tracking detail, Inbox-integrated Compose and stable form idempotency keys for double-submit protection.
+- Mail Health presentation as `Mail Health — DNS & Deliverability`, separating account connectivity/TLS from domain authentication/transport policy without synthesizing a single good/bad score.
+
+### Changed
+- `get_email(...)` without `inspection` preserves the v9.5.x original `body_html` contract and explicitly marks it as original/unsanitized. `inspection="summary|full"` is sanitized by default; original HTML in inspection mode requires explicit `content_mode="raw"` plus `acknowledge_unsanitized_content_risk=true`.
+- Existing `send_email`, `reply_email` and `follow_up_email` gain additive `idempotency_key` / `force_send` controls and existing newsletter options gain automatic unsubscribe behavior without adding a parallel send path.
+- Existing Knowledge MCP tools retain their names while gaining additive `scopes` and/or `project_ids` arguments where applicable. Legacy `owner_id` / `project_id` remain the primary scope fields.
+- The v9.6 runtime installs as another composition layer above the existing runtime and WebGUI layers. Scheduler behavior remains registry-only; no autonomous task or mail worker is introduced.
+
+### Schema / compatibility
+- New additive tables are `outbound_operations`, `knowledge_item_scopes` and `knowledge_scope_audit`; legacy Knowledge primary owner/project columns remain authoritative compatibility fields and existing rows are backfilled idempotently.
+- The composed MCP surface remains exactly the existing 90 command names (`delta = 0`); v9.6 extends arguments/structured responses additively rather than adding or renaming commands.
+- Task and execution-profile ownership are not converted to the Knowledge many-to-many scope model; their existing project ownership remains unchanged to avoid cross-owner authorization risk.
+- No dependency or `requirements.txt` change is required.
+
+### Security / deployment
+- Inbound inspection is static-only and the WebGUI Reader always requests the sanitized inspection-aware representation; remote automatic resources are stripped from Reader HTML.
+- Automatic unsubscribe requires a canonical HTTPS public email base derived from `PUBLIC_EMAIL_BASE_URL` or `PUBLIC_MCP_HOST`; opening the signed GET URL alone never creates suppression.
+- `postmaster-mcp.yml` is intentionally unchanged. No deployment, restart, tag, release or merge is performed by this source-change tranche; those remain separate owner-controlled steps.
+
 ## 9.5.4 - 2026-08-22
 
 ### Added
@@ -167,7 +196,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 
 ### Compatibility / deployment
 - `create_job`, `update_job`, `pause_job`, `resume_job`, `complete_job`, `delete_job`, `get_job_history`, `list_due_jobs`, `scheduler_status`, recurrence advancement, approval/security and persistent task storage are unchanged.
-- No scheduler/database migration, environment variable, port, volume or Cloudflare rule is introduced.
+- No scheduler/database migration, environment variable, port, volume or public callback path is introduced.
 - `postmaster-mcp.yml` remains byte-for-byte unchanged. Existing `POSTMASTER_VERSION=latest` deployments with update checks enabled can select v9.4.4 with the normal restart/redeploy after the stable release is published.
 
 ## 9.4.3 - 2026-08-20
