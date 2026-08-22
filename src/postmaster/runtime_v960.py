@@ -69,6 +69,7 @@ def install_runtime_v960(
                     "safe_reader_html": True,
                     "imap_special_use_roles": True,
                     "seen_unseen_listing": True,
+                    "imap_operation_timings": True,
                     "automatic_unsubscribe": True,
                     "unsubscribe_get_is_non_destructive": True,
                     "list_unsubscribe_post_one_click": True,
@@ -95,6 +96,7 @@ def install_runtime_v960(
                     "junk_mailbox": client.junk_mailbox,
                     "sent_mailbox": client.settings.sent_mailbox,
                     "mailbox_roles": base._safe_call(client.mailbox_catalog),
+                    "mailbox_timings_ms": dict(client.last_timings_ms),
                     "attachment_download": True,
                     "attachment_text_read": True,
                     "mailbox_move": True,
@@ -107,6 +109,64 @@ def install_runtime_v960(
     core.mcp.remove_tool("mailbox_status")
     core.mcp.add_tool(mailbox_status, name="mailbox_status")
     base.mailbox_status = mailbox_status
+
+    def list_mailboxes(
+        account_id: str | None = None,
+        include_roles: bool = False,
+        include_timings: bool = False,
+    ):
+        """Read-only. Legacy calls return mailbox names; v9.6 can include Special-Use roles/timings."""
+        client = mail_client(account_id)
+        catalog = base._safe_call(client.mailbox_catalog)
+        if not isinstance(catalog, list):
+            return catalog
+        if include_roles or include_timings:
+            result: dict[str, Any] = {
+                "mailboxes": [str(row.get("name") or "") for row in catalog],
+            }
+            if include_roles:
+                result["mailbox_roles"] = catalog
+            if include_timings:
+                result["timings_ms"] = dict(client.last_timings_ms)
+            return result
+        return [str(row.get("name") or "") for row in catalog]
+
+    core.mcp.remove_tool("list_mailboxes")
+    core.mcp.add_tool(list_mailboxes, name="list_mailboxes")
+    base.list_mailboxes = list_mailboxes
+
+    def search_emails(
+        mailbox: str = "INBOX",
+        from_address: str | None = None,
+        to_address: str | None = None,
+        subject: str | None = None,
+        text: str | None = None,
+        since_days: int = 90,
+        unread_only: bool = False,
+        limit: int = 20,
+        account_id: str | None = None,
+        include_timings: bool = False,
+    ):
+        """Read-only. Search email; optional v9.6 timings keep the legacy list return by default."""
+        client = mail_client(account_id)
+        result = base._safe_call(
+            client.search_emails,
+            mailbox=mailbox,
+            from_address=from_address,
+            to_address=to_address,
+            subject=subject,
+            text=text,
+            since_days=since_days,
+            unread_only=unread_only,
+            limit=limit,
+        )
+        if include_timings and isinstance(result, list):
+            return {"emails": result, "timings_ms": dict(client.last_timings_ms)}
+        return result
+
+    core.mcp.remove_tool("search_emails")
+    core.mcp.add_tool(search_emails, name="search_emails")
+    base.search_emails = search_emails
 
     def get_email(
         mailbox: str,
