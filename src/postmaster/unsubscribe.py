@@ -25,17 +25,26 @@ def _b64decode(value: str) -> bytes:
         raise UnsubscribeError("invalid unsubscribe token") from exc
 
 
+def _canonical_public_base_url() -> str:
+    raw = (os.getenv("PUBLIC_EMAIL_BASE_URL") or "").strip().rstrip("/")
+    if raw:
+        return raw
+    host = (os.getenv("PUBLIC_MCP_HOST") or "").strip().rstrip("/")
+    if host:
+        return f"https://{host}"
+    return ""
+
+
 class UnsubscribeManager:
     """Signed capability tokens for delivery-specific unsubscribe actions."""
 
     def __init__(self, *, key_path: str | None = None, public_base_url: str | None = None) -> None:
         self.key_path = Path(key_path or os.getenv("UNSUBSCRIBE_KEY_PATH", "/data/unsubscribe.key"))
         self.public_base_url = (
-            public_base_url
-            or os.getenv("TRACKING_PUBLIC_BASE_URL")
-            or os.getenv("PUBLIC_BASE_URL")
-            or ""
-        ).strip().rstrip("/")
+            public_base_url.strip().rstrip("/")
+            if public_base_url is not None
+            else _canonical_public_base_url()
+        )
         self._key = self._load_or_create_key()
 
     def _load_or_create_key(self) -> bytes:
@@ -65,7 +74,7 @@ class UnsubscribeManager:
         base = self.public_base_url
         if not base.lower().startswith("https://") or len(base) <= len("https://"):
             raise UnsubscribeError(
-                "automatic unsubscribe requires TRACKING_PUBLIC_BASE_URL or PUBLIC_BASE_URL with HTTPS"
+                "automatic unsubscribe requires PUBLIC_EMAIL_BASE_URL or PUBLIC_MCP_HOST with HTTPS"
             )
         return base
 
