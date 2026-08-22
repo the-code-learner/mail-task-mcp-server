@@ -191,7 +191,7 @@ class OutboundSafetyStore:
                             return str(row["id"]), row, False
                         raise self._blocking_error(row, explicit=True)
 
-                if not key and not force_send and self.duplicate_window_seconds > 0:
+                if not force_send and self.duplicate_window_seconds > 0:
                     row = conn.execute(
                         """
                         SELECT * FROM outbound_operations
