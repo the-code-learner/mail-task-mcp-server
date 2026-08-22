@@ -196,7 +196,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 
 ### Compatibility / deployment
 - `create_job`, `update_job`, `pause_job`, `resume_job`, `complete_job`, `delete_job`, `get_job_history`, `list_due_jobs`, `scheduler_status`, recurrence advancement, approval/security and persistent task storage are unchanged.
-- No scheduler/database migration, environment variable, port, volume or public callback path is introduced.
+- No scheduler/database migration, environment variable, port, volume or Cloudflare rule is introduced.
 - `postmaster-mcp.yml` remains byte-for-byte unchanged. Existing `POSTMASTER_VERSION=latest` deployments with update checks enabled can select v9.4.4 with the normal restart/redeploy after the stable release is published.
 
 ## 9.4.3 - 2026-08-20
