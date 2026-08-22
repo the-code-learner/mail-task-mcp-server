@@ -1,17 +1,28 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from html import escape
 from typing import Any
 
-from .mail_v960 import PostmasterV960MailClient
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, PlainTextResponse
+from starlette.routing import Route
+
+from .mail_v960_unsubscribe import PostmasterV960NewsletterMailClient
 from .outbound_safety import OutboundSafetyStore
 from .runtime_v950 import reliability_store
 from .stored_file_delivery import stored_file_link_store
+from .unsubscribe import UnsubscribeError, UnsubscribeManager
 
 
 @lru_cache(maxsize=1)
 def outbound_safety_store() -> OutboundSafetyStore:
     return OutboundSafetyStore()
+
+
+@lru_cache(maxsize=1)
+def unsubscribe_manager() -> UnsubscribeManager:
+    return UnsubscribeManager()
 
 
 def install_runtime_v960(
@@ -30,8 +41,8 @@ def install_runtime_v960(
         )
         return True
 
-    def mail_client(account_id: str | None = None) -> PostmasterV960MailClient:
-        return PostmasterV960MailClient(
+    def mail_client(account_id: str | None = None) -> PostmasterV960NewsletterMailClient:
+        return PostmasterV960NewsletterMailClient(
             base.account_store().settings(account_id),
             file_store=base.file_store(),
             file_authorizer=authorize_stored_file,
@@ -39,6 +50,7 @@ def install_runtime_v960(
             tracking_store=stored_file_link_store(),
             reliability=reliability_store(),
             outbound_safety=outbound_safety_store(),
+            unsubscribe_manager=unsubscribe_manager(),
         )
 
     base.mail_client = mail_client
@@ -57,6 +69,9 @@ def install_runtime_v960(
                     "safe_reader_html": True,
                     "imap_special_use_roles": True,
                     "seen_unseen_listing": True,
+                    "automatic_unsubscribe": True,
+                    "unsubscribe_get_is_non_destructive": True,
+                    "list_unsubscribe_post_one_click": True,
                     "new_mail_mcp_commands": 0,
                 }
             )
@@ -131,11 +146,12 @@ def install_runtime_v960(
         unsubscribe_url: str | None = None,
         unsubscribe_email: str | None = None,
         one_click_unsubscribe: bool = False,
+        automatic_unsubscribe: bool = True,
         dsn_notify_success: bool = False,
         idempotency_key: str | None = None,
         force_send: bool = False,
     ):
-        """WRITE ACTION. v9.6 persistent idempotency + short-window duplicate protection."""
+        """WRITE ACTION. Persistent idempotency, duplicate guard and automatic newsletter unsubscribe."""
         return base._safe_call(
             mail_client(account_id).send_email,
             to=to,
@@ -152,6 +168,7 @@ def install_runtime_v960(
             unsubscribe_url=unsubscribe_url,
             unsubscribe_email=unsubscribe_email,
             one_click_unsubscribe=one_click_unsubscribe,
+            automatic_unsubscribe=automatic_unsubscribe,
             dsn_notify_success=dsn_notify_success,
             idempotency_key=idempotency_key,
             force_send=force_send,
@@ -247,5 +264,64 @@ def install_runtime_v960(
     core.mcp.add_tool(follow_up_email, name="follow_up_email")
     core.follow_up_email = follow_up_email
     base.follow_up_email = follow_up_email
+
+    async def unsubscribe_endpoint(request: Request):
+        token = str(request.path_params.get("token") or "")
+        try:
+            delivery_id = unsubscribe_manager().resolve(token)
+            delivery = base.analytics_store().get_delivery(delivery_id)
+            recipient = str(delivery.get("recipient") or "").strip()
+            if not recipient:
+                raise UnsubscribeError("delivery recipient unavailable")
+        except Exception:
+            return PlainTextResponse(
+                "Not found",
+                status_code=404,
+                headers={"Cache-Control": "no-store"},
+            )
+
+        if request.method == "POST":
+            source = "web_confirmation"
+            try:
+                form = await request.form()
+                if str(form.get("List-Unsubscribe") or "") == "One-Click":
+                    source = "list_unsubscribe_one_click"
+            except Exception:
+                source = "list_unsubscribe_one_click"
+            reliability_store().suppress(
+                recipient,
+                reason="unsubscribe",
+                source=source,
+            )
+            return HTMLResponse(
+                "<!doctype html><html><body><main><h1>Unsubscribed</h1>"
+                "<p>This address has been added to the local suppression list.</p>"
+                "</main></body></html>",
+                headers={"Cache-Control": "no-store"},
+            )
+
+        action = escape(str(request.url.path), quote=True)
+        return HTMLResponse(
+            "<!doctype html><html><body><main><h1>Unsubscribe</h1>"
+            "<p>Confirm that you want to stop future newsletter email to "
+            + escape(recipient)
+            + ".</p>"
+            f'<form method="post" action="{action}">'
+            '<button type="submit">Confirm unsubscribe</button></form>'
+            "<p>Opening this page alone does not unsubscribe you.</p>"
+            "</main></body></html>",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if not any(getattr(route, "path", "") == "/unsubscribe/{token}" for route in app.router.routes):
+        app.router.routes.insert(
+            0,
+            Route(
+                "/unsubscribe/{token}",
+                unsubscribe_endpoint,
+                methods=["GET", "POST"],
+                name="unsubscribe_v960",
+            ),
+        )
 
     return legacy_dashboard, build_status, mail_client
