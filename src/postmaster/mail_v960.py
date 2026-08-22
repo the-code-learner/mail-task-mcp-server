@@ -233,7 +233,7 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
     def _seen_from_fetch(data: Any) -> bool:
         for item in data or []:
             raw = item[0] if isinstance(item, tuple) else item
-            if isinstance(raw, bytes) and re.search(rb"(?i)(?:^|\s)\\Seen(?:\s|\))", raw):
+            if isinstance(raw, bytes) and re.search(rb"(?i)(?:^|[\s(])\\Seen(?:[\s)])", raw):
                 return True
         return False
 
