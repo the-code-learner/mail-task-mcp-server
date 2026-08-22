@@ -40,11 +40,8 @@ class UnsubscribeManager:
 
     def __init__(self, *, key_path: str | None = None, public_base_url: str | None = None) -> None:
         self.key_path = Path(key_path or os.getenv("UNSUBSCRIBE_KEY_PATH", "/data/unsubscribe.key"))
-        self.public_base_url = (
-            public_base_url.strip().rstrip("/")
-            if public_base_url is not None
-            else _canonical_public_base_url()
-        )
+        explicit_base = (public_base_url or "").strip().rstrip("/")
+        self.public_base_url = explicit_base or _canonical_public_base_url()
         self._key = self._load_or_create_key()
 
     def _load_or_create_key(self) -> bytes:
