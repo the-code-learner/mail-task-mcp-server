@@ -8,6 +8,7 @@ from . import runtime_core as _core
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
 from .runtime_v953 import install_runtime_v953
+from .runtime_v960 import install_runtime_v960
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -39,6 +40,9 @@ dashboard_home, build_status, mail_client = install_runtime_v950(
     app, _base, _core, dashboard_home, build_status
 )
 build_status = install_runtime_v953(_base, _core, build_status)
+dashboard_home, build_status, mail_client = install_runtime_v960(
+    app, _base, _core, dashboard_home, build_status
+)
 dashboard_home = install_webgui_v951(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v952(app, _base, dashboard_home)
 dashboard_home = install_webgui_v953(app, _base, _core, dashboard_home)
