@@ -7,10 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from postmaster.delivery_reliability import ReliabilityStore
+from postmaster.file_store import FileStore
 from postmaster.mail_bridge import Settings
 from postmaster.mail_v950 import PostmasterV950MailClient
 from postmaster.mail_v960 import PostmasterV960MailClient
 from postmaster.outbound_safety import OutboundSafetyStore
+
+
+def _test_file_store(db_path: str) -> FileStore:
+    path = Path(db_path)
+    return FileStore(str(path.with_name("files.db")), str(path.with_name("files")))
 
 
 class _StaticInboundClient(PostmasterV960MailClient):
@@ -20,6 +26,7 @@ class _StaticInboundClient(PostmasterV960MailClient):
             settings,
             reliability=ReliabilityStore(db_path),
             outbound_safety=OutboundSafetyStore(db_path),
+            file_store=_test_file_store(db_path),
         )
 
     @contextlib.contextmanager
@@ -54,6 +61,7 @@ class CompatibilityV960Tests(unittest.TestCase):
                 self.settings(),
                 reliability=ReliabilityStore(db),
                 outbound_safety=OutboundSafetyStore(db, duplicate_window_seconds=120),
+                file_store=_test_file_store(db),
             )
             backend_result = {
                 "ok": True,
