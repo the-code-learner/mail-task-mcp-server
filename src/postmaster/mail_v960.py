@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import time
+from datetime import datetime, timedelta, timezone
 from email import policy
 from email.message import Message
 from email.parser import BytesParser
@@ -97,6 +99,10 @@ def _mime_tree(msg: Message, depth: int = 0) -> dict[str, Any]:
     return node
 
 
+def _elapsed_ms(started: float) -> float:
+    return round((time.perf_counter() - started) * 1000.0, 2)
+
+
 class PostmasterV960MailClient(PostmasterV950MailClient):
     """v9.6 compatibility layer for outbound safety and privacy-aware inbound reads."""
 
@@ -109,6 +115,7 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
     ) -> None:
         super().__init__(settings, **kwargs)
         self.outbound_safety = outbound_safety or OutboundSafetyStore()
+        self.last_timings_ms: dict[str, float] = {}
 
     def _account_scope(self) -> str:
         return str(getattr(self.settings, "account_id", "") or self.settings.email_address or "default")
@@ -192,8 +199,11 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
         )
 
     def mailbox_catalog(self) -> list[dict[str, Any]]:
+        timings: dict[str, float] = {}
         with self._imap() as conn:
+            started = time.perf_counter()
             typ, data = conn.list()
+            timings["imap_list"] = _elapsed_ms(started)
             if typ != "OK":
                 raise MailBridgeError("Could not list IMAP mailboxes")
             records: list[dict[str, Any]] = []
@@ -212,6 +222,7 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
                 )
         role_order = {"received": 0, "sent": 1, "spam": 2, "drafts": 3, "trash": 4, "other": 5}
         records.sort(key=lambda row: (role_order.get(str(row["role"]), 9), str(row["name"]).casefold()))
+        self.last_timings_ms = timings
         return records
 
     def list_mailboxes(self) -> list[str]:
@@ -230,21 +241,102 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
         typ, data = conn.uid("FETCH", uid, "(FLAGS)")
         return bool(typ == "OK" and self._seen_from_fetch(data))
 
-    def search_emails(self, **kwargs: Any) -> list[dict[str, Any]]:
-        rows = super().search_emails(**kwargs)
-        mailbox = str(kwargs.get("mailbox") or self.settings.inbox_mailbox)
+    def search_emails(
+        self,
+        *,
+        mailbox: str = "INBOX",
+        from_address: str | None = None,
+        to_address: str | None = None,
+        subject: str | None = None,
+        text: str | None = None,
+        since_days: int = 90,
+        unread_only: bool = False,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 100:
+            raise MailBridgeError("limit must be between 1 and 100")
+        since_days = max(0, min(since_days, 3650))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
         role = classify_mailbox_role(mailbox, [], self.settings)
-        try:
-            with self._imap() as conn:
-                self._select(conn, mailbox, readonly=True)
-                for row in rows:
-                    row["seen"] = self._seen_for_uid(conn, str(row.get("uid") or ""))
-                    row["mailbox_role"] = role
-        except Exception:
-            for row in rows:
-                row.setdefault("seen", None)
+        timings = {"imap_search": 0.0, "imap_fetch": 0.0, "imap_flags": 0.0}
+
+        with self._imap() as conn:
+            self._select(conn, mailbox, readonly=True)
+            criteria = ["ALL"]
+            if unread_only:
+                criteria.append("UNSEEN")
+            started = time.perf_counter()
+            typ, data = conn.uid("SEARCH", None, *criteria)
+            timings["imap_search"] += _elapsed_ms(started)
+            if typ != "OK" or not data:
+                raise MailBridgeError("IMAP search failed")
+            uids = data[0].decode().split()
+            uids = list(reversed(uids[-self.settings.search_candidate_limit :]))
+
+            filters = {
+                "from": (from_address or "").casefold().strip(),
+                "to": (to_address or "").casefold().strip(),
+                "subject": (subject or "").casefold().strip(),
+                "text": (text or "").casefold().strip(),
+            }
+            results: list[dict[str, Any]] = []
+            for uid in uids:
+                started = time.perf_counter()
+                header_raw = self._fetch_headers(conn, uid)
+                timings["imap_fetch"] += _elapsed_ms(started)
+                header_msg = BytesParser(policy=policy.default).parsebytes(header_raw)
+                header_row = _message_to_dict(
+                    header_msg,
+                    uid=uid,
+                    mailbox=mailbox,
+                    include_body=False,
+                    truncated=False,
+                )
+                date_value = header_row.get("date")
+                if date_value:
+                    try:
+                        dt = datetime.fromisoformat(str(date_value))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt < cutoff:
+                            continue
+                    except Exception:
+                        pass
+                if filters["from"] and filters["from"] not in str(header_row["from"]).casefold():
+                    continue
+                if filters["to"] and filters["to"] not in str(header_row["to"]).casefold():
+                    continue
+                if filters["subject"] and filters["subject"] not in str(header_row["subject"]).casefold():
+                    continue
+
+                started = time.perf_counter()
+                raw, truncated = self._fetch_raw(conn, uid)
+                timings["imap_fetch"] += _elapsed_ms(started)
+                msg = BytesParser(policy=policy.default).parsebytes(raw)
+                row = _message_to_dict(
+                    msg,
+                    uid=uid,
+                    mailbox=mailbox,
+                    include_body=not truncated,
+                    truncated=truncated,
+                )
+                if filters["text"]:
+                    haystack = "\n".join(
+                        [str(row["subject"]), str(row["from"]), str(row["to"]), str(row["body"])]
+                    ).casefold()
+                    if filters["text"] not in haystack:
+                        continue
+                body = str(row.pop("body", ""))
+                row["snippet"] = re.sub(r"\s+", " ", body).strip()[:600]
+                started = time.perf_counter()
+                row["seen"] = self._seen_for_uid(conn, uid)
+                timings["imap_flags"] += _elapsed_ms(started)
                 row["mailbox_role"] = role
-        return rows
+                results.append(row)
+                if len(results) >= limit:
+                    break
+        self.last_timings_ms = {key: round(value, 2) for key, value in timings.items()}
+        return results
 
     def get_email(
         self,
@@ -255,9 +347,12 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
         content_mode: str = "safe",
         acknowledge_unsanitized_content_risk: bool = False,
     ) -> dict[str, Any]:
+        timings = {"imap_fetch": 0.0, "imap_flags": 0.0, "inspection": 0.0}
         with self._imap() as conn:
             self._select(conn, mailbox, readonly=True)
+            started = time.perf_counter()
             raw, truncated = self._fetch_raw(conn, uid)
+            timings["imap_fetch"] += _elapsed_ms(started)
             msg = BytesParser(policy=policy.default).parsebytes(raw)
             row = _message_to_dict(
                 msg,
@@ -266,7 +361,9 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
                 include_body=not truncated,
                 truncated=truncated,
             )
+            started = time.perf_counter()
             row["seen"] = self._seen_for_uid(conn, uid)
+            timings["imap_flags"] += _elapsed_ms(started)
         row["mailbox_role"] = classify_mailbox_role(mailbox, [], self.settings)
         original_html = str(row.get("body_html") or "")
         selected = (inspection or "").strip().casefold()
@@ -276,16 +373,20 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
                 "legacy_compatibility": True,
                 "warning": "body_html is the original message HTML and may reference remote resources",
             }
+            row["performance_ms"] = {key: round(value, 2) for key, value in timings.items()}
+            self.last_timings_ms = dict(row["performance_ms"])
             return row
         if selected not in {"summary", "full"}:
             raise MailBridgeError("inspection must be 'summary' or 'full'")
 
+        started = time.perf_counter()
         privacy = inspect_message(
             msg,
             body_html=original_html,
             body_text=str(row.get("body") or ""),
             mode=selected,
         )
+        timings["inspection"] = _elapsed_ms(started)
         safe_html = str(privacy.pop("sanitized_html", ""))
         mode = (content_mode or "safe").strip().casefold()
         if mode not in {"safe", "raw"}:
@@ -314,4 +415,6 @@ class PostmasterV960MailClient(PostmasterV950MailClient):
                 for name, value in msg.raw_items()
             ]
             row["mime"] = _mime_tree(msg)
+        row["performance_ms"] = {key: round(value, 2) for key, value in timings.items()}
+        self.last_timings_ms = dict(row["performance_ms"])
         return row
