@@ -17,6 +17,7 @@ from .webgui_v952 import install_webgui_v952
 from .webgui_v953 import install_webgui_v953
 from .webgui_v954 import install_webgui_v954
 from .webgui_v960 import install_webgui_v960
+from .webgui_v960_scopes import install_webgui_v960_scopes
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -51,6 +52,7 @@ dashboard_home = install_webgui_v952(app, _base, dashboard_home)
 dashboard_home = install_webgui_v953(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v954(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v960(app, _base, _core, dashboard_home)
+install_webgui_v960_scopes(app, _base)
 link_store = _core.link_store
 
 
