@@ -31,8 +31,13 @@ def _dedupe(values: Iterable[str], excluded: set[str], seen: set[str] | None = N
     return result
 
 
-def reply_all_plan(message: Message, settings: Any) -> dict[str, Any]:
-    """Plan a Reply-all draft without reading or exposing Bcc."""
+def reply_all_plan(message: Message, settings: Any, *, require_reply_target: bool = True) -> dict[str, Any]:
+    """Plan a Reply-all draft without reading or exposing Bcc.
+
+    ``require_reply_target=False`` is useful for Forward UI planning where the selected
+    message can legitimately be outbound from the current account; Forward does not reuse
+    the returned reply target.
+    """
     identities = sender_identity_addresses(settings)
     excluded = {value.casefold() for value in identities}
     from_values = _addresses(message, "From")
@@ -40,11 +45,12 @@ def reply_all_plan(message: Message, settings: Any) -> dict[str, Any]:
     preferred = reply_to if reply_to else from_values
     seen: set[str] = set()
     to = _dedupe(preferred, excluded, seen)
-    if not to:
+    if require_reply_target and not to:
         raise ValueError("No external Reply-To/From recipient remains after sender filtering")
 
     # Standard Reply-all UX: keep the sender/Reply-To in To, preserve all visible original
     # To/Cc participants as Cc after removing the current account, aliases and duplicates.
+    # Bcc is intentionally never read here.
     visible_original = _addresses(message, "To") + _addresses(message, "Cc")
     cc = _dedupe(visible_original, excluded, seen)
     message_id = str(message.get("Message-ID", "") or "").strip()
