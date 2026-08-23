@@ -88,6 +88,40 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
         self.assertIn("confirm_version_change", inspect.signature(core.build_status).parameters)
         self.assertIn("confirm_suppressed_recipients", inspect.signature(core.send_email).parameters)
 
+    def test_composed_runtime_exports_v960_v963_v964_schema_through_real_registry(self):
+        import postmaster.runtime as runtime
+
+        tools = asyncio.run(runtime.mcp.list_tools())
+        by_name = {tool.name: tool for tool in tools}
+        self.assertEqual(len(by_name), 90)
+
+        get_email = by_name["get_email"].input_schema["properties"]
+        self.assertTrue(
+            {"mailbox", "uid", "account_id", "inspection", "content_mode", "acknowledge_unsanitized_content_risk"}
+            <= set(get_email)
+        )
+
+        proxy_admin = by_name["set_amp_account_state"].input_schema["properties"]
+        self.assertTrue(
+            {
+                "privacy_proxy_worker_url", "privacy_proxy_secret", "privacy_proxy_enabled",
+                "tracking_obfuscation", "high_noise_decoy_enabled", "privacy_proxy_test",
+                "privacy_proxy_dismiss_offer",
+            }
+            <= set(proxy_admin)
+        )
+
+        build_properties = by_name["build_status"].input_schema["properties"]
+        self.assertTrue(
+            {"operation", "target_version", "force_refresh", "confirm_version_change"}
+            <= set(build_properties)
+        )
+        for name in ("send_email", "reply_email", "follow_up_email"):
+            self.assertIn(
+                "confirm_suppressed_recipients",
+                by_name[name].input_schema["properties"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
