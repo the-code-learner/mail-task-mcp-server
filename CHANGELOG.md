@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.7 - 2026-08-23
+
+### Fixed / changed
+- Replaced lifecycle-sensitive use of polymorphic MCP commands with six stable command names split by nature: `runtime_status`, `runtime_version_change_preview`, `runtime_version_change_execute`, `privacy_proxy_status`, `privacy_proxy_provisioning_preview`, and `privacy_proxy_provisioning_execute`. The v9.6.7 layer never removes/re-adds a legacy command name and keeps each new command schema/annotation set stable across discovery, preview, reconnect, approval, and execute.
+- Added truthful MCP annotations: status/preview commands are read-only and non-destructive; runtime status and Privacy Proxy status/preview are closed-world, runtime preview is open-world for stable GitHub release discovery, and execute commands are writes/open-world. Execute annotations conservatively set `destructiveHint=true` because the fixed command names include rollback/deprovision, while responses distinguish destructive rollback/deprovision from non-destructive update/pin/switch/prepare/provision/rotate/reconcile operations.
+- Replaced process-local v9.6.4/v9.6.6 confirmation state in the final v9.6.7 MCP flows with stateless HMAC-authenticated 300-second tokens plus persistent one-time nonce consumption in SQLite. Token issuance is read-only after startup initialization; execute atomically consumes the nonce, mismatched attempts consume it, replay is rejected across reconnect/restart, and the token carries only scope/nonce/timestamps plus a binding digest rather than secret material.
+- Runtime confirmations bind operation, exact verified stable `vX.Y.Z` target, current selector, current build and current local release identity. `update-latest` preview resolves an exact release and approved execute uses the existing one-shot `restart_ref_once` bootstrap control so the first restart cannot silently jump to a newer release discovered after approval.
+- Privacy Proxy confirmations retain the v9.6.6 action/Worker-origin/key-id/fingerprint/generation/pending binding and add the current local proxy/provisioning state. The generated proxy HMAC secret and Ed25519 private signing key remain excluded from MCP/chat/log/audit/error output.
+- Added MCP client lifecycle tests that perform separate connect/list/preview/disconnect/reconnect/list/execute/status sequences for runtime version control and Privacy Proxy provisioning, including stable schemas/annotations, read-only previews, controlled confirmation-backend restart, one-time replay rejection and current-state binding.
+
+### Compatibility / safety / deployment
+- The composed MCP command-name surface is 96 names (`delta = +6` from the historical 90 through v9.6.6). Six lifecycle commands are added; no command is removed. `build_status` and `set_amp_account_state` retain their v9.6.6-compatible schemas/behavior and are deprecated specifically for lifecycle-sensitive version-change/provisioning flows rather than being mutated again.
+- Existing v9.6.6 Ed25519 provisioning, public-key pinning/no-TOFU, server-to-server secret transfer, `pending -> verify -> active`, monotonic generations, replay/timestamp/origin/key/generation checks, SSRF/redirect controls, bounded previous-secret grace, reconcile, deprovision and legacy Worker `POSTMASTER_PROXY_SECRET` fallback remain covered.
+- New local confirmation persistence is additive: `/data/mcp_confirmation_v967.key` plus SQLite `/data/mcp_confirmation_v967.db` with `mcp_confirmation_consumed`. No new dependency is required and `requirements.txt` is unchanged.
+- `postmaster-mcp.yml` remains byte-for-byte unchanged at Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`; no Portainer/bootstrap edit is required for this source release.
+- Stable source/release publication remains separate from production activation. Publishing v9.6.7 does not itself restart, deploy, switch the production runtime, provision a production Worker, or enable the Privacy Proxy.
+
 ## 9.6.6 - 2026-08-23
 
 ### Added / changed
