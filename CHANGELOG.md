@@ -2,6 +2,22 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.9 - 2026-08-24
+
+### Fixed / changed
+- Added one shared passive-content service used by WebGUI and MCP. Safe Email and the first Full HTML intent remain zero-network; only an explicit authorized Full HTML fetch may request genuine passive rendering resources through the Privacy Proxy. Total fetch failure stays in Safe Email, action/navigation URLs are never auto-fetched, and browser/MCP diagnostics expose aggregate counts/state instead of raw proxy/Worker exception detail.
+- Reused the persistent mailbox remote-resource cache for both positive content and negative tombstones, changed newly generated resource keys to opaque privacy-preserving hashes, and added explicit refresh semantics. Cache-only reopen performs no origin fetch.
+- Moved High-Noise decoy invocation behind the shared genuine-work boundary: decoys run only when an explicitly authorized request has real passive origin cache misses, remain bounded by the existing privacy controls, and do not repeat on cache-only reopen.
+- Added explicit MCP command `fetch_email_remote_content`; normal `get_email` remains inspection/static and zero-network. The composed MCP command-name surface changes from 96 to 97 (`delta = +1`).
+- Corrected individualized outbound Sent archiving so a successful logical fanout creates exactly one canonical IMAP Sent APPEND while preserving distinct per-recipient delivery IDs and Message-IDs. Sender-side operation metadata maps To/Cc/Bcc and delivery IDs privately; Bcc remains absent from recipient MIME and is not rediscovered by reply/follow-up flows.
+- Enriched Sent WebGUI detail with To/Cc/Bcc from sender-private metadata while preserving the original date. Received detail never exposes sender-side Bcc metadata. The existing successful-detail-only Seen boundary remains unchanged and covered by its v9.6.8 regression test.
+- Replaced the ChatGPT/MCP-native preview-to-execute bearer confirmation-token lifecycle with persistent server-side pending approvals. Pending state uses exact binding digests, opaque preview IDs for correlation only, a hard maximum 300-second TTL, atomic one-shot consumption, replay/expiry/wrong-target/wrong-operation/stale-state rejection and restart-safe SQLite persistence; execute schemas no longer accept `confirmation_token`.
+
+### Storage / compatibility / safety / deployment
+- Added `/data/mcp_pending_approvals_v969.db` for pending approval state and `/data/outbound_operations_v969.db` for sender-private logical-operation/Sent/Bcc delivery mapping. The existing mailbox remote-resource table is reused; only the cache-key format moves to opaque hashes.
+- `requirements.txt` is unchanged; `postmaster-mcp.yml` is unchanged; the canonical Cloudflare Privacy Proxy Worker source is unchanged. No analytics schema change or new dependency is introduced.
+- This tranche prepares source/tests and release metadata only. No stable tag, GitHub release, merge, deployment, production runtime switch, Portainer change, Worker deployment or Cloudflare change is performed.
+
 ## 9.6.8 - 2026-08-23
 
 ### Fixed / changed
