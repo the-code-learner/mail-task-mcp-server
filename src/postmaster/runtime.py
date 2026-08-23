@@ -18,6 +18,7 @@ from .runtime_v963 import install_runtime_v963
 from .runtime_v964 import install_runtime_v964
 from .runtime_v966 import install_runtime_v966
 from .runtime_v967 import install_runtime_v967
+from .runtime_v968 import install_runtime_v968
 from .webgui_release_identity import install_webgui_release_identity, project_release_version
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
@@ -80,6 +81,11 @@ dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
 # JS lifecycle and it does not add MCP command names.
 build_status = install_runtime_v963(_base, _core, build_status)
 install_webgui_v963_high_noise(_webgui_v963)
+# v9.6.8 hardens the final composed boundaries before v9.6.3 routes capture their handlers:
+# individualized sends must canonicalize historical tracking first; Full HTML propagates safe
+# success/partial/failure state; successful received-message detail opens update IMAP/cache Seen.
+# This layer adds no MCP command names and does not change deployment YAML or production state.
+install_runtime_v968(_base, _core, _webgui_v963)
 install_webgui_v963(app, _base)
 # v9.6.4 keeps the public mail tool names/count stable while changing only outbound policy
 # semantics: canonical detracking, manual WebGUI recipient policy and per-send suppression consent.
