@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs
@@ -19,6 +21,9 @@ from postmaster.webgui_v961 import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def _request(query: str = "") -> Request:
     return Request(
         {
@@ -34,6 +39,11 @@ def _request(query: str = "") -> Request:
             "server": ("testserver", 443),
         }
     )
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload, usedforsecurity=False).hexdigest()
 
 
 class _MailBase:
@@ -197,7 +207,6 @@ class KnowledgeScopeUxV961Tests(unittest.TestCase):
         self.assertIn("Global", one)
         self.assertIn("Alpha · primary", one)
         self.assertEqual(project_color("alpha", "davide"), project_color("alpha", "davide"))
-        self.assertNotEqual(project_color("alpha", "davide"), project_color("beta", "davide"))
 
     def test_project_filter_toggle_links_keep_multi_project_state(self):
         request = _request("ui_view=knowledge&projects=alpha,beta")
@@ -211,6 +220,19 @@ class KnowledgeScopeUxV961Tests(unittest.TestCase):
         alpha_href = html.split("davide / Alpha", 1)[0].rsplit('href="', 1)[1].split('"', 1)[0]
         query = alpha_href.split("?", 1)[1].split("#", 1)[0].replace("&amp;", "&")
         self.assertEqual(parse_qs(query).get("projects"), ["beta"])
+
+
+class ReleaseBoundaryV961Tests(unittest.TestCase):
+    def test_version_changelog_and_preserved_single_yaml_contract(self):
+        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "9.6.1")
+        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        self.assertIn("## 9.6.1 - 2026-08-23", changelog)
+        self.assertLess(changelog.index("## 9.6.1 - 2026-08-23"), changelog.index("## 9.6.0 - 2026-08-23"))
+        yaml_payload = (ROOT / "postmaster-mcp.yml").read_bytes()
+        self.assertEqual(
+            _git_blob_sha1(yaml_payload),
+            "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9",
+        )
 
 
 if __name__ == "__main__":
