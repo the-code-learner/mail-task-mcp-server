@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.4 - 2026-08-23
+
+### Added / changed
+- Added canonical outbound detracking before any new delivery tracking: historical Postmaster click wrappers are resolved locally from persisted tracking data to their authoritative original URLs, historical open pixels are removed, nested tracker generations are normalized with cycle/depth guards, unresolved active-origin tracker tokens fail closed, and no historical tracking URL is fetched over HTTP or recorded as a new analytics event during normalization.
+- Applied the same canonical clean-input pipeline to sends, drafts, replies and follow-ups, tracked and untracked. Newly tracked recipient MIME receives at most the current generation of click/open instrumentation while archived Sent MIME is generated from the canonical clean body and remains free of current and historical recipient trackers.
+- Made WebGUI manual recipient authorization channel-aware: syntactically valid manual recipients do not require the MCP/automated recipient allowlist, the bypass exists only inside the manual operation context, and the persistent allowlist is never mutated or widened.
+- Made suppression confirmation channel-specific and per operation. WebGUI manual sends use a first-warning/no-send response followed by a second explicit confirmation for exactly the currently suppressed addresses; MCP/chat sends remain blocked before SMTP and require explicit user approval of the exact suppressed recipients before `confirm_suppressed_recipients` may be used for that single retry.
+- Extended the existing `build_status` MCP command, without adding a command name, with read-only update checks/version listing and guarded runtime version-control requests. `update-latest`, explicit pin/switch and rollback requests are preview-only until the assistant shows current version/build, current selector, exact target and operation type and obtains explicit approval in the active chat.
+- Added target/state-specific, process-local, short-lived one-time approval nonces for MCP version changes. A generic boolean is not sufficient; changing operation, target or current runtime state invalidates the confirmation, mismatched attempts consume it, and successful confirmations cannot be reused across later calls. `force_refresh` remains a separate read-only stable-release discovery action and never authorizes or triggers a version change.
+- Reused the existing runtime-control intent, stable-release filtering, single-YAML bootstrap, atomic source staging and restart-policy path for approved MCP update/version requests rather than adding a second deployment system. Stable application selectors remain `latest` or verified stable `vX.Y.Z` releases through this runtime-control surface.
+
+### Compatibility / safety / deployment
+- MCP command surface remains exactly 90 names (`delta = 0`). Existing send/reply/follow-up idempotency keys, duplicate/`force_send` guards, recipient authorization, suppression persistence, delivery-uncertainty behavior and all existing mail safety boundaries remain in force; `confirm_suppressed_recipients` and version-change confirmation are distinct, operation-scoped controls and create no persistent bypass.
+- Read-only `build_status`, update checks and stable-version listing require no version-change approval. A mutating version request never treats the tool call itself, a generic earlier instruction, or a target parameter alone as user approval; the tool description requires a new explicit active-chat approval before the exact one-time token may be retried.
+- `postmaster-mcp.yml` remains byte-for-byte unchanged at Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`; `requirements.txt` is unchanged and no new dependency or deployment topology is introduced.
+- Stable release publication and production runtime activation remain separate actions. Publishing v9.6.4 does not itself deploy, restart or version-switch production; any later real production update/version change must be separately approved and then verified from live `build_status` after bootstrap/restart completes.
+
 ## 9.6.3 - 2026-08-23
 
 ### Added / changed
