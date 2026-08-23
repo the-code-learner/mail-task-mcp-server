@@ -121,6 +121,7 @@ def inbox_prefetch_limit(request: Request) -> int:
 
 
 def render_inbox_v961(base: Any, request: Request) -> str:
+    """Delegate to the v9.6 Safe Reader contract: inspection="full", content_mode="safe"."""
     return _BASE_RENDER_INBOX(_InboxBaseProxy(base, inbox_prefetch_limit(request)), request)
 
 
