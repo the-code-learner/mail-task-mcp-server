@@ -16,6 +16,9 @@ const BLOCKED_HOSTS = new Set([
   "localhost", "localhost.localdomain", "metadata", "metadata.google.internal",
   "metadata.google.internal.", "instance-data", "instance-data.ec2.internal",
 ]);
+const BLOCKED_CLASSIFICATIONS = new Set([
+  "normal link", "analytics link", "unsubscribe", "action url", "redirector",
+]);
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -97,10 +100,10 @@ function blockedIPv4(parts) {
 function blockedIPv6(value) {
   const host = value.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "::" || host === "::1") return true;
-  if (host.startsWith("fc") || host.startsWith("fd")) return true; // fc00::/7
-  if (/^fe[89ab]/.test(host)) return true; // fe80::/10 link-local
-  if (host.startsWith("ff")) return true; // multicast
-  if (host.startsWith("2001:db8:")) return true; // documentation
+  if (host.startsWith("fc") || host.startsWith("fd")) return true;
+  if (/^fe[89ab]/.test(host)) return true;
+  if (host.startsWith("ff")) return true;
+  if (host.startsWith("2001:db8:")) return true;
   const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   return Boolean(mapped && blockedIPv4(parseIPv4(mapped[1]) || [0, 0, 0, 0]));
 }
@@ -141,11 +144,19 @@ async function assertPublicTarget(url) {
 }
 
 function minimizedTrackingUrl(input, enabled) {
-  if (!enabled) return input;
+  if (!enabled) return new URL(input.toString());
   const url = new URL(input.toString());
   for (const key of [...url.searchParams.keys()]) {
     if (TRACKING_PARAMS.has(key.toLowerCase()) || key.toLowerCase().startsWith("utm_")) url.searchParams.delete(key);
   }
+  return url;
+}
+
+function decoyVariant(input) {
+  const url = new URL(input.toString());
+  url.search = "";
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  url.searchParams.set("_", [...bytes].map((value) => value.toString(16).padStart(2, "0")).join(""));
   return url;
 }
 
@@ -185,11 +196,21 @@ function toBase64(bytes) {
 async function proxyFetch(payload) {
   const original = new URL(String(payload.url || ""));
   await assertPublicTarget(original);
-  const classification = String(payload.classification || "unknown");
-  if (["normal link", "analytics link", "unsubscribe", "action URL"].includes(classification)) {
-    throw new Error("navigation_or_action_url_not_proxyable");
+  const classification = String(payload.classification || "unknown").toLowerCase();
+  if (BLOCKED_CLASSIFICATIONS.has(classification)) throw new Error("navigation_or_action_url_not_proxyable");
+
+  const requestKind = String(payload.request_kind || "render").toLowerCase();
+  if (!new Set(["render", "decoy"]).has(requestKind)) throw new Error("request_kind_not_allowed");
+  const trackingObfuscation = Boolean(payload.tracking_obfuscation);
+  if (requestKind === "decoy" && !trackingObfuscation) throw new Error("decoy_requires_tracking_obfuscation");
+
+  let target = minimizedTrackingUrl(original, trackingObfuscation);
+  if (requestKind === "decoy") target = decoyVariant(target);
+  if (target.hostname !== original.hostname || target.protocol !== original.protocol || target.pathname !== original.pathname) {
+    throw new Error("decoy_target_scope_violation");
   }
-  const target = minimizedTrackingUrl(original, Boolean(payload.tracking_obfuscation));
+  await assertPublicTarget(target);
+
   const maxBytes = Math.max(1, Math.min(Number(payload.max_response_bytes || DEFAULT_MAX_RESPONSE_BYTES), HARD_MAX_RESPONSE_BYTES));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
@@ -210,12 +231,20 @@ async function proxyFetch(payload) {
         body_base64: "",
         redirect_location: response.headers.get("location") || "",
         error: "",
+        request_kind: requestKind,
       };
     }
     const contentType = (response.headers.get("content-type") || "").split(";", 1)[0].trim().toLowerCase();
     if (!ALLOWED_CONTENT_TYPES.has(contentType)) throw new Error("content_type_not_allowed");
     const body = await readBounded(response, maxBytes);
-    return { status: response.status, content_type: contentType, body_base64: toBase64(body), redirect_location: "", error: "" };
+    return {
+      status: response.status,
+      content_type: contentType,
+      body_base64: toBase64(body),
+      redirect_location: "",
+      error: "",
+      request_kind: requestKind,
+    };
   } finally {
     clearTimeout(timer);
   }
