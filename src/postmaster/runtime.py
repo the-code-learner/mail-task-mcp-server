@@ -5,6 +5,7 @@ import os
 import uvicorn
 
 from . import runtime_core as _core
+from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
 from .runtime_v953 import install_runtime_v953
@@ -20,6 +21,8 @@ from .webgui_v954 import install_webgui_v954
 from .webgui_v960 import install_webgui_v960
 from .webgui_v960_scopes import install_webgui_v960_scopes
 from .webgui_v961 import install_webgui_v961
+from .webgui_v962 import install_webgui_v962
+from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -48,6 +51,8 @@ build_status = install_runtime_v953(_base, _core, build_status)
 dashboard_home, build_status, mail_client = install_runtime_v960(
     app, _base, _core, dashboard_home, build_status
 )
+# Install v9.6.2 Unassigned semantics before the scope-store singleton can bootstrap.
+install_project_scope_semantics()
 install_runtime_v960_knowledge(_base, _core)
 install_runtime_v961()
 dashboard_home = install_webgui_v951(app, _base, _core, dashboard_home)
@@ -57,6 +62,8 @@ dashboard_home = install_webgui_v954(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v960(app, _base, _core, dashboard_home)
 install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
+install_webgui_v962_collapsible_system()
+dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
 link_store = _core.link_store
 
 

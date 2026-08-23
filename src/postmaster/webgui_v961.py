@@ -36,7 +36,7 @@ def project_color(project_id: str, owner_id: str = "") -> str:
 def _scope_labels_v961(item: dict[str, Any], names: dict[str, str]) -> str:
     scopes = [scope for scope in (item.get("scopes") or []) if isinstance(scope, dict)]
     if not scopes:
-        return '<span class="v961-project-chip" style="--project-color:var(--muted)"><span class="v961-project-dot" aria-hidden="true"></span>Unscoped</span>'
+        return '<span class="v961-project-chip" style="--project-color:var(--muted)"><span class="v961-project-dot" aria-hidden="true"></span>Unassigned</span>'
 
     def sort_key(scope: dict[str, Any]) -> tuple[int, str, str]:
         owner = str(scope.get("owner_id") or "")

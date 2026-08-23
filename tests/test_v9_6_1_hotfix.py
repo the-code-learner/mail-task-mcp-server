@@ -208,6 +208,11 @@ class KnowledgeScopeUxV961Tests(unittest.TestCase):
         self.assertIn("Alpha · primary", one)
         self.assertEqual(project_color("alpha", "davide"), project_color("alpha", "davide"))
 
+    def test_empty_scope_is_explicitly_unassigned(self):
+        html = _scope_labels_v961({"scopes": []}, {})
+        self.assertIn("Unassigned", html)
+        self.assertNotIn("Global", html)
+
     def test_project_filter_toggle_links_keep_multi_project_state(self):
         request = _request("ui_view=knowledge&projects=alpha,beta")
         projects = [
@@ -223,8 +228,7 @@ class KnowledgeScopeUxV961Tests(unittest.TestCase):
 
 
 class ReleaseBoundaryV961Tests(unittest.TestCase):
-    def test_version_changelog_and_preserved_single_yaml_contract(self):
-        self.assertEqual((ROOT / "VERSION").read_text(encoding="utf-8").strip(), "9.6.1")
+    def test_v961_history_and_preserved_single_yaml_contract(self):
         changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertIn("## 9.6.1 - 2026-08-23", changelog)
         self.assertLess(changelog.index("## 9.6.1 - 2026-08-23"), changelog.index("## 9.6.0 - 2026-08-23"))
