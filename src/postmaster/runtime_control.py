@@ -10,7 +10,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .confirmation_v967 import CONFIRMATION_TTL_SECONDS, PersistentConfirmationTokens
+from .confirmation_v967 import (
+    CONFIRMATION_TTL_SECONDS,
+    PersistentConfirmationTokens,
+    resolve_confirmation_paths,
+)
 
 
 _CONTROL_PATH_ENV = "POSTMASTER_RUNTIME_CONTROL_PATH"
@@ -164,13 +168,24 @@ def initialize_version_change_approvals(
 ) -> PersistentConfirmationTokens:
     """Initialize the persistent approval backend outside any MCP preview invocation."""
     global _APPROVAL_SERVICE
+    resolved_key_path, resolved_db_path = resolve_confirmation_paths(
+        key_path=key_path,
+        db_path=db_path,
+    )
     with _APPROVAL_SERVICE_LOCK:
-        if _APPROVAL_SERVICE is None or replace:
+        paths_changed = (
+            _APPROVAL_SERVICE is not None
+            and (
+                _APPROVAL_SERVICE.key_path != resolved_key_path
+                or _APPROVAL_SERVICE.db_path != resolved_db_path
+            )
+        )
+        if _APPROVAL_SERVICE is None or replace or paths_changed:
             _APPROVAL_SERVICE = PersistentConfirmationTokens(
                 scope="runtime_version_change",
                 ttl_seconds=_APPROVAL_TTL_SECONDS,
-                key_path=key_path,
-                db_path=db_path,
+                key_path=resolved_key_path,
+                db_path=resolved_db_path,
             )
         return _APPROVAL_SERVICE
 

@@ -40,12 +40,12 @@ Issuing a preview token does not write a nonce record. The persistent key and SQ
 
 The target TTL is exactly 300 seconds. Expired, malformed, wrong-scope, mismatched and already-consumed tokens are rejected. Because both the signing key and consumed-nonce database are persistent, a token can survive an MCP disconnect/reconnect and a controlled Postmaster process restart while replay rejection also survives restart.
 
-Default persistent files are:
+Production/container deployments prefer the persistent files on the mounted `/data` volume when that directory is present and writable:
 
 - `/data/mcp_confirmation_v967.key`
 - `/data/mcp_confirmation_v967.db`
 
-The SQLite database contains the additive `mcp_confirmation_consumed` table. Environment overrides exist for tests/advanced deployments, but no new setting is required in `postmaster-mcp.yml`.
+`POSTMASTER_MCP_CONFIRMATION_KEY_PATH` and `POSTMASTER_MCP_CONFIRMATION_DB_PATH` override storage explicitly. Outside the container, including CI runners where `/data` is unavailable or not writable, the default falls back to the user's persistent state directory: `${XDG_STATE_HOME:-~/.local/state}/postmaster/mcp_confirmation_v967.{key,db}`. Path resolution itself is write-free; backend initialization may create the key/database before any preview invocation, so preview/token issuance remains read-only. The SQLite database contains the additive `mcp_confirmation_consumed` table. No new setting is required in `postmaster-mcp.yml`.
 
 ## Runtime binding
 

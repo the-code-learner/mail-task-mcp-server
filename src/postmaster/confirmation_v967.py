@@ -17,8 +17,8 @@ from typing import Any, Callable
 CONFIRMATION_TTL_SECONDS = 300
 _CONFIRMATION_KEY_ENV = "POSTMASTER_MCP_CONFIRMATION_KEY_PATH"
 _CONFIRMATION_DB_ENV = "POSTMASTER_MCP_CONFIRMATION_DB_PATH"
-_DEFAULT_CONFIRMATION_KEY_PATH = "/data/mcp_confirmation_v967.key"
-_DEFAULT_CONFIRMATION_DB_PATH = "/data/mcp_confirmation_v967.db"
+_DEFAULT_CONFIRMATION_KEY_PATH = Path("/data/mcp_confirmation_v967.key")
+_DEFAULT_CONFIRMATION_DB_PATH = Path("/data/mcp_confirmation_v967.db")
 _SCOPE_RE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{1,95}$")
 _TOKEN_PREFIX = "pmc1"
 _MAX_FUTURE_SKEW_SECONDS = 30
@@ -38,6 +38,52 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
 
 def _binding_digest(binding: dict[str, Any]) -> str:
     return hashlib.sha256(_json_bytes(binding)).hexdigest()
+
+
+def _user_state_directory() -> Path:
+    configured = str(os.getenv("XDG_STATE_HOME") or "").strip()
+    root = Path(configured).expanduser() if configured else Path.home() / ".local" / "state"
+    return root / "postmaster"
+
+
+def _default_path(default_path: Path) -> Path:
+    parent = default_path.parent
+    try:
+        if parent.is_dir() and os.access(parent, os.W_OK | os.X_OK):
+            return default_path
+    except OSError:
+        pass
+    return _user_state_directory() / default_path.name
+
+
+def _resolve_path(
+    explicit: str | Path | None,
+    env_name: str,
+    default_path: Path,
+) -> Path:
+    if explicit is not None:
+        return Path(explicit).expanduser()
+    configured = str(os.getenv(env_name) or "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return _default_path(default_path)
+
+
+def resolve_confirmation_paths(
+    *,
+    key_path: str | Path | None = None,
+    db_path: str | Path | None = None,
+) -> tuple[Path, Path]:
+    """Resolve persistent confirmation storage without creating files or directories.
+
+    Explicit function arguments take precedence over environment overrides. With neither set,
+    production prefers the persistent /data volume when it already exists and is writable;
+    non-container/CI processes fall back to the user's persistent state directory.
+    """
+    return (
+        _resolve_path(key_path, _CONFIRMATION_KEY_ENV, _DEFAULT_CONFIRMATION_KEY_PATH),
+        _resolve_path(db_path, _CONFIRMATION_DB_ENV, _DEFAULT_CONFIRMATION_DB_PATH),
+    )
 
 
 class PersistentConfirmationTokens:
@@ -63,8 +109,10 @@ class PersistentConfirmationTokens:
             raise ValueError("confirmation scope is invalid")
         self.scope = normalized_scope
         self.ttl_seconds = max(30, min(int(ttl_seconds), CONFIRMATION_TTL_SECONDS))
-        self.key_path = Path(key_path or os.getenv(_CONFIRMATION_KEY_ENV, _DEFAULT_CONFIRMATION_KEY_PATH))
-        self.db_path = Path(db_path or os.getenv(_CONFIRMATION_DB_ENV, _DEFAULT_CONFIRMATION_DB_PATH))
+        self.key_path, self.db_path = resolve_confirmation_paths(
+            key_path=key_path,
+            db_path=db_path,
+        )
         self._clock = clock or time.time
         self._lock = threading.RLock()
         self._key = self._load_or_create_key()
@@ -261,4 +309,5 @@ __all__ = [
     "CONFIRMATION_TTL_SECONDS",
     "PersistentConfirmationTokens",
     "StateBoundConfirmationTokens",
+    "resolve_confirmation_paths",
 ]
