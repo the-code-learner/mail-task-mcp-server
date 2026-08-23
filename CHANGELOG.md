@@ -2,6 +2,25 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.6 - 2026-08-23
+
+### Added / changed
+- Added MCP-native Privacy Proxy secret provisioning through the existing `set_amp_account_state` command with additive `status`, `prepare_provisioning`, `provision`, `rotate`, `reconcile`, and `deprovision` actions; no new MCP command name is introduced.
+- Postmaster now generates an Ed25519 keypair internally for provisioning trust. The private signing key is encrypted at rest and never returned; MCP exposes only the public key, key-id, and SHA-256 fingerprint for explicit Worker pinning.
+- Added preview-first, short-lived one-time confirmation tokens for every mutating provisioning action. Tokens are bound to the exact action, Worker origin, key fingerprint/key-id, generation, and current pending state and are consumed after one attempt.
+- Postmaster now generates the proxy HMAC secret internally, persists it encrypted as pending, and sends it directly to the Worker over a server-to-server `/provision` request signed with Ed25519. The provisioning signature binds method, path, Worker origin, timestamp, nonce, body digest, monotonic generation, operation, and key-id.
+- The example Worker now fails closed unless the Ed25519 public key/key-id is explicitly pinned, verifies signatures/timestamps/nonces/generations, rejects replay and rollback/out-of-order rotations, and stores active/previous HMAC state in the existing SQLite-backed `NONCE_GUARD` Durable Object. The previous secret is accepted only during a bounded rotation grace period (120 seconds requested by Postmaster, 300 seconds hard maximum).
+- Provisioning promotion is `pending -> verify -> active`: Postmaster verifies `/health` with the pending HMAC secret before replacing the local active secret. Interrupted provision/rotation remains recoverable with `reconcile`, which reuses the same encrypted pending secret and generation with a fresh signed request.
+- Added provider-neutral Worker deployment documentation and a complete MCP-client wizard covering status inspection, prepare/public-key pinning, provision preview/confirmation, server-to-server provisioning, health verification, enablement, rotation, reconcile, deprovision, and interruption recovery.
+
+### Compatibility / safety / deployment
+- The composed MCP command-name surface remains exactly 90 names (`delta = 0`); v9.6.6 extends existing schemas/status only.
+- Normal `/health` and `/fetch` authentication remains HMAC-SHA256 with timestamp/nonce anti-replay. Legacy `privacy_proxy_secret` input and Worker `POSTMASTER_PROXY_SECRET` fallback remain supported for existing/manual deployments.
+- The existing Durable Object binding is reused; no new Cloudflare binding, port, dependency, or `requirements.txt` change is required. Local provisioning metadata is an additive SQLite table protected by the existing persistent Fernet key.
+- Generated HMAC secrets and Ed25519 private keys are excluded from MCP responses, bounded errors, documentation examples, and the public tree. Worker configuration contains public-key placeholders only.
+- `postmaster-mcp.yml` remains byte-for-byte unchanged at Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`.
+- Stable source/release publication remains separate from production activation. Publishing v9.6.6 does not itself deploy/update the Worker, pin a production key, create a production secret, restart Postmaster, switch the production runtime, or change Cloudflare/Portainer configuration.
+
 ## 9.6.5 - 2026-08-23
 
 ### Fixed / changed
