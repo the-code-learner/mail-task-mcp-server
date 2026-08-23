@@ -10,6 +10,9 @@ from starlette.responses import RedirectResponse
 from .email_privacy_v963 import fetch_high_noise_decoys
 
 
+_BLOCKED_NETWORK_CLASSIFICATIONS = {"normal link", "analytics link", "unsubscribe", "action url", "redirector"}
+
+
 def install_webgui_v963_high_noise(v963: Any) -> None:
     """Patch only the v9.6.3 privacy-proxy UI/confirmation hooks before routes are registered."""
 
@@ -105,7 +108,8 @@ def install_webgui_v963_high_noise(v963: Any) -> None:
         filtered["urls"] = []
         for raw in raw_inventory.get("urls") or []:
             row = dict(raw)
-            row["passive_resource"] = v963._allow_passive(row)
+            classification = str(row.get("classification") or "").casefold()
+            row["passive_resource"] = bool(row.get("passive_resource")) and v963._allow_passive(row) and classification not in _BLOCKED_NETWORK_CLASSIFICATIONS
             filtered["urls"].append(row)
 
         proxy_client = base.privacy_proxy_client()
