@@ -41,7 +41,6 @@ def cached_structural(key: str, loader: Callable[[], Any], *, ttl: float = 2.5) 
             cached = _CACHE.get(key)
             if cached:
                 return copy.deepcopy(cached[1])
-        # The leader failed. Retry as a new leader rather than returning stale/empty data.
         return cached_structural(key, loader, ttl=ttl)
 
     try:
@@ -144,6 +143,29 @@ class _FileProxy:
         return getattr(self._store, name)
 
 
+class _AnalyticsProxy:
+    def __init__(self, store: Any) -> None:
+        self._store = store
+
+    @staticmethod
+    def _bounded(kwargs: dict[str, Any], cap: int = 201) -> dict[str, Any]:
+        values = dict(kwargs)
+        values["limit"] = min(int(values.get("limit", cap)), cap)
+        return values
+
+    def list_campaigns(self, *args: Any, **kwargs: Any) -> Any:
+        return self._store.list_campaigns(*args, **self._bounded(kwargs))
+
+    def list_deliveries(self, *args: Any, **kwargs: Any) -> Any:
+        return self._store.list_deliveries(*args, **self._bounded(kwargs))
+
+    def list_open_events(self, *args: Any, **kwargs: Any) -> Any:
+        return self._store.list_open_events(*args, **self._bounded(kwargs))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._store, name)
+
+
 class BoundedBaseProxy:
     """Delegate to runtime base while bounding list sources and sharing structural reads."""
 
@@ -158,6 +180,9 @@ class BoundedBaseProxy:
 
     def file_store(self) -> _FileProxy:
         return _FileProxy(self._base.file_store())
+
+    def analytics_store(self) -> _AnalyticsProxy:
+        return _AnalyticsProxy(self._base.analytics_store())
 
     def list_email_accounts(self) -> dict[str, Any]:
         return {"ok": True, "accounts": accounts(self._base)}
