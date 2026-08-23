@@ -168,11 +168,19 @@ def initialize_version_change_approvals(
 ) -> PersistentConfirmationTokens:
     """Initialize the persistent approval backend outside any MCP preview invocation."""
     global _APPROVAL_SERVICE
-    resolved_key_path, resolved_db_path = resolve_confirmation_paths(
-        key_path=key_path,
-        db_path=db_path,
-    )
     with _APPROVAL_SERVICE_LOCK:
+        if (
+            _APPROVAL_SERVICE is not None
+            and not replace
+            and key_path is None
+            and db_path is None
+        ):
+            return _APPROVAL_SERVICE
+
+        resolved_key_path, resolved_db_path = resolve_confirmation_paths(
+            key_path=key_path,
+            db_path=db_path,
+        )
         paths_changed = (
             _APPROVAL_SERVICE is not None
             and (

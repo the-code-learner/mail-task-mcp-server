@@ -41,6 +41,14 @@ get_job_history build_status follow_up_email create_follow_up_draft get_stored_f
 get_tracking_campaign get_tracking_summary list_tracking_links list_tracking_events
 """.split()
 )
+V967_LIFECYCLE_MCP_NAMES = {
+    "runtime_status",
+    "runtime_version_change_preview",
+    "runtime_version_change_execute",
+    "privacy_proxy_status",
+    "privacy_proxy_provisioning_preview",
+    "privacy_proxy_provisioning_execute",
+}
 
 
 class CanonicalUnsubscribeUrlV960Tests(unittest.TestCase):
@@ -243,8 +251,9 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
             )
             self.assertTrue(line, completed.stdout)
             actual = set(json.loads(line.split("=", 1)[1]))
-            self.assertEqual(actual, BASELINE_MCP_NAMES)
-            self.assertEqual(len(actual), 90)
+            self.assertTrue(BASELINE_MCP_NAMES <= actual)
+            self.assertEqual(actual - BASELINE_MCP_NAMES, V967_LIFECYCLE_MCP_NAMES)
+            self.assertEqual(len(actual), 96)
 
 
 if __name__ == "__main__":
