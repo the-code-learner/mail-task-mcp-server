@@ -21,6 +21,10 @@ const BLOCKED_HOSTS = new Set([
 const BLOCKED_CLASSIFICATIONS = new Set([
   "normal link", "analytics link", "unsubscribe", "action url", "redirector",
 ]);
+const UNSUBSCRIBE_PATH_RE = /(?:^|[\/_.-])(?:unsubscribe|opt[-_]?out|list[-_]?unsubscribe)(?:$|[\/_.-])/i;
+const ACTION_PATH_RE = /(?:^|[\/_.-])(?:action|reset|magic(?:[-_]?link)?|login|signin|verify|verification|confirm|confirmation|approve|accept|activate)(?:$|[\/_.-])/i;
+const ACTION_VALUE_RE = /(?:unsubscribe|opt[-_]?out|reset|magic|login|signin|verify|confirm|approve|accept|activate)/i;
+const ACTION_TOKEN_KEY_RE = /^(?:reset|magic|login|verify|verification|confirm|confirmation|approve|accept|activate)[_-]?token$/i;
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -119,6 +123,20 @@ function hostBlockedSyntactically(hostname) {
   return false;
 }
 
+function navigationOrActionUrl(url) {
+  let path;
+  try { path = decodeURIComponent(url.pathname || ""); } catch (_) { path = url.pathname || ""; }
+  if (UNSUBSCRIBE_PATH_RE.test(path) || ACTION_PATH_RE.test(path)) return true;
+  for (const [rawKey, rawValue] of url.searchParams.entries()) {
+    const key = String(rawKey || "").toLowerCase();
+    const value = String(rawValue || "").toLowerCase();
+    if (["unsubscribe", "optout", "opt_out", "opt-out", "one_click", "one-click", "list_unsubscribe", "list-unsubscribe"].includes(key)) return true;
+    if (key === "action" && ACTION_VALUE_RE.test(value)) return true;
+    if (["one_time_token", "one-time-token", "magic_token", "magic-token", "otp"].includes(key) || ACTION_TOKEN_KEY_RE.test(key)) return true;
+  }
+  return false;
+}
+
 async function dnsAnswers(hostname, type) {
   const endpoint = new URL("https://cloudflare-dns.com/dns-query");
   endpoint.searchParams.set("name", hostname);
@@ -197,9 +215,11 @@ function toBase64(bytes) {
 
 async function proxyFetch(payload) {
   const original = new URL(String(payload.url || ""));
-  await assertPublicTarget(original);
   const classification = String(payload.classification || "unknown").toLowerCase();
-  if (BLOCKED_CLASSIFICATIONS.has(classification)) throw new Error("navigation_or_action_url_not_proxyable");
+  if (BLOCKED_CLASSIFICATIONS.has(classification) || navigationOrActionUrl(original)) {
+    throw new Error("navigation_or_action_url_not_proxyable");
+  }
+  await assertPublicTarget(original);
 
   const requestKind = String(payload.request_kind || "render").toLowerCase();
   if (!new Set(["render", "decoy"]).has(requestKind)) throw new Error("request_kind_not_allowed");
@@ -211,6 +231,7 @@ async function proxyFetch(payload) {
   if (target.hostname !== original.hostname || target.protocol !== original.protocol || target.pathname !== original.pathname) {
     throw new Error("decoy_target_scope_violation");
   }
+  if (navigationOrActionUrl(target)) throw new Error("navigation_or_action_url_not_proxyable");
   await assertPublicTarget(target);
 
   const hardMaxBytes = requestKind === "decoy" ? HARD_MAX_DECOY_RESPONSE_BYTES : HARD_MAX_RESPONSE_BYTES;
