@@ -12,6 +12,7 @@ from .runtime_v953 import install_runtime_v953
 from .runtime_v960 import install_runtime_v960
 from .runtime_v960_knowledge import install_runtime_v960_knowledge
 from .runtime_v961 import install_runtime_v961
+from .runtime_v963 import install_runtime_v963
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -23,6 +24,7 @@ from .webgui_v960_scopes import install_webgui_v960_scopes
 from .webgui_v961 import install_webgui_v961
 from .webgui_v962 import install_webgui_v962
 from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
+from .webgui_v963 import install_webgui_v963
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -64,6 +66,10 @@ install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
 install_webgui_v962_collapsible_system()
 dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
+# v9.6.3 is additive: runtime/cache first, then a presentation/Inbox renderer layer over
+# the already-installed v9.6.2 lazy shell. It does not replace that shell's JS lifecycle.
+build_status = install_runtime_v963(_base, _core, build_status)
+install_webgui_v963(app, _base)
 link_store = _core.link_store
 
 
