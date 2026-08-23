@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 from types import SimpleNamespace
 
+from postmaster.email_inventory_v963 import inventory_message
 from postmaster.email_privacy_v963 import (
     PrivacyProxyStore,
     _DECOY_TIMEOUT_SECONDS,
@@ -18,7 +19,9 @@ from postmaster.email_privacy_v963 import (
     _MAX_DECOY_RESPONSE_BYTES,
     _MAX_DECOY_TOTAL_BYTES,
     fetch_high_noise_decoys,
+    fetch_passive_resources,
 )
+from postmaster.mailbox_cache_v963 import MailboxCacheStore
 from postmaster.webgui_v963_high_noise import install_webgui_v963_high_noise
 
 
@@ -192,6 +195,33 @@ class HighNoiseExecutionV963Tests(unittest.TestCase):
             self.assertEqual(result["requests"], 0)
             self.assertEqual(proxy.calls, [])
 
+    def test_action_semantics_disguised_as_passive_resources_never_reach_proxy(self):
+        inventory = inventory_message(
+            '<img src="https://assets.example/unsubscribe/pixel.png?token=one">'
+            '<img src="https://assets.example/reset.png?token=two">'
+            '<link rel="stylesheet" href="https://assets.example/theme.css?action=confirm">'
+            '<img src="https://assets.example/image.png?one_time_token=three">',
+            "",
+        )
+        rows = inventory["urls"]
+        self.assertEqual(len(rows), 4)
+        self.assertTrue(all(row["classification"] in {"unsubscribe", "action URL"} for row in rows))
+        self.assertTrue(all(not row["passive_resource"] for row in rows))
+        with tempfile.TemporaryDirectory() as tmp:
+            store = self._configured_store(tmp)
+            cache = MailboxCacheStore(str(Path(tmp) / "mailbox.db"))
+            proxy = FakeProxy()
+            fetch_passive_resources(
+                inventory, cache=cache, proxy=proxy,
+                account_id="a", mailbox="INBOX", uid="5",
+            )
+            noise = fetch_high_noise_decoys(
+                inventory, store=store, proxy=proxy,
+                account_id="a", mailbox="INBOX", uid="5",
+            )
+            self.assertEqual(proxy.calls, [])
+            self.assertEqual(noise["requests"], 0)
+
     def test_high_noise_is_passive_only_bounded_and_never_navigation(self):
         self.assertEqual(_MAX_DECOY_REQUESTS_PER_MESSAGE, 4)
         self.assertEqual(_MAX_DECOY_REQUESTS_PER_DOMAIN, 2)
@@ -260,6 +290,8 @@ class HighNoiseSurfaceAndWorkerV963Tests(unittest.TestCase):
         self.assertIn("High-noise:", source)
         self.assertIn("fetch_high_noise_decoys", source)
         self.assertIn("fetch_passive_resources", source)
+        self.assertIn("_BLOCKED_NETWORK_CLASSIFICATIONS", source)
+        self.assertIn('bool(row.get("passive_resource"))', source)
         self.assertNotIn("send_email", source)
         original = (ROOT / "src/postmaster/webgui_v963.py").read_text(encoding="utf-8")
         detail = original[original.index("def _detail"):original.index("def render_inbox_v963")]
@@ -272,10 +304,15 @@ class HighNoiseSurfaceAndWorkerV963Tests(unittest.TestCase):
         verify_pos = source.index("verifyRequest(request, env, bodyBytes)")
         route_pos = source.index('if (path !== "/fetch")')
         self.assertLess(verify_pos, route_pos)
+        semantic_pos = source.index("navigationOrActionUrl(original)")
+        dns_pos = source.index("await assertPublicTarget(original)")
+        self.assertLess(semantic_pos, dns_pos)
         self.assertIn('requestKind === "decoy"', source)
         self.assertIn("decoy_requires_tracking_obfuscation", source)
         self.assertIn("decoy_target_scope_violation", source)
         self.assertIn("navigation_or_action_url_not_proxyable", source)
+        self.assertIn("ACTION_PATH_RE", source)
+        self.assertIn("ACTION_TOKEN_KEY_RE", source)
         self.assertIn('"redirector"', source)
         self.assertIn('redirect: "manual"', source)
         self.assertIn("assertPublicTarget(target)", source)
