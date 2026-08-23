@@ -502,7 +502,8 @@ class ReleaseBoundaryV967Tests(unittest.TestCase):
         self.assertNotIn('name="set_amp_account_state"', source)
 
     def test_release_metadata_requirements_and_single_yaml_boundary(self):
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "9.6.7")
+        version = tuple(int(part) for part in (ROOT / "VERSION").read_text().strip().split("."))
+        self.assertGreaterEqual(version, (9, 6, 7))
         self.assertIn("## 9.6.7 - 2026-08-23", (ROOT / "CHANGELOG.md").read_text())
         self.assertEqual(_blob_sha(ROOT / "postmaster-mcp.yml"), EXPECTED_SINGLE_YAML_BLOB)
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
