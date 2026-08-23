@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
 import signal
 import threading
 import time
 import urllib.request
 from pathlib import Path
 from typing import Any
+
+from .confirmation_v967 import CONFIRMATION_TTL_SECONDS, PersistentConfirmationTokens
 
 
 _CONTROL_PATH_ENV = "POSTMASTER_RUNTIME_CONTROL_PATH"
@@ -23,9 +24,9 @@ _RELEASE_CACHE: dict[str, Any] = {
     "last_attempt_monotonic": None,
     "status": "never",
 }
-_APPROVAL_TTL_SECONDS = 600.0
-_APPROVAL_LOCK = threading.RLock()
-_APPROVAL_CACHE: dict[str, dict[str, Any]] = {}
+_APPROVAL_TTL_SECONDS = CONFIRMATION_TTL_SECONDS
+_APPROVAL_SERVICE_LOCK = threading.RLock()
+_APPROVAL_SERVICE: PersistentConfirmationTokens | None = None
 
 
 def control_path() -> Path:
@@ -148,14 +149,50 @@ def current_release_tag(version: str | None) -> str:
     return "v" + ".".join(str(part) for part in parsed)
 
 
-def _purge_expired_approvals(now: float) -> None:
-    expired = [
-        token
-        for token, payload in _APPROVAL_CACHE.items()
-        if now - float(payload.get("issued_monotonic") or 0.0) > _APPROVAL_TTL_SECONDS
-    ]
-    for token in expired:
-        _APPROVAL_CACHE.pop(token, None)
+def _running_version() -> str:
+    try:
+        return (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unknown"
+
+
+def initialize_version_change_approvals(
+    *,
+    key_path: str | Path | None = None,
+    db_path: str | Path | None = None,
+    replace: bool = False,
+) -> PersistentConfirmationTokens:
+    """Initialize the persistent approval backend outside any MCP preview invocation."""
+    global _APPROVAL_SERVICE
+    with _APPROVAL_SERVICE_LOCK:
+        if _APPROVAL_SERVICE is None or replace:
+            _APPROVAL_SERVICE = PersistentConfirmationTokens(
+                scope="runtime_version_change",
+                ttl_seconds=_APPROVAL_TTL_SECONDS,
+                key_path=key_path,
+                db_path=db_path,
+            )
+        return _APPROVAL_SERVICE
+
+
+def version_change_confirmation_ttl_seconds() -> int:
+    return _APPROVAL_TTL_SECONDS
+
+
+def _version_binding(
+    *,
+    operation: str,
+    target: str,
+    current_selector: str,
+    current_build: str,
+) -> dict[str, str]:
+    return {
+        "operation": str(operation),
+        "target": str(target),
+        "current_selector": str(current_selector),
+        "current_build": str(current_build),
+        "current_version": _running_version(),
+    }
 
 
 def issue_version_change_approval(
@@ -165,24 +202,21 @@ def issue_version_change_approval(
     current_selector: str,
     current_build: str,
 ) -> str:
-    """Issue a short-lived, process-local, one-operation approval nonce.
+    """Issue a stateless authenticated, exact-state version-change confirmation token.
 
-    Issuance is only a preview step. It never means the user approved the operation.
-    The MCP assistant must ask for explicit approval in the active chat before sending
-    this nonce back to a mutating call.
+    Issuance is a preview step and performs no persistent write after application startup.
+    It never means the user approved the operation. The MCP assistant must show the preview
+    and obtain explicit approval in the active chat before execute sends this token back.
     """
-    now = time.monotonic()
-    token = secrets.token_urlsafe(24)
-    with _APPROVAL_LOCK:
-        _purge_expired_approvals(now)
-        _APPROVAL_CACHE[token] = {
-            "operation": str(operation),
-            "target": str(target),
-            "current_selector": str(current_selector),
-            "current_build": str(current_build),
-            "issued_monotonic": now,
-        }
-    return token
+    service = initialize_version_change_approvals()
+    return service.issue(
+        _version_binding(
+            operation=operation,
+            target=target,
+            current_selector=current_selector,
+            current_build=current_build,
+        )
+    )
 
 
 def consume_version_change_approval(
@@ -193,31 +227,22 @@ def consume_version_change_approval(
     current_selector: str,
     current_build: str,
 ) -> bool:
-    """Consume and validate an exact, single-use version-change approval nonce."""
-    candidate = str(token or "").strip()
-    if not candidate:
-        return False
-    now = time.monotonic()
-    with _APPROVAL_LOCK:
-        _purge_expired_approvals(now)
-        payload = _APPROVAL_CACHE.pop(candidate, None)
-    if not payload:
-        return False
-    return all(
-        str(payload.get(key) or "") == str(value)
-        for key, value in {
-            "operation": operation,
-            "target": target,
-            "current_selector": current_selector,
-            "current_build": current_build,
-        }.items()
+    """Consume an exact, persistent one-time version-change confirmation token."""
+    service = initialize_version_change_approvals()
+    return service.consume(
+        token,
+        _version_binding(
+            operation=operation,
+            target=target,
+            current_selector=current_selector,
+            current_build=current_build,
+        ),
     )
 
 
 def clear_version_change_approvals() -> None:
-    """Clear process-local approval nonces. Intended for deterministic tests."""
-    with _APPROVAL_LOCK:
-        _APPROVAL_CACHE.clear()
+    """Clear persisted consumed nonces for deterministic tests."""
+    initialize_version_change_approvals().clear_consumed()
 
 
 def terminate_current_process() -> None:
