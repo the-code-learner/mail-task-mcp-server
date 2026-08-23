@@ -2,17 +2,68 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from functools import lru_cache
+from html import unescape
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 from .email_analytics import (
     AnalyticsError, EmailAnalyticsStore, _client_metadata, _now, _safe_base_url, _token, analytics_store,
 )
 from .link_tracking_queries import LinkTrackingQueriesMixin
 from .link_tracking_html import (
-    already_tracked_url, collect_anchors, eligible_web_url, normalized_url, replace_href, rewrite_anchor_tags,
+    collect_anchors, eligible_web_url, normalized_url, replace_href, rewrite_anchor_tags,
 )
+
+_SRC_RE = re.compile(r"(?is)\bsrc\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s>]+))")
+_IMG_TAG_RE = re.compile(r"(?is)<img\b[^>]*>")
+_AMP_IMG_ELEMENT_RE = re.compile(r"(?is)<amp-img\b[^>]*(?:/\s*>|>.*?</amp-img\s*>)")
+_TRACKED_LINK_PREFIX = "/t/c/"
+_OPEN_PIXEL_PREFIX = "/track/open/"
+_OPEN_PIXEL_SUFFIX = ".gif"
+_MAX_TRACKING_CHAIN_DEPTH = 8
+
+
+def _attribute_url(raw_tag: str, pattern: re.Pattern[str]) -> str:
+    match = pattern.search(raw_tag or "")
+    if not match:
+        return ""
+    for group in (1, 2, 3):
+        value = match.group(group)
+        if value is not None:
+            return unescape(value).strip()
+    return ""
+
+
+def _tracking_path_token(url: str, *, prefix: str, suffix: str = "") -> tuple[str, SplitResult | None]:
+    try:
+        parts = urlsplit(unescape(url or "").strip())
+    except ValueError:
+        return "", None
+    if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+        return "", parts
+    path = parts.path or ""
+    if not path.startswith(prefix):
+        return "", parts
+    candidate = path[len(prefix):]
+    if suffix:
+        if not candidate.endswith(suffix):
+            return "", parts
+        candidate = candidate[:-len(suffix)]
+    if not candidate or "/" in candidate:
+        return "", parts
+    return candidate, parts
+
+
+def _same_origin(left: SplitResult | None, right: SplitResult | None) -> bool:
+    if left is None or right is None:
+        return False
+    return (
+        left.scheme.lower() == right.scheme.lower()
+        and left.netloc.lower() == right.netloc.lower()
+    )
+
 
 class LinkTrackingStore(LinkTrackingQueriesMixin):
     """Additive per-link analytics layered on the existing email analytics database."""
@@ -131,6 +182,80 @@ class LinkTrackingStore(LinkTrackingQueriesMixin):
         with self._connect() as conn:
             conn.execute("UPDATE tracking_links SET message_id=? WHERE delivery_id=?", (message_id or "", delivery_id))
 
+    def _resolve_prior_tracking_url(self, url: str, public_base: SplitResult) -> tuple[str, bool]:
+        """Resolve historical Postmaster click URLs from local persistence only."""
+        current = unescape(url or "").strip()
+        changed = False
+        seen_tokens: set[str] = set()
+
+        for _ in range(_MAX_TRACKING_CHAIN_DEPTH):
+            token, parts = _tracking_path_token(current, prefix=_TRACKED_LINK_PREFIX)
+            if not token:
+                return current, changed
+            if token in seen_tokens:
+                raise AnalyticsError("Cyclic Postmaster tracking-link chain")
+            seen_tokens.add(token)
+            try:
+                record = self.get_by_token(token)
+            except AnalyticsError:
+                if _same_origin(parts, public_base):
+                    raise AnalyticsError("Unknown Postmaster tracking-link token")
+                return current, changed
+
+            original = str(record.get("original_url") or "").strip()
+            if not eligible_web_url(original):
+                raise AnalyticsError("Stored Postmaster tracking-link destination is invalid")
+            current = original
+            changed = True
+
+        token, _ = _tracking_path_token(current, prefix=_TRACKED_LINK_PREFIX)
+        if token:
+            raise AnalyticsError("Postmaster tracking-link chain is too deep")
+        return current, changed
+
+    def normalize_postmaster_html(self, body_html: str) -> str:
+        """
+        Remove historical Postmaster telemetry before a new outbound delivery is built.
+
+        This function is deliberately local-only: click tokens and open-pixel tokens are
+        resolved against Postmaster persistence and are never fetched over HTTP. Unknown
+        artifacts on the active Postmaster origin fail closed rather than remaining active.
+        """
+        html = body_html or ""
+        if not html:
+            return html
+
+        public_base = urlsplit(_safe_base_url())
+        anchor_replacements: list[tuple[str, str]] = []
+        for anchor in collect_anchors(html):
+            href = str(anchor.get("href") or "")
+            resolved_url, changed = self._resolve_prior_tracking_url(href, public_base)
+            if changed:
+                anchor_replacements.append(
+                    (str(anchor["raw_tag"]), replace_href(str(anchor["raw_tag"]), resolved_url))
+                )
+        html = rewrite_anchor_tags(html, anchor_replacements)
+
+        def strip_open_pixel(match: re.Match[str]) -> str:
+            raw_tag = match.group(0)
+            src = _attribute_url(raw_tag, _SRC_RE)
+            token, parts = _tracking_path_token(
+                src, prefix=_OPEN_PIXEL_PREFIX, suffix=_OPEN_PIXEL_SUFFIX
+            )
+            if not token:
+                return raw_tag
+            try:
+                self.analytics.get_delivery_by_tracking_token(token)
+            except AnalyticsError:
+                if _same_origin(parts, public_base):
+                    raise AnalyticsError("Unknown Postmaster open-pixel token")
+                return raw_tag
+            return ""
+
+        html = _AMP_IMG_ELEMENT_RE.sub(strip_open_pixel, html)
+        html = _IMG_TAG_RE.sub(strip_open_pixel, html)
+        return html
+
     def instrument_html(self, *, body_html: str, delivery: dict[str, Any]) -> tuple[str, list[dict[str, Any]]]:
         html = body_html or ""
         anchors = collect_anchors(html)
@@ -141,7 +266,11 @@ class LinkTrackingStore(LinkTrackingQueriesMixin):
         tracked: list[dict[str, Any]] = []
         for anchor_index, anchor in enumerate(anchors):
             href = str(anchor.get("href") or "")
-            if not eligible_web_url(href) or already_tracked_url(href, public_base):
+            if not eligible_web_url(href):
+                continue
+            token, parts = _tracking_path_token(href, prefix=_TRACKED_LINK_PREFIX)
+            base_parts = urlsplit(public_base)
+            if token and _same_origin(parts, base_parts):
                 continue
             record = self._insert_link(
                 delivery=delivery, original_url=href, position=anchor_index,
