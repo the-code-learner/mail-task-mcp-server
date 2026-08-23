@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.2 - 2026-08-23
+
+### Added / changed
+- Added full Projects WebGUI create/edit/delete over the existing persistent project registry. New Project accepts Name, an automatically suggested but pre-create editable validated project ID/slug, and an optional description; Edit changes only Name/Description and keeps `project_id` immutable.
+- Project deletion is non-destructive to content: the deleted project scope is detached from Knowledge, remaining project scopes are preserved, sole-project Knowledge/File items become Unassigned, and no item is promoted to Global or moved to another project. Scheduler jobs or execution profiles that still reference the stable project ID block deletion before any detach occurs.
+- Added a real two-step delete flow with impact counts for memories, skills, files, jobs and execution profiles, followed by exact `project_id` typing plus an explicit `Delete permanently` action and `Cancel`.
+- Made occasional creation/edit/configuration/secondary forms collapsible across Accounts, AMP, Domains, Recipients, Projects, Knowledge, Files, Tasks and Suppressions while keeping search, filters, mailbox navigation, pagination and tab navigation continuously visible. Collapsible state is restored across fragment replacement where appropriate.
+- Replaced eager all-tab dashboard rendering with a lightweight shell and per-tab lazy fragments: only the active tab is fetched initially, unopened tabs do not execute their data queries, fragment refreshes dispatch only their own view, and stale requests are aborted/generation-guarded before they can overwrite newer UI state.
+- Added request coalescing and short-lived caching for structural project/owner/account reads with mutation invalidation, bounded source reads for large WebGUI inventories/event lists, batched Knowledge scope attachment to remove per-row scope lookups, and fragment `Server-Timing` observability without fragile CI timing thresholds.
+- Preserved the v9.6.1 Inbox source-prefetch contract (26/51/76 rows for pages 1/2/3 with cap 100), active-fragment visibility fix, Safe Reader `inspection="full"` + `content_mode="safe"`, Sent `To`, mailbox logical roles, Knowledge multi-scope and deterministic project colors.
+
+### Compatibility / safety / deployment
+- Existing persistent idempotency-before-SMTP, duplicate heuristic/`force_send` boundaries, `delivery_uncertain` behavior, static zero-network inbound inspection and existing mail APIs are unchanged.
+- MCP command surface remains exactly 90 names (`delta = 0`); no MCP command or public MCP schema is added/removed/renamed, no dependency or `requirements.txt` change is introduced, and no database/storage migration is required.
+- `postmaster-mcp.yml` remains unchanged (Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`). Source/stable release state remains separate from production runtime state.
+- No deploy, restart, Portainer or Cloudflare action is part of v9.6.2 release preparation or publication.
+
 ## 9.6.1 - 2026-08-23
 
 ### Fixed
