@@ -3,9 +3,17 @@ main = "src/index.js"
 compatibility_date = "2026-08-01"
 workers_dev = true
 
-# Do not put POSTMASTER_PROXY_SECRET in this file or in Git.
-# Configure it with `wrangler secret put POSTMASTER_PROXY_SECRET` or an equivalent
-# authorized Cloudflare deployment workflow.
+# v9.6.6 MCP-native provisioning pins only public Ed25519 material here.
+# Copy these two non-secret values from set_amp_account_state(prepare_provisioning).
+# Never place the Postmaster private signing key or generated proxy HMAC secret here.
+[vars]
+POSTMASTER_PROVISIONING_PUBLIC_KEY = "BASE64URL_ED25519_PUBLIC_KEY_FROM_POSTMASTER"
+POSTMASTER_PROVISIONING_KEY_ID = "KEY_ID_FROM_POSTMASTER"
+
+# Legacy deployments may continue to use POSTMASTER_PROXY_SECRET as a Worker secret.
+# Do not put POSTMASTER_PROXY_SECRET in this file or in Git. Configure it with
+# `wrangler secret put POSTMASTER_PROXY_SECRET` or an equivalent authorized workflow.
+# New MCP-native provisioning does not require that legacy secret to be preconfigured.
 
 [durable_objects]
 bindings = [
