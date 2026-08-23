@@ -1,7 +1,9 @@
 const MAX_CLOCK_SKEW_SECONDS = 300;
 const DEFAULT_MAX_RESPONSE_BYTES = 2_000_000;
 const HARD_MAX_RESPONSE_BYTES = 2_000_000;
+const HARD_MAX_DECOY_RESPONSE_BYTES = 64_000;
 const FETCH_TIMEOUT_MS = 8_000;
+const DECOY_FETCH_TIMEOUT_MS = 3_000;
 const PROXY_USER_AGENT = "Postmaster-MCP-Privacy-Proxy/9.6.3";
 const ALLOWED_CONTENT_TYPES = new Set([
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif",
@@ -211,9 +213,11 @@ async function proxyFetch(payload) {
   }
   await assertPublicTarget(target);
 
-  const maxBytes = Math.max(1, Math.min(Number(payload.max_response_bytes || DEFAULT_MAX_RESPONSE_BYTES), HARD_MAX_RESPONSE_BYTES));
+  const hardMaxBytes = requestKind === "decoy" ? HARD_MAX_DECOY_RESPONSE_BYTES : HARD_MAX_RESPONSE_BYTES;
+  const maxBytes = Math.max(1, Math.min(Number(payload.max_response_bytes || DEFAULT_MAX_RESPONSE_BYTES), hardMaxBytes));
+  const timeoutMs = requestKind === "decoy" ? DECOY_FETCH_TIMEOUT_MS : FETCH_TIMEOUT_MS;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort("timeout"), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
     const response = await fetch(target, {
       method: "GET",
