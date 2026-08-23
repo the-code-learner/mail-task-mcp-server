@@ -5,6 +5,7 @@ import os
 import uvicorn
 
 from . import runtime_core as _core
+from . import webgui_v963 as _webgui_v963
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
@@ -25,6 +26,7 @@ from .webgui_v961 import install_webgui_v961
 from .webgui_v962 import install_webgui_v962
 from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
 from .webgui_v963 import install_webgui_v963
+from .webgui_v963_high_noise import install_webgui_v963_high_noise
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -66,9 +68,11 @@ install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
 install_webgui_v962_collapsible_system()
 dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
-# v9.6.3 is additive: runtime/cache first, then a presentation/Inbox renderer layer over
-# the already-installed v9.6.2 lazy shell. It does not replace that shell's JS lifecycle.
+# v9.6.3 is additive: runtime/cache first, then privacy hooks and the presentation/Inbox
+# renderer layer over the already-installed v9.6.2 lazy shell. It does not replace that shell's
+# JS lifecycle and it does not add MCP command names.
 build_status = install_runtime_v963(_base, _core, build_status)
+install_webgui_v963_high_noise(_webgui_v963)
 install_webgui_v963(app, _base)
 link_store = _core.link_store
 
