@@ -31,6 +31,7 @@ from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
 from .webgui_v963 import install_webgui_v963
 from .webgui_v963_high_noise import install_webgui_v963_high_noise
 from .webgui_v964 import install_webgui_v964
+from .webgui_visual_restoration import install_webgui_visual_restoration
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -82,6 +83,10 @@ install_webgui_v963(app, _base)
 # semantics: canonical detracking, manual WebGUI recipient policy and per-send suppression consent.
 build_status = install_runtime_v964(_base, _core, build_status)
 install_webgui_v964(app, _base)
+# Restore the richer pre-v9.6.2 navigation/palette only after all functional WebGUI overlays are
+# installed. The installer changes presentation on the existing lazy shell and does not replace
+# fragment routes, renderers or outbound handlers.
+install_webgui_visual_restoration(_webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
