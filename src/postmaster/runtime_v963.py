@@ -26,7 +26,6 @@ def _runtime_data_path(env_name: str, filename: str) -> str:
             pass
         return str(data / filename)
     except OSError:
-        # Development/CI fallback only. Production's versioned deployment mounts writable /data.
         return str(Path(tempfile.gettempdir()) / f"postmaster-{os.getuid()}-{filename}")
 
 
@@ -60,8 +59,6 @@ def onboarding_state(base: Any) -> dict[str, Any]:
     try:
         account_count = len(base.account_store().list_accounts())
     except Exception:
-        # Ambiguity is deliberately upgrade-safe: do not force first-run onboarding when
-        # established-install state cannot be determined reliably.
         return {
             "established_installation": True,
             "full_onboarding": False,
@@ -72,8 +69,6 @@ def onboarding_state(base: Any) -> dict[str, Any]:
     try:
         state = privacy_proxy_store().onboarding(account_count)
     except Exception:
-        # Failure to read optional onboarding state must not turn an established install into a
-        # first-run install. Fresh installs can resume after storage becomes available.
         return {
             "established_installation": account_count > 0,
             "full_onboarding": account_count == 0,
@@ -147,6 +142,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
                     "enabled": bool(proxy.get("enabled")),
                     "secret_configured": bool(proxy.get("secret_configured")),
                     "tracking_obfuscation": bool(proxy.get("tracking_obfuscation")),
+                    "high_noise_decoy_enabled": bool(proxy.get("high_noise_decoy_enabled")),
                 },
                 "onboarding": onboarding_state(base),
                 "new_mail_mcp_commands": 0,
@@ -165,7 +161,6 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
         if not isinstance(result, dict):
             result = {"ok": True}
         proxy = privacy_proxy_store().status()
-        # Never return secret_value or encrypted material from any read API.
         result["privacy_proxy"] = {
             "configured": bool(proxy.get("configured")),
             "worker_url": str(proxy.get("worker_url") or ""),
@@ -173,6 +168,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
             "secret": "configured" if proxy.get("secret_configured") else "not configured",
             "enabled": bool(proxy.get("enabled")),
             "tracking_obfuscation": bool(proxy.get("tracking_obfuscation")),
+            "high_noise_decoy_enabled": bool(proxy.get("high_noise_decoy_enabled")),
             "last_test_at": str(proxy.get("last_test_at") or ""),
             "last_test_ok": proxy.get("last_test_ok"),
             "last_test_error": str(proxy.get("last_test_error") or ""),
@@ -196,6 +192,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
         privacy_proxy_secret: str | None = None,
         privacy_proxy_enabled: bool | None = None,
         tracking_obfuscation: bool | None = None,
+        high_noise_decoy_enabled: bool | None = None,
         privacy_proxy_test: bool = False,
         privacy_proxy_dismiss_offer: bool = False,
     ):
@@ -203,6 +200,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
 
         The MCP command name is intentionally reused to keep the public tool count unchanged. The
         Privacy Proxy secret is write-only: it is encrypted at rest and never echoed by this tool.
+        High-noise decoy traffic is a distinct persisted opt-in policy and defaults to off.
         """
         result: dict[str, Any] = {"ok": True}
         amp_change = any(value is not None for value in (enabled, tested, registered, notes)) or bool(review_sent)
@@ -228,6 +226,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
                 privacy_proxy_secret,
                 privacy_proxy_enabled,
                 tracking_obfuscation,
+                high_noise_decoy_enabled,
             )
         )
         if proxy_change:
@@ -237,6 +236,7 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
                     secret=privacy_proxy_secret,
                     enabled=privacy_proxy_enabled,
                     tracking_obfuscation=tracking_obfuscation,
+                    high_noise_decoy_enabled=high_noise_decoy_enabled,
                 )
             except Exception as exc:
                 return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
