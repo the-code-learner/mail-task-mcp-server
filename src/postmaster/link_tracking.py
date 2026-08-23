@@ -182,7 +182,7 @@ class LinkTrackingStore(LinkTrackingQueriesMixin):
         with self._connect() as conn:
             conn.execute("UPDATE tracking_links SET message_id=? WHERE delivery_id=?", (message_id or "", delivery_id))
 
-    def _resolve_prior_tracking_url(self, url: str, public_base: SplitResult) -> tuple[str, bool]:
+    def _resolve_prior_tracking_url(self, url: str, public_base: SplitResult | None) -> tuple[str, bool]:
         """Resolve historical Postmaster click URLs from local persistence only."""
         current = unescape(url or "").strip()
         changed = False
@@ -225,7 +225,13 @@ class LinkTrackingStore(LinkTrackingQueriesMixin):
         if not html:
             return html
 
-        public_base = urlsplit(_safe_base_url())
+        try:
+            public_base: SplitResult | None = urlsplit(_safe_base_url())
+        except AnalyticsError:
+            # Normal untracked HTML must not start requiring a public tracking endpoint.
+            # Known historical tokens can still be resolved locally from persistence.
+            public_base = None
+
         anchor_replacements: list[tuple[str, str]] = []
         for anchor in collect_anchors(html):
             href = str(anchor.get("href") or "")
@@ -263,13 +269,13 @@ class LinkTrackingStore(LinkTrackingQueriesMixin):
             return html, []
         replacements: list[tuple[str, str]] = []
         public_base = _safe_base_url()
+        base_parts = urlsplit(public_base)
         tracked: list[dict[str, Any]] = []
         for anchor_index, anchor in enumerate(anchors):
             href = str(anchor.get("href") or "")
             if not eligible_web_url(href):
                 continue
             token, parts = _tracking_path_token(href, prefix=_TRACKED_LINK_PREFIX)
-            base_parts = urlsplit(public_base)
             if token and _same_origin(parts, base_parts):
                 continue
             record = self._insert_link(
