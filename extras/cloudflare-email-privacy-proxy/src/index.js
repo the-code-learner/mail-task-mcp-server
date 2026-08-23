@@ -405,16 +405,39 @@ async function proxyFetch(payload) {
 }
 
 export class NonceGuard {
-  constructor(state) { this.state = state; }
+  constructor(state) {
+    this.state = state;
+    this.sql = state.storage.sql;
+    this.sql.exec(
+      "CREATE TABLE IF NOT EXISTS postmaster_nonces (scope TEXT NOT NULL, nonce TEXT NOT NULL, observed_at INTEGER NOT NULL, PRIMARY KEY(scope, nonce))"
+    );
+  }
 
   async _checkNonce(request) {
     const { nonce, timestamp, scope = "hmac" } = await request.json();
     const now = Math.floor(Date.now() / 1000);
-    if (!nonce || Math.abs(now - Number(timestamp)) > MAX_CLOCK_SKEW_SECONDS) return new Response("", { status: 401 });
-    const key = `nonce:${scope}:${nonce}`;
-    if (await this.state.storage.get(key)) return new Response("", { status: 409 });
-    await this.state.storage.put(key, Number(timestamp), { expiration: now + MAX_CLOCK_SKEW_SECONDS + 30 });
-    return new Response("", { status: 204 });
+    const seconds = Number(timestamp);
+    if (!nonce || !Number.isFinite(seconds) || Math.abs(now - seconds) > MAX_CLOCK_SKEW_SECONDS) {
+      return new Response(null, { status: 401 });
+    }
+    const normalizedScope = String(scope || "hmac").slice(0, 128);
+    this.sql.exec(
+      "DELETE FROM postmaster_nonces WHERE observed_at < ?",
+      now - MAX_CLOCK_SKEW_SECONDS - 30,
+    );
+    const existing = [...this.sql.exec(
+      "SELECT 1 AS present FROM postmaster_nonces WHERE scope = ? AND nonce = ? LIMIT 1",
+      normalizedScope,
+      String(nonce),
+    )];
+    if (existing.length) return new Response(null, { status: 409 });
+    this.sql.exec(
+      "INSERT INTO postmaster_nonces(scope, nonce, observed_at) VALUES (?, ?, ?)",
+      normalizedScope,
+      String(nonce),
+      seconds,
+    );
+    return new Response(null, { status: 204 });
   }
 
   async _getSecretState() {
@@ -451,7 +474,7 @@ export class NonceGuard {
       await this.state.storage.delete("proxy:active");
       await this.state.storage.delete("proxy:previous");
       await this.state.storage.put("proxy:generation", generation);
-      return json({ ok: true, generation, provisioned: false }, 204);
+      return json({ ok: true, generation, provisioned: false }, 200);
     }
 
     if (!new Set(["provision", "rotate"]).has(operation)) return json({ error: "invalid_operation" }, 400);
@@ -460,7 +483,7 @@ export class NonceGuard {
 
     if (generation === currentGeneration) {
       if (active && Number(active.generation) === generation && String(active.secret || "") === secret) {
-        return json({ ok: true, generation, idempotent: true }, 204);
+        return json({ ok: true, generation, idempotent: true }, 200);
       }
       return json({ error: "generation_conflict" }, 409);
     }
@@ -483,21 +506,21 @@ export class NonceGuard {
     }
     await this.state.storage.put("proxy:active", { secret, generation });
     await this.state.storage.put("proxy:generation", generation);
-    return json({ ok: true, generation, provisioned: true }, 204);
+    return json({ ok: true, generation, provisioned: true }, 200);
   }
 
   async fetch(request) {
     const path = new URL(request.url).pathname;
     if (path === "/check") {
-      if (request.method !== "POST") return new Response("", { status: 405 });
+      if (request.method !== "POST") return new Response(null, { status: 405 });
       return this._checkNonce(request);
     }
     if (path === "/secret-state") {
       if (request.method === "GET") return this._getSecretState();
       if (request.method === "POST") return this._applySecretState(request);
-      return new Response("", { status: 405 });
+      return new Response(null, { status: 405 });
     }
-    return new Response("", { status: 404 });
+    return new Response(null, { status: 404 });
   }
 }
 
