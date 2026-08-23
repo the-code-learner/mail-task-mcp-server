@@ -2,6 +2,22 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.8 - 2026-08-23
+
+### Fixed / changed
+- Fixed the outbound detracking/Sent-clean regression at the final composed mail-client boundary. Historical Postmaster click wrappers and open pixels are now canonicalized locally before any current-delivery instrumentation even when higher newsletter/stored-file/threaded paths call the inherited individualized-send boundary directly; unresolved active-origin tokens continue to fail closed.
+- Added final-composed-runtime/MCP regression coverage above the v9.6.4 helper tests for send, reply and follow-up, tracked and untracked delivery, recipient MIME, independently clean Sent MIME, repeated generations/no nesting and fail-closed unresolved tokens. The unchanged v9.6.4 detracking suite continues to verify zero HTTP/DNS/network requests and zero tracking events during historical normalization.
+- Hardened the second explicit Full HTML confirmation so it performs genuine passive-resource fetches through the configured Privacy Proxy, classifies the aggregate result as `success`, `partial success` or `failure`, and renders only successfully cached resources. An all-failure result remains in Safe Email instead of falsely claiming Full HTML success.
+- Made final high-noise wiring explicit at the route-composition boundary after the second Full HTML confirmation. Existing safety bounds remain unchanged: at most 4 decoys per message/load, 2 per domain and concurrency 2, with navigation/action links excluded and all existing Privacy Proxy SSRF, redirect, replay, content-type and size protections preserved.
+- Successful received-message detail opens now set IMAP `Seen` through the existing mail abstraction, update cached flags and clear the selected unread indicator in the same WebGUI response. A failed detail load does not mark the message read.
+- Full HTML diagnostics expose only safe aggregate state/counts; Privacy Proxy per-fetch exception text, HMAC material, Ed25519 private-key material, signatures and provisioning/confirmation tokens are not surfaced to the browser.
+
+### Compatibility / safety / deployment
+- The composed MCP command-name surface remains exactly 96 names (`delta = 0` from v9.6.7); no command is added or removed and no lifecycle command schema/classification is changed.
+- `requirements.txt` is unchanged; `postmaster-mcp.yml` is unchanged; no persistent database/storage schema or migration is introduced; the canonical Worker source is unchanged.
+- Existing persistent outbound idempotency, suppression semantics, preview-first one-time lifecycle confirmation, Ed25519 provisioning/no-TOFU, Safe Email zero-network default and provider-neutral public-tree boundaries remain intact.
+- Stable source/release publication remains separate from production activation. Publishing v9.6.8 does not itself restart, deploy, switch the production runtime, mutate Portainer/Cloudflare, replace the Worker or reprovision/rotate the Privacy Proxy.
+
 ## 9.6.7 - 2026-08-23
 
 ### Fixed / changed
