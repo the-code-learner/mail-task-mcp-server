@@ -31,12 +31,12 @@ def _dedupe(values: Iterable[str], excluded: set[str], seen: set[str] | None = N
     return result
 
 
-def reply_all_plan(message: Message, settings: Any, *, require_reply_target: bool = True) -> dict[str, Any]:
+def reply_all_plan(message: Message, settings: Any, *, require_reply_target: bool = False) -> dict[str, Any]:
     """Plan a Reply-all draft without reading or exposing Bcc.
 
-    ``require_reply_target=False`` is useful for Forward UI planning where the selected
-    message can legitimately be outbound from the current account; Forward does not reuse
-    the returned reply target.
+    Set ``require_reply_target=True`` when validating an actual reply operation. The default
+    permits the same metadata helper to support Forward UI for outbound messages where From is
+    the current sender account and no external reply target should exist.
     """
     identities = sender_identity_addresses(settings)
     excluded = {value.casefold() for value in identities}
