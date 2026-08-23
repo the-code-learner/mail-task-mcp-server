@@ -10,7 +10,7 @@ from mcp.server import MCPServer
 from starlette.responses import HTMLResponse
 
 from postmaster.runtime_v964 import install_runtime_v964
-from postmaster.webgui_release_identity import install_webgui_release_identity
+from postmaster.webgui_release_identity import install_webgui_release_identity, project_release_version
 
 
 class WebGuiReleaseIdentityTests(unittest.TestCase):
@@ -35,11 +35,15 @@ class WebGuiReleaseIdentityTests(unittest.TestCase):
         self.assertEqual(response.headers["X-Postmaster-WebGUI"], "9.6.4-lazy")
         self.assertNotIn("WebGUI v9.6.2", response.body.decode("utf-8"))
 
+    def test_release_identity_reads_same_local_version_metadata_as_runtime(self):
+        version_path = Path(__file__).resolve().parents[1] / "VERSION"
+        self.assertEqual(project_release_version(), version_path.read_text(encoding="utf-8").strip())
+
     def test_runtime_applies_release_identity_after_v964_webgui_overlay(self):
         runtime_path = Path(__file__).resolve().parents[1] / "src" / "postmaster" / "runtime.py"
         source = runtime_path.read_text(encoding="utf-8")
         v964_index = source.index("install_webgui_v964(app, _base)")
-        identity_index = source.index("install_webgui_release_identity(_webgui_v962, _core._project_version())")
+        identity_index = source.index("install_webgui_release_identity(_webgui_v962, project_release_version())")
         self.assertLess(v964_index, identity_index)
         self.assertIn("from . import webgui_v962 as _webgui_v962", source)
 
