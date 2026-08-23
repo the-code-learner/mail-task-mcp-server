@@ -1,16 +1,38 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .email_privacy_v963 import PrivacyProxyClient, PrivacyProxyStore
 from .mailbox_cache_v963 import MailboxCacheStore, MailboxCacheSynchronizer, MailboxSyncService
 
 
+def _runtime_data_path(env_name: str, filename: str) -> str:
+    explicit = (os.getenv(env_name) or "").strip()
+    if explicit:
+        return explicit
+    data = Path("/data")
+    try:
+        data.mkdir(parents=True, exist_ok=True)
+        probe = data / ".postmaster-write-probe"
+        with probe.open("a", encoding="utf-8"):
+            pass
+        try:
+            probe.unlink()
+        except OSError:
+            pass
+        return str(data / filename)
+    except OSError:
+        # Development/CI fallback only. Production's versioned deployment mounts writable /data.
+        return str(Path(tempfile.gettempdir()) / f"postmaster-{os.getuid()}-{filename}")
+
+
 @lru_cache(maxsize=1)
 def mailbox_cache_store() -> MailboxCacheStore:
-    return MailboxCacheStore()
+    return MailboxCacheStore(_runtime_data_path("MAILBOX_CACHE_DB_PATH", "mailbox_cache.db"))
 
 
 @lru_cache(maxsize=1)
@@ -20,7 +42,10 @@ def mailbox_cache_synchronizer() -> MailboxCacheSynchronizer:
 
 @lru_cache(maxsize=1)
 def privacy_proxy_store() -> PrivacyProxyStore:
-    return PrivacyProxyStore()
+    return PrivacyProxyStore(
+        _runtime_data_path("PRIVACY_PROXY_DB_PATH", "privacy_proxy.db"),
+        _runtime_data_path("PRIVACY_PROXY_KEY_PATH", "privacy_proxy.key"),
+    )
 
 
 @lru_cache(maxsize=1)
@@ -44,7 +69,18 @@ def onboarding_state(base: Any) -> dict[str, Any]:
             "fresh_install_resumable": False,
             "ambiguous_installation_state": True,
         }
-    state = privacy_proxy_store().onboarding(account_count)
+    try:
+        state = privacy_proxy_store().onboarding(account_count)
+    except Exception:
+        # Failure to read optional onboarding state must not turn an established install into a
+        # first-run install. Fresh installs can resume after storage becomes available.
+        return {
+            "established_installation": account_count > 0,
+            "full_onboarding": account_count == 0,
+            "privacy_proxy_offer": False,
+            "fresh_install_resumable": account_count == 0,
+            "ambiguous_installation_state": True,
+        }
     state["ambiguous_installation_state"] = False
     return state
 
@@ -73,8 +109,6 @@ def _install_mcp_onboarding_instructions(base: Any, core: Any) -> None:
             )
         setattr(core.mcp, "instructions", current + addition)
     except Exception:
-        # Onboarding policy is still enforced by the state/read-write surfaces below if a given MCP
-        # implementation exposes instructions as immutable.
         return
 
 
@@ -217,7 +251,6 @@ def install_runtime_v963(base: Any, core: Any, legacy_build_status: Any):
         if privacy_proxy_dismiss_offer:
             privacy_proxy_store().set_onboarding("privacy_proxy_offer", "dismissed")
         result["onboarding"] = onboarding_state(base)
-        # Defensive deletion in case an implementation detail is ever added to the status object.
         for key in ("secret_value", "secret_enc", "privacy_proxy_secret"):
             result.pop(key, None)
             if isinstance(result.get("privacy_proxy"), dict):
