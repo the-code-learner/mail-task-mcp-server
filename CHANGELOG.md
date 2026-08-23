@@ -2,6 +2,27 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.3 - 2026-08-23
+
+### Added / changed
+- Added a persistent SQLite cache-first Inbox read model with read-only incremental IMAP synchronization based on UID/UIDVALIDITY, mailbox-level request coalescing, five-minute scheduling, explicit manual refresh, cached body-on-demand and persistent restart-safe state while keeping IMAP authoritative and the synchronizer outside every send boundary.
+- Made Safe Email the zero-network default: message HTML/URLs are inventoried statically, remote/active content and navigable message URLs are suppressed, tracking evidence remains heuristic with observed evidence separated from inference, and the first **Visualizza HTML completo** action performs no message-target DNS/HTTP activity.
+- Added the second explicit **Conferma e carica HTML completo** consent action. Only passive rendering resources are eligible, only through the configured Privacy Proxy, redirects remain inert status + `Location`, and successful genuine passive resources are served back to the browser from the durable local cache under restrictive CSP/sandbox rules. Navigation/action/unsubscribe/login/magic/reset/confirmation/approval/one-time-token URLs remain silent.
+- Added an optional generic Cloudflare Privacy Proxy Worker template with HTTPS-only targets, shared-secret HMAC over timestamp/nonce/body digest, replay protection, canonical proxy User-Agent, header isolation, strict SSRF checks, public-DNS preflight, manual redirects, passive content-type allowlisting and bounded response handling. The browser never contacts message targets directly.
+- Added explicit persisted **High-noise decoy traffic** configuration, semantically separate from tracking obfuscation and defaulting to Off for new and upgraded installations. The existing administrative MCP surface and WebGUI can independently configure proxy enablement, tracking obfuscation and high-noise without adding an MCP command name. High-noise requires tracking obfuscation and is never enabled by per-message Full HTML consent.
+- High-noise runs only after the second Full HTML confirmation and only over structurally passive resource candidates. It is bounded to 4 decoy requests per message/load, 2 per domain, concurrency 2, 3-second client and Worker decoy timeouts, 64,000 bytes per decoy response, 256,000 aggregate decoy response bytes and a 7-second Postmaster execution budget. Decoys reuse the authenticated `/fetch` endpoint and the same SSRF/content/redirect protections; they never contact `<a href>` or navigation/action URLs and do not simulate human clicks.
+- Decoy results are stored only as separate hashed audit metadata and never become durable render-cache entries or evidence that a resource was required for rendering. Genuine passive resources retain cache-first reuse so high-noise does not create an automatic refetch loop or invalidate the local privacy cache.
+- Added Reply, Reply all and Forward Inbox UX that remains draft-oriented, preserves threading semantics, filters sender identities/aliases from Reply-all recipients, never rediscovers Bcc, and reuses existing attachment/draft paths rather than introducing an automatic-send route.
+- Restored v9.6.0-inspired presentation hooks while preserving the v9.6.2 lazy-fragment cancellation/stale-response lifecycle, widened the Knowledge editor, and kept Projects CRUD/storage semantics unchanged.
+- Added upgrade-safe onboarding semantics: any installation with at least one configured email account is established and never receives full first-run onboarding; established users can receive only an optional dismissible Privacy Proxy setup. Onboarding itself sends no mail, contacts no message URL and cannot enable high-noise without explicit configuration.
+
+### Compatibility / safety / deployment
+- MCP command surface remains exactly 90 names (`delta = 0`); Privacy Proxy/high-noise configuration extends the existing administrative command and existing status surfaces additively. The shared secret remains write-only/encrypted locally and is never returned in plaintext, committed to Git, placed in `postmaster-mcp.yml`, logged, or inserted into MCP initialize instructions.
+- v9.6.3 introduces additive local storage for mailbox cache/resources plus Privacy Proxy configuration/decoy audit state. Existing Privacy Proxy databases migrate `high_noise_decoy_enabled` with `DEFAULT 0`; established installations therefore remain high-noise Off unless explicitly changed. No dependency or `requirements.txt` change is intended.
+- Existing persistent idempotency-before-SMTP, duplicate fingerprint/`force_send` boundaries and conservative `delivery_uncertain` behavior remain unchanged; no v9.6.3 cache/proxy/onboarding path sends mail automatically.
+- `postmaster-mcp.yml` remains do-not-touch and unchanged (expected Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`). The Worker template contains no personal URL, domain, account identifier, token or shared secret.
+- Source/release work remains separate from production runtime state. v9.6.3 preparation/publication does not itself authorize or perform a production deploy/restart/update, Portainer change, Docker-topology change, Cloudflare Access/Tunnel/DNS/reverse-proxy change or real test email.
+
 ## 9.6.2 - 2026-08-23
 
 ### Added / changed
