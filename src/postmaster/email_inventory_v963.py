@@ -4,7 +4,8 @@ import re
 from typing import Any
 
 from .email_privacy_v963 import inventory_html
-from .inbound_inspection_urls import inspect_url, urls_from_text
+from .inbound_inspection_html import urls_from_text
+from .inbound_inspection_urls import inspect_url
 
 
 _ACTION_RE = re.compile(r"(?:unsubscribe|opt[-_]?out|reset|magic|login|signin|verify|confirm|approve|accept|activate|token=|action=)", re.I)
@@ -45,7 +46,10 @@ def inventory_message(body_html: str, body_text: str) -> dict[str, Any]:
     """Complete static inventory across HTML attributes/CSS and the plain-text MIME alternative."""
     result = inventory_html(body_html or "")
     rows = [dict(row) for row in result.get("urls") or []]
-    for url in urls_from_text(body_text or ""):
+    for text_record in urls_from_text(body_text or ""):
+        url = str(text_record.get("original_url") or "").strip()
+        if not url:
+            continue
         inspected = inspect_url(url)
         kind, score, reasons, observed = _plain_classification(url)
         rows.append(
