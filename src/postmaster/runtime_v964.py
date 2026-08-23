@@ -36,6 +36,14 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
         dsn_notify_success: bool = False, idempotency_key: str | None = None,
         force_send: bool = False, confirm_suppressed_recipients: list[str] | None = None,
     ):
+        """WRITE ACTION. Send email through the existing outbound pipeline.
+
+        Suppressed recipients are blocked by default. If a call reports that suppression
+        authorization is required, ask the user to explicitly approve the exact suppressed
+        address(es) for this specific send before retrying. Only after that approval may
+        `confirm_suppressed_recipients` contain those exact addresses. The confirmation is
+        ephemeral and does not alter recipient authorization or the suppression list.
+        """
         return base._safe_call(
             base.mail_client(account_id).send_email,
             to=to, subject=subject, body=body, cc=cc, bcc=bcc, body_html=body_html,
@@ -64,6 +72,12 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
         dsn_notify_success: bool = False, idempotency_key: str | None = None,
         force_send: bool = False, confirm_suppressed_recipients: list[str] | None = None,
     ):
+        """WRITE ACTION. Reply in-thread through the existing outbound pipeline.
+
+        Suppressed recipients require explicit user approval for this single reply before their
+        exact addresses may be passed in `confirm_suppressed_recipients`. Never infer or persist
+        that approval; retry only after the user has approved the addresses named by the block.
+        """
         return base._safe_call(
             base.mail_client(account_id).reply_email,
             mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc, body_html=body_html,
@@ -90,6 +104,12 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
         dsn_notify_success: bool = False, idempotency_key: str | None = None,
         force_send: bool = False, confirm_suppressed_recipients: list[str] | None = None,
     ):
+        """WRITE ACTION. Follow up on an outbound message through the existing pipeline.
+
+        Suppressed recipients require explicit user approval for this single follow-up before
+        their exact addresses may be passed in `confirm_suppressed_recipients`. The approval is
+        per-send only and must not be inferred from prior sends or stored as future authorization.
+        """
         return base._safe_call(
             base.mail_client(account_id).follow_up_email,
             mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc, body_html=body_html,
