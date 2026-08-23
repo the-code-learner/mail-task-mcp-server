@@ -49,6 +49,9 @@ RESTORED_STYLE = r'''
   --surface:var(--card);--border:var(--line);
 }
 .shell{grid-template-columns:238px minmax(0,1fr)}
+/* v951.STYLE is appended after BASE_STYLE and still contains the old fixed-sidebar
+   main offset. This shell-specific selector wins by specificity so the grid owns layout. */
+.shell>main{margin-left:0;max-width:none;min-width:0}
 .v962-nav{display:flex;flex-direction:column;flex-wrap:nowrap;gap:3px;padding:14px 12px;background:linear-gradient(180deg,#151a21 0%,#10141a 64%,#0c1015 100%);box-shadow:10px 0 34px rgba(0,0,0,.16)}
 .v962-brand{padding:7px 9px 15px;border-bottom:1px solid var(--line);margin-bottom:4px}
 .v962-brand strong{font-size:17px;letter-spacing:.01em}.v962-brand small{color:var(--muted)}
