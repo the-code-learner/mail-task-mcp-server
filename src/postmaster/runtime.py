@@ -22,6 +22,7 @@ from .webgui_v960 import install_webgui_v960
 from .webgui_v960_scopes import install_webgui_v960_scopes
 from .webgui_v961 import install_webgui_v961
 from .webgui_v962 import install_webgui_v962
+from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -61,6 +62,7 @@ dashboard_home = install_webgui_v954(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v960(app, _base, _core, dashboard_home)
 install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
+install_webgui_v962_collapsible_system()
 dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
 link_store = _core.link_store
 
