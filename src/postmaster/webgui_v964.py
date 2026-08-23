@@ -14,6 +14,7 @@ from .thread_recipients import merge_thread_cc, sender_identity_addresses
 
 
 _CONFIRM_FIELD = "confirm_suppressed"
+_WARNED_FIELD = "warned_suppressed_recipients"
 
 
 def _hidden(name: str, value: Any) -> str:
@@ -56,6 +57,10 @@ def _form_payload(form: Any) -> dict[str, Any]:
         "force_send": bool(form.get("force_send")),
         "return_view": str(form.get("return_view") or "").strip(),
         "confirmed": str(form.get(_CONFIRM_FIELD) or "") == "1",
+        "warned_suppressed": {
+            value.casefold()
+            for value in v960._split_addresses(form.get(_WARNED_FIELD))
+        },
     }
 
 
@@ -108,6 +113,12 @@ def _confirmation_page(base: Any, form: Any, blocked: list[dict[str, Any]]) -> H
         value = form.get(name)
         if value is not None and str(value) != "":
             hidden += _hidden(name, value)
+    warned = ",".join(
+        str(row.get("recipient") or "").strip()
+        for row in blocked
+        if str(row.get("recipient") or "").strip()
+    )
+    hidden += _hidden(_WARNED_FIELD, warned)
     hidden += _hidden(_CONFIRM_FIELD, "1")
     return HTMLResponse(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>Confirm suppressed recipients</title></head>"
@@ -138,15 +149,58 @@ def _result_redirect(form: Any, result: Any, success_text: str) -> RedirectRespo
     )
 
 
+def _save_draft(base: Any, form: Any, payload: dict[str, Any]) -> RedirectResponse:
+    common = {
+        "body": payload["body"],
+        "body_html": payload["body_html"],
+        "attachments": payload["attachments"] or None,
+        "account_id": payload["account_id"],
+    }
+    mode = str(payload["thread_mode"])
+    if mode == "reply" and payload["mailbox"] and payload["uid"]:
+        result = v951._safe_call(
+            base,
+            base.create_reply_draft,
+            mailbox=payload["mailbox"],
+            uid=payload["uid"],
+            cc=payload["cc"] or None,
+            bcc=payload["bcc"] or None,
+            **common,
+        )
+    elif mode == "follow_up" and payload["mailbox"] and payload["uid"]:
+        result = v951._safe_call(
+            base,
+            base.create_follow_up_draft,
+            mailbox=payload["mailbox"],
+            uid=payload["uid"],
+            cc=payload["cc"] or None,
+            bcc=payload["bcc"] or None,
+            **common,
+        )
+    else:
+        result = v951._safe_call(
+            base,
+            base.create_draft,
+            to=payload["to"],
+            cc=payload["cc"] or None,
+            bcc=payload["bcc"] or None,
+            subject=payload["subject"],
+            body_amp=payload["body_amp"],
+            **common,
+        )
+    return _result_redirect(form, result, "Draft saved")
+
+
 async def compose_send(base: Any, request: Request):
     form, error = await base._verified_form(request)
     if error:
         return error
     payload = _form_payload(form)
 
-    # Drafting is review-only and intentionally keeps the existing v9.6 behavior.
+    # Drafting is review-only and intentionally keeps the existing v9.6 semantics,
+    # but it is executed here so the same POST/CSRF token is verified only once.
     if payload["compose_action"] == "draft":
-        return await v960.compose_send(base, request)
+        return _save_draft(base, form, payload)
 
     client = base.mail_client(payload["account_id"])
     mode = str(payload["thread_mode"])
@@ -169,7 +223,14 @@ async def compose_send(base: Any, request: Request):
             "Message sent",
         )
 
-    if blocked and not payload["confirmed"]:
+    current_blocked = {
+        str(row.get("recipient") or "").strip().casefold()
+        for row in blocked
+        if str(row.get("recipient") or "").strip()
+    }
+    newly_blocked = current_blocked - payload["warned_suppressed"]
+    if blocked and (not payload["confirmed"] or newly_blocked):
+        # Re-warn if suppression state changed between the first page and confirmation.
         return _confirmation_page(base, form, blocked)
 
     authorized_suppressed = [str(row.get("recipient") or "") for row in blocked]
