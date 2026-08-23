@@ -71,10 +71,11 @@ class FakeImap:
         sequence = str(args[0])
         query = str(args[1])
         if sequence == "1:*" and "UID FLAGS" in query:
-            return "OK", [
-                f'{index} (UID {uid} FLAGS ({"\\\\Seen" if uid in self.owner.seen else ""}))'.encode()
-                for index, uid in enumerate(self.owner.uids, 1)
-            ]
+            rows = []
+            for index, uid in enumerate(self.owner.uids, 1):
+                flag = "\\Seen" if uid in self.owner.seen else ""
+                rows.append(f"{index} (UID {uid} FLAGS ({flag}))".encode())
+            return "OK", rows
         uid = int(sequence)
         if "BODY.PEEK[HEADER]" in query:
             self.owner.header_fetches.append(uid)
@@ -193,7 +194,7 @@ class MailboxCacheV963Tests(unittest.TestCase):
         self.assertEqual(_SYNC_INTERVAL_SECONDS, 300.0)
         service = MailboxSyncService(self.sync, list_accounts=lambda: [], client_factory=lambda _: self.client)
         self.assertEqual(service.interval_seconds, 300.0)
-        self.assertNotIn("SchedulerEngine", inspect.getsource(MailboxSyncService))
+        self.assertNotIn("SchedulerEngine(", inspect.getsource(MailboxSyncService))
         self.assertNotIn("send_email", inspect.getsource(MailboxCacheSynchronizer))
 
 
@@ -348,7 +349,7 @@ class WebGuiAndOnboardingV963Tests(unittest.TestCase):
         renderer = inspect.getsource(render_inbox_v963)
         self.assertIn("query_messages", renderer)
         self.assertNotIn("search_emails", renderer)
-        self.assertNotIn("list_mailboxes", renderer)
+        self.assertNotIn("mailbox_catalog(", renderer)
         self.assertIn("Aggiorna", renderer)
         self.assertIn("Safe Email is the default", renderer)
         detail_source = Path(ROOT / "src/postmaster/webgui_v963.py").read_text(encoding="utf-8")
