@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+
+def project_release_version() -> str:
+    """Read the checked-out application release without network or runtime-private exports."""
+    try:
+        return (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
 
 
 def install_webgui_release_identity(v962: Any, version: str) -> None:
@@ -25,4 +34,4 @@ def install_webgui_release_identity(v962: Any, version: str) -> None:
     v962._shell = release_shell
 
 
-__all__ = ["install_webgui_release_identity"]
+__all__ = ["install_webgui_release_identity", "project_release_version"]
