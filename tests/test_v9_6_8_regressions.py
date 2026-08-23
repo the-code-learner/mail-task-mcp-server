@@ -17,6 +17,7 @@ from postmaster.link_tracking import LinkTrackingStore
 from postmaster.mail_bridge import MailBridgeError, Settings
 from postmaster.mail_v960_unsubscribe import PostmasterV960NewsletterMailClient
 from postmaster.runtime_v964 import install_runtime_v964
+from postmaster.runtime_v968 import install_runtime_v968, _install_webgui_seen_boundary
 from postmaster.stored_file_delivery import StoredFileLinkTrackingStore
 from postmaster.tracked_mail import _synchronize_transport_headers
 from postmaster import webgui_v963 as v963
@@ -45,8 +46,7 @@ class FinalComposedCapture(PostmasterV960NewsletterMailClient):
     """Exact final runtime mail-client class with transport/storage side effects captured locally."""
 
     def __init__(self, settings, *, analytics, tracking_store):
-        # Deliberately avoid the production constructors that allocate unrelated persistent stores.
-        # These attributes are the dependencies exercised by the final outbound call chain below.
+        # Deliberately avoid production constructors that allocate unrelated persistent stores.
         self.settings = settings
         self._v946_analytics = analytics
         self._v946_tracking_store = tracking_store
@@ -58,12 +58,31 @@ class FinalComposedCapture(PostmasterV960NewsletterMailClient):
         self.outbound_safety = _OutboundSafety()
         self.outbound_messages: list[EmailMessage] = []
         self.sent_messages: list[EmailMessage] = []
+        self.group_messages: list[EmailMessage] = []
+        self.source: EmailMessage | None = None
 
     def _validate_recipients(self, recipients):
         cleaned = [str(value).strip() for value in recipients if str(value).strip()]
         if not cleaned:
             raise MailBridgeError("At least one recipient is required")
         return cleaned
+
+    def _thread_source_message(self, mailbox: str, uid: str):
+        if self.source is None:
+            raise AssertionError("thread source not configured")
+        return self.source
+
+    def _send_message(self, msg, recipients):
+        self.group_messages.append(msg)
+        return {
+            "sent": True,
+            "from": self.settings.email_address,
+            "to": list(recipients),
+            "subject": str(msg.get("Subject", "")),
+            "message_id": "<group@example.test>",
+            "sent_copy_saved": True,
+            "sent_copy_error": None,
+        }
 
     def _send_message_with_clean_sent(self, outbound, sent_copy, recipients):
         _synchronize_transport_headers(outbound, sent_copy, self.settings.email_address)
@@ -107,6 +126,16 @@ def _html_part(msg: EmailMessage) -> str:
     return ""
 
 
+def _source_message(*, outbound: bool) -> EmailMessage:
+    msg = EmailMessage()
+    msg["From"] = "sender@example.test" if outbound else "reader@example.net"
+    msg["To"] = "reader@example.net" if outbound else "sender@example.test"
+    msg["Subject"] = "Topic"
+    msg["Message-ID"] = "<selected@example.test>"
+    msg["References"] = "<root@example.test>"
+    return msg
+
+
 class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -135,6 +164,8 @@ class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
             analytics=self.analytics,
             tracking_store=self.links,
         )
+        # The release installer is what makes the lower individualized boundary mandatory.
+        install_runtime_v968(_McpBase(self.client), _McpCore())
 
     def tearDown(self):
         if self.old_public is None:
@@ -143,7 +174,7 @@ class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
             os.environ["PUBLIC_EMAIL_BASE_URL"] = self.old_public
         self.tmp.cleanup()
 
-    def historical_html(self):
+    def historical_html(self, destination: str = "https://destination.example/original"):
         campaign = self.analytics.create_campaign(
             account_id="acct",
             sender="sender@example.test",
@@ -158,7 +189,7 @@ class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
             recipient_role="to",
         )
         rendered, _ = self.analytics.render_for_recipient(
-            body_html='<html><body><a href="https://destination.example/original">Open</a></body></html>',
+            body_html=f'<html><body><a href="{destination}">Open</a></body></html>',
             body_amp=None,
             delivery=delivery,
             track_opens=True,
@@ -194,6 +225,62 @@ class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
             self.assertIn("https://destination.example/original", value)
             self.assertNotIn("/t/c/", value)
             self.assertNotIn("/track/open/", value)
+
+    def test_final_tracked_path_retracks_once_and_repeated_generation_does_not_nest(self):
+        historical = self.historical_html()
+        with patch("postmaster.tracked_mail.link_store", return_value=self.links):
+            first = self.client.send_email(
+                to=["reader@example.net"], subject="Generation one", body="Plain",
+                body_html=historical, track_opens=True,
+            )
+            first_html = _html_part(self.client.outbound_messages[-1])
+            second = self.client.send_email(
+                to=["reader@example.net"], subject="Generation two", body="Plain",
+                body_html=first_html, track_opens=True,
+            )
+        second_html = _html_part(self.client.outbound_messages[-1])
+        second_sent = _html_part(self.client.sent_messages[-1])
+        self.assertTrue(first["sent"] and second["sent"])
+        self.assertEqual(first_html.count("/t/c/"), 1)
+        self.assertEqual(first_html.count("/track/open/"), 1)
+        self.assertEqual(second_html.count("/t/c/"), 1)
+        self.assertEqual(second_html.count("/track/open/"), 1)
+        self.assertIn("https://destination.example/original", second_sent)
+        self.assertNotIn("/t/c/", second_sent)
+        self.assertNotIn("/track/open/", second_sent)
+
+    def test_final_reply_and_follow_up_use_same_lower_boundary(self):
+        historical = self.historical_html()
+        self.client.source = _source_message(outbound=False)
+        with patch("postmaster.tracked_mail.link_store", return_value=self.links):
+            reply = self.client.reply_email(
+                mailbox="INBOX", uid="1", body="Reply", body_html=historical,
+                track_opens=True,
+            )
+            self.client.source = _source_message(outbound=True)
+            follow = self.client.follow_up_email(
+                mailbox="Sent", uid="2", body="Follow-up", body_html=historical,
+                track_opens=False,
+            )
+        self.assertTrue(reply["sent"] and follow["sent"])
+        reply_html = _html_part(self.client.outbound_messages[-1])
+        self.assertEqual(reply_html.count("/t/c/"), 1)
+        self.assertEqual(reply_html.count("/track/open/"), 1)
+        follow_html = _html_part(self.client.group_messages[-1])
+        self.assertIn("https://destination.example/original", follow_html)
+        self.assertNotIn("/t/c/", follow_html)
+        self.assertNotIn("/track/open/", follow_html)
+
+    def test_unresolved_active_origin_token_fails_closed_before_transport(self):
+        before = len(self.client.outbound_messages) + len(self.client.group_messages)
+        with patch("postmaster.tracked_mail.link_store", return_value=self.links):
+            with self.assertRaisesRegex(MailBridgeError, "unresolved Postmaster tracking artifact"):
+                self.client.send_email(
+                    to=["reader@example.net"], subject="Broken", body="Plain",
+                    body_html='<a href="https://postmaster.example.test/t/c/missing">Broken</a>',
+                    track_opens=False,
+                )
+        self.assertEqual(len(self.client.outbound_messages) + len(self.client.group_messages), before)
 
     def test_final_client_is_the_runtime_v960_factory_class(self):
         from postmaster import runtime_v960
@@ -248,8 +335,11 @@ class _WebBase:
 class WebGuiPrivacyWiringV968Tests(unittest.TestCase):
     def test_final_high_noise_confirmation_does_not_claim_success_when_all_render_fetches_fail(self):
         original_confirm = v963.confirm_full_html
+        original_detail = v963._detail
+        original_renderer = v963.render_inbox_v963
         try:
             v963_high_noise.install_webgui_v963_high_noise(v963)
+            install_runtime_v968(SimpleNamespace(), SimpleNamespace(), v963)
             inventory = {
                 "urls": [{
                     "url": "https://img.example/a.png",
@@ -269,8 +359,8 @@ class WebGuiPrivacyWiringV968Tests(unittest.TestCase):
             }
             with patch.object(v963, "inventory_message", return_value=inventory), patch.object(
                 v963, "fetch_passive_resources", return_value=failed
-            ), patch.object(
-                v963_high_noise, "fetch_high_noise_decoys", return_value={"requests": 1}
+            ), patch(
+                "postmaster.runtime_v968.fetch_high_noise_decoys", return_value={"requests": 1}
             ):
                 response = asyncio.run(v963.confirm_full_html(_WebBase(), object()))
             location = response.headers["location"]
@@ -280,11 +370,111 @@ class WebGuiPrivacyWiringV968Tests(unittest.TestCase):
             self.assertNotIn("internal+detail", location.casefold())
         finally:
             v963.confirm_full_html = original_confirm
+            v963._detail = original_detail
+            v963.render_inbox_v963 = original_renderer
 
-    def test_canonical_webgui_detail_uses_existing_seen_abstraction(self):
-        source = inspect.getsource(v963._detail)
-        self.assertIn("set_seen", source)
-        self.assertIn("update_flags", source)
+    def test_partial_success_renders_cached_subset_and_reports_safe_state(self):
+        original_confirm = v963.confirm_full_html
+        original_detail = v963._detail
+        original_renderer = v963.render_inbox_v963
+        try:
+            install_runtime_v968(SimpleNamespace(), SimpleNamespace(), v963)
+            inventory = {"urls": []}
+            results = {
+                "https://img.example/ok.png": {"http_status": 200, "body": b"png", "error_state": ""},
+                "https://img.example/fail.png": {"http_status": None, "body": None, "error_state": "hidden"},
+            }
+            with patch.object(v963, "inventory_message", return_value=inventory), patch.object(
+                v963, "fetch_passive_resources", return_value=results
+            ), patch(
+                "postmaster.runtime_v968.fetch_high_noise_decoys", return_value={"requests": 0}
+            ):
+                response = asyncio.run(v963.confirm_full_html(_WebBase(), object()))
+            location = response.headers["location"]
+            self.assertIn("full_html=1", location)
+            self.assertIn("partial+success", location)
+            self.assertNotIn("hidden", location)
+        finally:
+            v963.confirm_full_html = original_confirm
+            v963._detail = original_detail
+            v963.render_inbox_v963 = original_renderer
+
+
+class SeenBoundaryV968Tests(unittest.TestCase):
+    def _fixture(self, *, detail_raises: bool = False):
+        calls: list[tuple] = []
+
+        def detail(base, params, account_id, mailbox, role, uid, request):
+            if detail_raises:
+                raise RuntimeError("detail failed")
+            return '<div class="detail">ok</div>'
+
+        def renderer(base, request):
+            return (
+                '<tr class="v963-mail-row unread" '
+                'data-v960-href="/?ui_view=inbox&amp;message_uid=7">'
+                '<td><span class="v963-unread-dot" title="Unread"></span></td><td>message</td></tr>'
+            )
+
+        fake = SimpleNamespace(
+            _detail=detail,
+            render_inbox_v963=renderer,
+        )
+        _install_webgui_seen_boundary(fake)
+
+        class Store:
+            seen = False
+
+            def get_message(self, account_id, mailbox, uid, include_body=False):
+                return {"seen": self.seen, "flags": []}
+
+            def update_flags(self, account_id, mailbox, values):
+                calls.append(("update_flags", account_id, mailbox, values))
+                self.seen = True
+
+        store = Store()
+
+        class Client:
+            def set_seen(self, mailbox, uid, seen):
+                calls.append(("set_seen", mailbox, uid, seen))
+                return {"ok": True}
+
+        base = SimpleNamespace(
+            mailbox_cache_store=lambda: store,
+            mail_client=lambda account_id: Client(),
+        )
+        return fake, base, store, calls
+
+    def test_successful_received_detail_sets_imap_and_cache_seen(self):
+        fake, base, store, calls = self._fixture()
+        result = fake._detail(
+            base, {}, "acct", "INBOX", "received", "7", SimpleNamespace(query_params={})
+        )
+        self.assertIn("ok", result)
+        self.assertTrue(store.seen)
+        self.assertEqual(calls[0], ("set_seen", "INBOX", "7", True))
+        self.assertEqual(calls[1][0], "update_flags")
+        self.assertEqual(calls[1][3], {7: [r"\Seen"]})
+
+    def test_failed_detail_does_not_mark_seen(self):
+        fake, base, store, calls = self._fixture(detail_raises=True)
+        with self.assertRaisesRegex(RuntimeError, "detail failed"):
+            fake._detail(
+                base, {}, "acct", "INBOX", "received", "7", SimpleNamespace(query_params={})
+            )
+        self.assertFalse(store.seen)
+        self.assertEqual(calls, [])
+
+    def test_same_response_clears_selected_unread_row_after_success(self):
+        fake, base, store, calls = self._fixture()
+        fake._detail(base, {}, "acct", "INBOX", "received", "7", SimpleNamespace(query_params={}))
+        html = fake.render_inbox_v963(
+            base,
+            SimpleNamespace(query_params={"account_id": "acct", "mailbox": "INBOX", "message_uid": "7"}),
+        )
+        self.assertNotIn("v963-mail-row unread", html)
+        self.assertNotIn("v963-unread-dot", html)
+        self.assertIn("v963-mail-row", html)
 
 
 if __name__ == "__main__":
