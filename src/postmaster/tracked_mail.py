@@ -10,7 +10,7 @@ from email.utils import format_datetime, make_msgid
 from html import escape
 from typing import Any
 
-from .email_analytics import analytics_store
+from .email_analytics import AnalyticsError, analytics_store
 from .link_tracking import link_store
 from .mail_bridge import MailBridgeError
 from .mail_extensions import EnhancedMailClient, _plain_to_html
@@ -46,6 +46,40 @@ def _synchronize_transport_headers(outbound: EmailMessage, sent_copy: EmailMessa
 
 class LinkTrackingMailClient(ThreadRecipientsMixin, EnhancedMailClient):
     """v9.4 delivery variant: tracked recipient MIME plus clean archived Sent MIME."""
+
+    def _normalize_outbound_html(self, body_html: str | None) -> str | None:
+        """Canonicalize supplied HTML before any new delivery tracking is applied."""
+        if body_html is None:
+            return None
+        try:
+            return link_store().normalize_postmaster_html(body_html)
+        except AnalyticsError as exc:
+            raise MailBridgeError(
+                f"Outbound HTML contains an unresolved Postmaster tracking artifact: {exc}"
+            ) from exc
+
+    def send_email(
+        self, *, to: list[str], subject: str, body: str = "", cc: list[str] | None = None,
+        bcc: list[str] | None = None, body_html: str | None = None, body_amp: str | None = None,
+        attachments: list[dict[str, Any]] | None = None, track_opens: bool | None = None,
+        campaign_id: str | None = None,
+    ) -> dict[str, Any]:
+        return super().send_email(
+            to=to, subject=subject, body=body, cc=cc, bcc=bcc,
+            body_html=self._normalize_outbound_html(body_html), body_amp=body_amp,
+            attachments=attachments, track_opens=track_opens, campaign_id=campaign_id,
+        )
+
+    def create_draft(
+        self, *, to: list[str], subject: str, body: str = "", cc: list[str] | None = None,
+        bcc: list[str] | None = None, body_html: str | None = None, body_amp: str | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return super().create_draft(
+            to=to, subject=subject, body=body, cc=cc, bcc=bcc,
+            body_html=self._normalize_outbound_html(body_html), body_amp=body_amp,
+            attachments=attachments,
+        )
 
     def _send_message_with_clean_sent(self, outbound: EmailMessage, sent_copy: EmailMessage, recipients: list[str]) -> dict[str, Any]:
         if not self.settings.enable_send:
@@ -122,7 +156,11 @@ class LinkTrackingMailClient(ThreadRecipientsMixin, EnhancedMailClient):
             sender=self.settings.email_address, subject=subject.strip(), track_opens=track_opens,
             amp_used=amp_used, campaign_id=campaign_id,
         )
-        base_html = body_html if body_html is not None else _plain_to_html(body)
+        base_html = (
+            self._normalize_outbound_html(body_html)
+            if body_html is not None
+            else _plain_to_html(body)
+        ) or ""
         delivery_results: list[dict[str, Any]] = []
         errors: list[dict[str, Any]] = []
         attachment_meta: list[dict[str, Any]] = []
