@@ -266,13 +266,13 @@ class PrivacyProxyProvisioningV966Tests(unittest.TestCase):
         self.assertNotIn("tofu", source.casefold())
 
 
-class ReleaseBoundaryV966Tests(unittest.TestCase):
-    def test_composed_real_mcp_registry_remains_exactly_90_and_extends_existing_tool(self):
+class ReleaseBoundaryV966CompatibilityTests(unittest.TestCase):
+    def test_final_registry_preserves_v966_legacy_privacy_schema_inside_v967_surface(self):
         import postmaster.runtime as runtime
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 90)
+        self.assertEqual(len(by_name), 96)
         props = by_name["set_amp_account_state"].input_schema["properties"]
         self.assertIn("privacy_proxy_action", props)
         self.assertIn("privacy_proxy_confirm", props)
@@ -289,7 +289,7 @@ class ReleaseBoundaryV966Tests(unittest.TestCase):
             inspect.signature(runtime._base.set_amp_account_state).parameters,
         )
 
-    def test_yaml_is_unchanged_and_release_metadata_is_v966(self):
+    def test_yaml_is_unchanged_and_v966_historical_contract_remains_documented(self):
         def blob_sha(path: Path) -> str:
             data = path.read_bytes()
             return hashlib.sha1(
@@ -300,7 +300,6 @@ class ReleaseBoundaryV966Tests(unittest.TestCase):
             blob_sha(ROOT / "postmaster-mcp.yml"),
             "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9",
         )
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "9.6.6")
         changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertIn("## 9.6.6 - ", changelog)
         runtime_source = (ROOT / "src/postmaster/runtime.py").read_text()

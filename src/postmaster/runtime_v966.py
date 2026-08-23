@@ -30,7 +30,7 @@ def _public_proxy_status(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def install_runtime_v966(base: Any, core: Any, legacy_build_status: Any):
-    """Install v9.6.6 MCP-native Privacy Proxy provisioning without new command names."""
+    """Install the frozen v9.6.6 legacy compatibility surface."""
 
     legacy_email_security_status = base.email_security_status
     legacy_set_amp_account_state = base.set_amp_account_state
@@ -42,6 +42,13 @@ def install_runtime_v966(base: Any, core: Any, legacy_build_status: Any):
         force_refresh: bool = False,
         confirm_version_change: str | None = None,
     ):
+        """Legacy mixed v9.6.6 runtime compatibility surface.
+
+        This command contains read-only status/discovery behavior plus guarded historical runtime
+        version-change actions. v9.6.7 clients should use runtime_status,
+        runtime_version_change_preview and runtime_version_change_execute so each command name has
+        one stable lifecycle classification.
+        """
         status = legacy_build_status(
             operation=operation,
             target_version=target_version,
@@ -99,20 +106,17 @@ def install_runtime_v966(base: Any, core: Any, legacy_build_status: Any):
         privacy_proxy_action: str | None = None,
         privacy_proxy_confirm: str | None = None,
     ):
-        """WRITE ACTION. AMP administration plus v9.6.6 Privacy Proxy provisioning.
+        """Legacy mixed v9.6.6 AMP and Privacy Proxy compatibility surface.
 
-        No new MCP command name is added. `privacy_proxy_action` supports the read-only `status`
-        action and the additive mutating actions `prepare_provisioning`, `provision`, `rotate`,
-        `reconcile`, and `deprovision`.
+        The frozen schema contains ordinary AMP/configuration writes, a read-only Privacy Proxy
+        status action, and historical preview/execute provisioning behavior. v9.6.7 clients should
+        use privacy_proxy_status, privacy_proxy_provisioning_preview and
+        privacy_proxy_provisioning_execute for the MCP-native provisioning lifecycle.
 
-        Every mutating provisioning action is preview-first. Call it without
-        `privacy_proxy_confirm` to receive the exact public preview and a short-lived one-time
-        confirmation token. Only after the user explicitly approves that preview in the active
-        chat may the token be passed back in `privacy_proxy_confirm`.
-
-        The MCP-native flow never accepts or returns the generated proxy HMAC secret or Ed25519
-        private signing key. The legacy `privacy_proxy_secret` argument remains supported only for
-        backwards-compatible manual deployments and is still write-only.
+        Existing mutating provisioning actions remain preview-first for backwards compatibility.
+        The MCP-native flow never returns the generated proxy HMAC secret or Ed25519 private
+        signing key. The legacy privacy_proxy_secret argument remains supported only for
+        backwards-compatible manual deployments and is write-only.
         """
         action = str(privacy_proxy_action or "").strip().lower()
         if not action:
