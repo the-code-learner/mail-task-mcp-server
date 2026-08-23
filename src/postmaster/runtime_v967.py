@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
 from mcp.types import ToolAnnotations
@@ -43,14 +45,46 @@ def _runtime_selector(status: dict[str, Any]) -> str:
         return "latest"
 
 
-def _local_runtime_status(legacy_build_status: Any) -> dict[str, Any]:
+def _project_version(base: Any) -> str:
+    project_version = getattr(base, "_project_version", None)
+    if callable(project_version):
+        try:
+            return str(project_version() or "unknown")
+        except Exception:
+            pass
     try:
-        status = legacy_build_status(operation="status")
-    except TypeError:
-        status = legacy_build_status()
-    if not isinstance(status, dict):
-        status = {"ok": True}
-    result = dict(status)
+        return (Path(__file__).resolve().parents[2] / "VERSION").read_text(encoding="utf-8").strip() or "unknown"
+    except OSError:
+        return "unknown"
+
+
+def _local_runtime_status(base: Any, legacy_build_status: Any) -> dict[str, Any]:
+    """Build a local-only status snapshot without invoking the legacy release checker in production."""
+    if callable(getattr(base, "_project_version", None)):
+        resolved = os.getenv("BRIDGE_BUILD") or os.getenv("POSTMASTER_REF") or "unknown"
+        requested = (
+            os.getenv("POSTMASTER_VERSION")
+            or os.getenv("POSTMASTER_REQUESTED_VERSION")
+            or resolved
+        )
+        result: dict[str, Any] = {
+            "ok": True,
+            "version": _project_version(base),
+            "build": resolved,
+            "requested_version": requested,
+            "check_updates_on_start": os.getenv(
+                "POSTMASTER_CHECK_UPDATES_ON_START", "true"
+            ).strip().lower() == "true",
+            "force_refresh": os.getenv("POSTMASTER_FORCE_REFRESH", "false").strip().lower() == "true",
+        }
+    else:
+        # Test/embedding compatibility: a minimal fake base may not expose the production helper.
+        try:
+            status = legacy_build_status(operation="status")
+        except TypeError:
+            status = legacy_build_status()
+        result = dict(status) if isinstance(status, dict) else {"ok": True}
+
     result.update(
         {
             "version_capability": "9.6.7",
@@ -175,7 +209,7 @@ def install_runtime_v967(
 
     def runtime_status():
         """Read-only local runtime identity/state. Performs no release-network lookup and no mutation."""
-        return _local_runtime_status(legacy_build_status)
+        return _local_runtime_status(base, legacy_build_status)
 
     def runtime_version_change_preview(
         operation: str,
@@ -188,7 +222,7 @@ def install_runtime_v967(
                 target_version,
                 execute=False,
             )
-            status = _local_runtime_status(legacy_build_status)
+            status = _local_runtime_status(base, legacy_build_status)
             current_selector = _runtime_selector(status)
             current_build = str(status.get("build") or "unknown")
             token = runtime_control.issue_version_change_approval(
@@ -242,7 +276,7 @@ def install_runtime_v967(
                 target_version,
                 execute=True,
             )
-            status = _local_runtime_status(legacy_build_status)
+            status = _local_runtime_status(base, legacy_build_status)
             current_selector = _runtime_selector(status)
             current_build = str(status.get("build") or "unknown")
             if not runtime_control.consume_version_change_approval(
@@ -376,11 +410,23 @@ def install_runtime_v967(
                 ),
                 "action_applied": False,
             }
-        result = service.execute(
-            normalized,
-            confirmation_token=confirmation_token,
-            worker_url=worker_url if normalized == "prepare_provisioning" else None,
-        )
+        try:
+            result = service.execute(
+                normalized,
+                confirmation_token=confirmation_token,
+                worker_url=worker_url if normalized == "prepare_provisioning" else None,
+            )
+        except Exception as exc:
+            return _public_proxy_status(
+                {
+                    "ok": False,
+                    "error": str(exc),
+                    "approval_required": True,
+                    "action_applied": False,
+                    "action_destructive": normalized == "deprovision",
+                    "privacy_proxy_provisioning": service.public_status(),
+                }
+            )
         if isinstance(result, dict):
             result["action_destructive"] = normalized == "deprovision"
         return _public_proxy_status(result)
