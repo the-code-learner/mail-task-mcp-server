@@ -33,7 +33,7 @@ def slugify_project_name(value: str) -> str:
 
 
 def validate_project_slug(value: str) -> str:
-    slug = str(value or "").strip().lower()
+    slug = str(value or "").strip()
     if not slug:
         raise ProjectServiceError("Project ID / slug is required")
     if not _SLUG_RE.fullmatch(slug) or slug.endswith("-"):
@@ -271,10 +271,12 @@ class ProjectService:
         if str(confirmation or "").strip() != pid:
             raise ProjectServiceError("Type the exact project_id to confirm deletion")
 
-        # Hold the scheduler registry lock through the cross-store detach so a new job/profile
-        # cannot appear between the safety check and project deactivation.
+        # BEGIN IMMEDIATE holds the scheduler DB write reservation through the cross-store
+        # detach. A concurrent create_job/create_profile can therefore not commit a new
+        # reference after this safety check but before project deactivation.
         with self.scheduler._lock:
             with self.scheduler._connect() as conn:
+                conn.execute("BEGIN IMMEDIATE")
                 project = conn.execute(
                     "SELECT id,owner_id,name,active FROM projects WHERE id=?", (pid,)
                 ).fetchone()
