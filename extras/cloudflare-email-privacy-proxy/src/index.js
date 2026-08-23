@@ -4,7 +4,8 @@ const HARD_MAX_RESPONSE_BYTES = 2_000_000;
 const HARD_MAX_DECOY_RESPONSE_BYTES = 64_000;
 const FETCH_TIMEOUT_MS = 8_000;
 const DECOY_FETCH_TIMEOUT_MS = 3_000;
-const PROXY_USER_AGENT = "Postmaster-MCP-Privacy-Proxy/9.6.3";
+const MAX_PREVIOUS_SECRET_GRACE_SECONDS = 300;
+const PROXY_USER_AGENT = "Postmaster-MCP-Privacy-Proxy/9.6.6";
 const ALLOWED_CONTENT_TYPES = new Set([
   "image/jpeg", "image/png", "image/gif", "image/webp", "image/avif",
   "text/css", "font/woff", "font/woff2", "application/font-woff",
@@ -49,6 +50,13 @@ function constantTimeEqual(a, b) {
   return result === 0;
 }
 
+function base64UrlToBytes(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
 async function sha256Hex(bytes) {
   return bytesToHex(await crypto.subtle.digest("SHA-256", bytes));
 }
@@ -60,9 +68,28 @@ async function hmacHex(secret, value) {
   return bytesToHex(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value)));
 }
 
+function nonceGuard(env) {
+  return env.NONCE_GUARD.get(env.NONCE_GUARD.idFromName("postmaster-email-privacy-proxy"));
+}
+
+async function checkNonce(env, nonce, timestamp, scope) {
+  const guard = nonceGuard(env);
+  const checked = await guard.fetch("https://nonce-guard/check", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ nonce, timestamp, scope }),
+  });
+  return checked.status === 204;
+}
+
+async function readSecretState(env) {
+  const guard = nonceGuard(env);
+  const response = await guard.fetch("https://nonce-guard/secret-state", { method: "GET" });
+  if (!response.ok) throw new Error("secret_state_unavailable");
+  return response.json();
+}
+
 async function verifyRequest(request, env, bodyBytes) {
-  const secret = String(env.POSTMASTER_PROXY_SECRET || "");
-  if (secret.length < 32) throw new Error("server_secret_not_configured");
   const timestamp = request.headers.get("x-postmaster-timestamp") || "";
   const nonce = request.headers.get("x-postmaster-nonce") || "";
   const signature = (request.headers.get("x-postmaster-signature") || "").toLowerCase();
@@ -72,15 +99,113 @@ async function verifyRequest(request, env, bodyBytes) {
   const seconds = Number(timestamp.length > 10 ? Math.floor(Number(timestamp) / 1000) : Number(timestamp));
   if (!Number.isFinite(seconds) || Math.abs(Math.floor(Date.now() / 1000) - seconds) > MAX_CLOCK_SKEW_SECONDS) return false;
   const digest = await sha256Hex(bodyBytes);
-  const expected = await hmacHex(secret, `${timestamp}\n${nonce}\n${digest}`);
-  if (!constantTimeEqual(expected, signature)) return false;
-  const guard = env.NONCE_GUARD.get(env.NONCE_GUARD.idFromName("postmaster-email-privacy-proxy"));
-  const checked = await guard.fetch("https://nonce-guard/check", {
+  const canonical = `${timestamp}\n${nonce}\n${digest}`;
+
+  const state = await readSecretState(env);
+  const candidates = [];
+  if (state.active_secret) {
+    candidates.push(String(state.active_secret));
+    if (state.previous_secret && Number(state.previous_valid_until || 0) >= Math.floor(Date.now() / 1000)) {
+      candidates.push(String(state.previous_secret));
+    }
+  } else {
+    const legacy = String(env.POSTMASTER_PROXY_SECRET || "");
+    if (legacy.length >= 32) candidates.push(legacy);
+  }
+  if (!candidates.length) throw new Error("server_secret_not_configured");
+
+  let verified = false;
+  for (const secret of candidates) {
+    const expected = await hmacHex(secret, canonical);
+    if (constantTimeEqual(expected, signature)) {
+      verified = true;
+      break;
+    }
+  }
+  if (!verified) return false;
+  return checkNonce(env, nonce, seconds, "hmac");
+}
+
+export function provisioningCanonical({
+  method, path, origin, timestamp, nonce, bodyDigest, generation, operation, keyId,
+}) {
+  return [
+    String(method || "").toUpperCase(),
+    String(path || ""),
+    String(origin || ""),
+    String(timestamp || ""),
+    String(nonce || ""),
+    String(Number(generation)),
+    String(operation || ""),
+    String(keyId || ""),
+    String(bodyDigest || ""),
+  ].join("\n");
+}
+
+export async function verifyProvisioningRequest(request, env, bodyBytes, payload) {
+  const publicKey = String(env.POSTMASTER_PROVISIONING_PUBLIC_KEY || "");
+  const pinnedKeyId = String(env.POSTMASTER_PROVISIONING_KEY_ID || "");
+  if (!publicKey || !pinnedKeyId) throw new Error("provisioning_key_not_configured");
+
+  const timestamp = request.headers.get("x-postmaster-provisioning-timestamp") || "";
+  const nonce = request.headers.get("x-postmaster-provisioning-nonce") || "";
+  const keyId = request.headers.get("x-postmaster-provisioning-key-id") || "";
+  const generation = request.headers.get("x-postmaster-provisioning-generation") || "";
+  const operation = request.headers.get("x-postmaster-provisioning-operation") || "";
+  const claimedDigest = (request.headers.get("x-postmaster-provisioning-body-sha256") || "").toLowerCase();
+  const signature = request.headers.get("x-postmaster-provisioning-signature") || "";
+
+  if (!/^\d{10,13}$/.test(timestamp) || nonce.length < 16 || nonce.length > 128) return false;
+  if (!/^\d+$/.test(generation) || !/^[a-f0-9]{64}$/.test(claimedDigest)) return false;
+  if (!new Set(["provision", "rotate", "deprovision"]).has(operation)) return false;
+  if (keyId !== pinnedKeyId || String(payload.key_id || keyId) !== keyId) return false;
+  if (Number(payload.generation) !== Number(generation) || String(payload.operation || "") !== operation) return false;
+
+  const seconds = Number(timestamp.length > 10 ? Math.floor(Number(timestamp) / 1000) : Number(timestamp));
+  if (!Number.isFinite(seconds) || Math.abs(Math.floor(Date.now() / 1000) - seconds) > MAX_CLOCK_SKEW_SECONDS) return false;
+
+  const digest = await sha256Hex(bodyBytes);
+  if (!constantTimeEqual(digest, claimedDigest)) return false;
+  const url = new URL(request.url);
+  const canonical = provisioningCanonical({
+    method: request.method,
+    path: url.pathname,
+    origin: url.origin,
+    timestamp,
+    nonce,
+    bodyDigest: digest,
+    generation: Number(generation),
+    operation,
+    keyId,
+  });
+
+  let keyBytes;
+  let signatureBytes;
+  try {
+    keyBytes = base64UrlToBytes(publicKey);
+    signatureBytes = base64UrlToBytes(signature);
+  } catch (_) {
+    return false;
+  }
+  if (keyBytes.length !== 32 || signatureBytes.length !== 64) return false;
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "Ed25519" }, false, ["verify"]);
+  const verified = await crypto.subtle.verify(
+    { name: "Ed25519" }, key, signatureBytes, new TextEncoder().encode(canonical),
+  );
+  if (!verified) return false;
+  return checkNonce(env, nonce, seconds, `provision:${keyId}`);
+}
+
+async function applyProvisioning(env, payload) {
+  const guard = nonceGuard(env);
+  const response = await guard.fetch("https://nonce-guard/secret-state", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ nonce, timestamp: seconds }),
+    body: JSON.stringify(payload),
   });
-  return checked.status === 204;
+  let result = {};
+  try { result = await response.json(); } catch (_) { /* status is authoritative */ }
+  return { status: response.status, result };
 }
 
 function parseIPv4(host) {
@@ -144,7 +269,9 @@ async function dnsAnswers(hostname, type) {
   const response = await fetch(endpoint, { headers: { accept: "application/dns-json" }, redirect: "error" });
   if (!response.ok) throw new Error("dns_preflight_failed");
   const body = await response.json();
-  return Array.isArray(body.Answer) ? body.Answer.filter((row) => String(row.type) === (type === "A" ? "1" : "28")).map((row) => String(row.data || "")) : [];
+  return Array.isArray(body.Answer)
+    ? body.Answer.filter((row) => String(row.type) === (type === "A" ? "1" : "28")).map((row) => String(row.data || ""))
+    : [];
 }
 
 async function assertPublicTarget(url) {
@@ -240,6 +367,8 @@ async function proxyFetch(payload) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
+    // Exactly one target is contacted for every render/decoy request and no caller Cookie or
+    // Authorization header is forwarded.
     const response = await fetch(target, {
       method: "GET",
       redirect: "manual",
@@ -277,16 +406,124 @@ async function proxyFetch(payload) {
 
 export class NonceGuard {
   constructor(state) { this.state = state; }
-  async fetch(request) {
-    if (request.method !== "POST") return new Response("", { status: 405 });
-    const { nonce, timestamp } = await request.json();
+
+  async _checkNonce(request) {
+    const { nonce, timestamp, scope = "hmac" } = await request.json();
     const now = Math.floor(Date.now() / 1000);
     if (!nonce || Math.abs(now - Number(timestamp)) > MAX_CLOCK_SKEW_SECONDS) return new Response("", { status: 401 });
-    const key = `nonce:${nonce}`;
+    const key = `nonce:${scope}:${nonce}`;
     if (await this.state.storage.get(key)) return new Response("", { status: 409 });
     await this.state.storage.put(key, Number(timestamp), { expiration: now + MAX_CLOCK_SKEW_SECONDS + 30 });
     return new Response("", { status: 204 });
   }
+
+  async _getSecretState() {
+    const active = await this.state.storage.get("proxy:active");
+    const previous = await this.state.storage.get("proxy:previous");
+    const generation = Number(await this.state.storage.get("proxy:generation") || 0);
+    const now = Math.floor(Date.now() / 1000);
+    let previousSecret = "";
+    let previousValidUntil = 0;
+    if (previous && Number(previous.valid_until || 0) >= now) {
+      previousSecret = String(previous.secret || "");
+      previousValidUntil = Number(previous.valid_until || 0);
+    } else if (previous) {
+      await this.state.storage.delete("proxy:previous");
+    }
+    return json({
+      generation,
+      active_secret: active ? String(active.secret || "") : "",
+      previous_secret: previousSecret,
+      previous_valid_until: previousValidUntil,
+    });
+  }
+
+  async _applySecretState(request) {
+    const payload = await request.json();
+    const generation = Number(payload.generation);
+    const operation = String(payload.operation || "");
+    const currentGeneration = Number(await this.state.storage.get("proxy:generation") || 0);
+    const active = await this.state.storage.get("proxy:active");
+    if (!Number.isInteger(generation) || generation <= 0) return json({ error: "invalid_generation" }, 400);
+
+    if (operation === "deprovision") {
+      if (generation !== currentGeneration + 1) return json({ error: "generation_out_of_order" }, 409);
+      await this.state.storage.delete("proxy:active");
+      await this.state.storage.delete("proxy:previous");
+      await this.state.storage.put("proxy:generation", generation);
+      return json({ ok: true, generation, provisioned: false }, 204);
+    }
+
+    if (!new Set(["provision", "rotate"]).has(operation)) return json({ error: "invalid_operation" }, 400);
+    const secret = String(payload.secret || "");
+    if (secret.length < 32) return json({ error: "invalid_secret" }, 400);
+
+    if (generation === currentGeneration) {
+      if (active && Number(active.generation) === generation && String(active.secret || "") === secret) {
+        return json({ ok: true, generation, idempotent: true }, 204);
+      }
+      return json({ error: "generation_conflict" }, 409);
+    }
+    if (generation !== currentGeneration + 1) return json({ error: "generation_out_of_order" }, 409);
+    if (operation === "provision" && active) return json({ error: "already_provisioned" }, 409);
+    if (operation === "rotate" && !active) return json({ error: "not_provisioned" }, 409);
+
+    if (active) {
+      const requestedGrace = Number(payload.previous_secret_grace_seconds || 0);
+      const grace = Math.max(0, Math.min(requestedGrace, MAX_PREVIOUS_SECRET_GRACE_SECONDS));
+      if (grace > 0) {
+        await this.state.storage.put("proxy:previous", {
+          secret: String(active.secret || ""),
+          generation: Number(active.generation || currentGeneration),
+          valid_until: Math.floor(Date.now() / 1000) + grace,
+        });
+      } else {
+        await this.state.storage.delete("proxy:previous");
+      }
+    }
+    await this.state.storage.put("proxy:active", { secret, generation });
+    await this.state.storage.put("proxy:generation", generation);
+    return json({ ok: true, generation, provisioned: true }, 204);
+  }
+
+  async fetch(request) {
+    const path = new URL(request.url).pathname;
+    if (path === "/check") {
+      if (request.method !== "POST") return new Response("", { status: 405 });
+      return this._checkNonce(request);
+    }
+    if (path === "/secret-state") {
+      if (request.method === "GET") return this._getSecretState();
+      if (request.method === "POST") return this._applySecretState(request);
+      return new Response("", { status: 405 });
+    }
+    return new Response("", { status: 404 });
+  }
+}
+
+async function handleProvisioning(request, env, bodyBytes) {
+  let payload;
+  try { payload = bodyBytes.length ? JSON.parse(new TextDecoder().decode(bodyBytes)) : {}; } catch (_) {
+    return json({ error: "invalid_json" }, 400);
+  }
+  try {
+    if (!(await verifyProvisioningRequest(request, env, bodyBytes, payload))) {
+      return json({ error: "unauthorized_or_replay" }, 401);
+    }
+  } catch (error) {
+    const code = String(error.message || error);
+    if (code === "provisioning_key_not_configured") return json({ error: code }, 503);
+    return json({ error: "provisioning_verification_failed" }, 401);
+  }
+  const applied = await applyProvisioning(env, payload);
+  if (applied.status === 204 || applied.status === 200) {
+    return json({
+      ok: true,
+      generation: Number(payload.generation),
+      provisioned: String(payload.operation) !== "deprovision",
+    }, 200);
+  }
+  return json({ error: String(applied.result.error || "provisioning_state_rejected") }, applied.status);
 }
 
 export default {
@@ -294,6 +531,9 @@ export default {
     if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
     let bodyBytes;
     try { bodyBytes = new Uint8Array(await request.arrayBuffer()); } catch (_) { return json({ error: "invalid_body" }, 400); }
+    const path = new URL(request.url).pathname;
+    if (path === "/provision") return handleProvisioning(request, env, bodyBytes);
+
     try {
       if (!(await verifyRequest(request, env, bodyBytes))) return json({ error: "unauthorized_or_replay" }, 401);
     } catch (error) {
@@ -301,8 +541,7 @@ export default {
     }
     let payload;
     try { payload = bodyBytes.length ? JSON.parse(new TextDecoder().decode(bodyBytes)) : {}; } catch (_) { return json({ error: "invalid_json" }, 400); }
-    const path = new URL(request.url).pathname;
-    if (path === "/health") return json({ ok: true, service: "postmaster-email-privacy-proxy", version: "9.6.3" });
+    if (path === "/health") return json({ ok: true, service: "postmaster-email-privacy-proxy", version: "9.6.6" });
     if (path !== "/fetch") return json({ error: "not_found" }, 404);
     try { return json(await proxyFetch(payload)); } catch (error) { return json({ error: String(error.message || error) }, 422); }
   },
