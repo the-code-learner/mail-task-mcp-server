@@ -3,16 +3,15 @@ from __future__ import annotations
 import hashlib
 from html import escape
 from typing import Any
-from urllib.parse import urlencode
 
 from starlette.requests import Request
 
 from . import webgui_v951 as v951
-from . import webgui_v953 as v953
 from . import webgui_v960 as v960
 
 
 _BASE_RENDER_INBOX = v960.render_inbox
+_BASE_AUGMENT_DASHBOARD = v960.augment_dashboard
 _PROJECT_PALETTE = (
     "#64b5f6", "#81c784", "#ffb74d", "#ba68c8", "#4dd0e1", "#f06292",
     "#aed581", "#ffd54f", "#7986cb", "#4db6ac", "#ff8a65", "#90a4ae",
@@ -125,6 +124,14 @@ def render_inbox_v961(base: Any, request: Request) -> str:
     return _BASE_RENDER_INBOX(_InboxBaseProxy(base, inbox_prefetch_limit(request)), request)
 
 
+def augment_dashboard_v961(body: str) -> str:
+    return _BASE_AUGMENT_DASHBOARD(body).replace(
+        "<small>Mail client · v9.6</small>",
+        "<small>Mail client · v9.6.1</small>",
+        1,
+    )
+
+
 def _patch_fragment_visibility() -> None:
     old = "    target.replaceWith(next);"
     new = (
@@ -145,3 +152,4 @@ def install_webgui_v961() -> None:
     v960._scope_chips = _scope_chips_v961
     v960.render_inbox = render_inbox_v961
     v951.render_inbox = render_inbox_v961
+    v960.augment_dashboard = augment_dashboard_v961
