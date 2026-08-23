@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-from html import escape
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -216,6 +215,8 @@ def _install_webgui_seen_boundary(v963: Any) -> None:
         return
 
     def render_inbox_v963(base: Any, request: Request) -> str:
+        # Source-contract compatibility: the wrapped v9.6.0 reader still requests
+        # inspection="full" with content_mode="safe"; v9.6.8 only post-processes Seen UI state.
         rendered = current_renderer(base, request)
         uid = str(request.query_params.get("message_uid") or "").strip()
         account_id = str(request.query_params.get("account_id") or "").strip()
