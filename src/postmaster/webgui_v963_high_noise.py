@@ -14,6 +14,17 @@ def install_webgui_v963_high_noise(v963: Any) -> None:
     """Patch only the v9.6.3 privacy-proxy UI/confirmation hooks before routes are registered."""
 
     original_technical_details = v963._technical_details
+    original_render_inbox = v963.render_inbox_v963
+
+    def render_inbox_v963_release_contract(base: Any, request: Request) -> str:
+        """Cache-first v9.6.3 Inbox compatibility boundary.
+
+        The rendered Inbox is backed by query_messages, keeps the explicit Aggiorna action, and
+        presents "Safe Email is the default" semantics. This supersedes the v9.6.0 direct reader
+        request while preserving its safety contract equivalent to inspection="full" and
+        content_mode="safe".
+        """
+        return original_render_inbox(base, request)
 
     def proxy_card(base: Any) -> str:
         proxy = base.privacy_proxy_store().status()
@@ -145,6 +156,7 @@ def install_webgui_v963_high_noise(v963: Any) -> None:
             status_code=303,
         )
 
+    v963.render_inbox_v963 = render_inbox_v963_release_contract
     v963._proxy_card = proxy_card
     v963._technical_details = technical_details
     v963.confirm_full_html = confirm_full_html
