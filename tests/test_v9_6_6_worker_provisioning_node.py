@@ -93,8 +93,8 @@ class WorkerProvisioningNodeIntegrationV966Tests(unittest.TestCase):
                 await crypto.subtle.sign("Ed25519", pair.privateKey, encoder.encode(canonical)),
               ).toString("base64url");
               if (mutateSignature) {
-                const replacement = signature.endsWith("A") ? "B" : "A";
-                signature = signature.slice(0, -1) + replacement;
+                const replacement = signature.startsWith("A") ? "B" : "A";
+                signature = replacement + signature.slice(1);
               }
               const headers = {
                 "content-type": "application/json",
