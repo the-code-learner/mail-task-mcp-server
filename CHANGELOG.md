@@ -2,6 +2,20 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.1 - 2026-08-23
+
+### Fixed
+- Fixed WebGUI progressive-fragment replacements so Inbox message detail, mailbox navigation (including Sent/Trash) and Knowledge project filters preserve the active dashboard panel instead of rendering fetched content hidden.
+- Restored Inbox inline safe-reader detail with Reader / Privacy / Links / Headers / MIME views and preserved Sent `To` presentation.
+- Unified logical mailbox-role fallback for hierarchical/provider mailbox names, including `INBOX.Trash`, so `mailbox_status`, `search_emails`, `get_email` and WebGUI agree on received/sent/spam/drafts/trash roles.
+- Restored deterministic visible project chips/colors for Knowledge single-scope, multi-scope and global items and project filters.
+- Reduced WebGUI mail-list enrichment from an unconditional 100-message prefetch to the current 25-row page plus one next-page sentinel, without changing the MCP/IMAP `search_emails` contract.
+
+### Compatibility / safety / deployment
+- Existing persistent idempotency, duplicate heuristic/`force_send`, static zero-network inbound inspection, unsubscribe GET/POST and legacy `get_email.body_html` semantics are unchanged.
+- MCP command surface remains 90 names (`delta = 0`); no dependency, `requirements.txt`, database schema/storage migration or MCP-schema change is introduced.
+- `postmaster-mcp.yml` is unchanged. Release and production deployment remain separate; no deploy, restart, Portainer or Cloudflare action is part of v9.6.1 release preparation.
+
 ## 9.6.0 - 2026-08-23
 
 ### Added

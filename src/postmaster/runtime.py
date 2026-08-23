@@ -10,6 +10,7 @@ from .runtime_v950 import install_runtime_v950
 from .runtime_v953 import install_runtime_v953
 from .runtime_v960 import install_runtime_v960
 from .runtime_v960_knowledge import install_runtime_v960_knowledge
+from .runtime_v961 import install_runtime_v961
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -18,6 +19,7 @@ from .webgui_v953 import install_webgui_v953
 from .webgui_v954 import install_webgui_v954
 from .webgui_v960 import install_webgui_v960
 from .webgui_v960_scopes import install_webgui_v960_scopes
+from .webgui_v961 import install_webgui_v961
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -47,12 +49,14 @@ dashboard_home, build_status, mail_client = install_runtime_v960(
     app, _base, _core, dashboard_home, build_status
 )
 install_runtime_v960_knowledge(_base, _core)
+install_runtime_v961()
 dashboard_home = install_webgui_v951(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v952(app, _base, dashboard_home)
 dashboard_home = install_webgui_v953(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v954(app, _base, _core, dashboard_home)
 dashboard_home = install_webgui_v960(app, _base, _core, dashboard_home)
 install_webgui_v960_scopes(app, _base)
+install_webgui_v961()
 link_store = _core.link_store
 
 

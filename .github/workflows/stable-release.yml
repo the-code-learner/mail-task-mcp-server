@@ -69,7 +69,7 @@ jobs:
           else
             gh release create "$RELEASE_TAG" \
               --verify-tag \
-              --title "$RELEASE_TAG" \
+              --title "Postmaster MCP $RELEASE_TAG" \
               --notes-file /tmp/release-notes.md
           fi
 
