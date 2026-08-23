@@ -81,6 +81,28 @@ class LinkTrackingMailClient(ThreadRecipientsMixin, EnhancedMailClient):
             attachments=attachments,
         )
 
+    def _send_threaded(
+        self, *, mode: str, mailbox: str, uid: str, body: str = "",
+        cc: list[str] | None = None, bcc: list[str] | None = None,
+        body_html: str | None = None, attachments: list[dict[str, Any]] | None = None,
+        track_opens: bool | None = None, campaign_id: str | None = None,
+    ) -> dict[str, Any]:
+        return super()._send_threaded(
+            mode=mode, mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
+            body_html=self._normalize_outbound_html(body_html), attachments=attachments,
+            track_opens=track_opens, campaign_id=campaign_id,
+        )
+
+    def _create_thread_draft(
+        self, *, mode: str, mailbox: str, uid: str, body: str = "",
+        cc: list[str] | None = None, bcc: list[str] | None = None,
+        body_html: str | None = None, attachments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        return super()._create_thread_draft(
+            mode=mode, mailbox=mailbox, uid=uid, body=body, cc=cc, bcc=bcc,
+            body_html=self._normalize_outbound_html(body_html), attachments=attachments,
+        )
+
     def _send_message_with_clean_sent(self, outbound: EmailMessage, sent_copy: EmailMessage, recipients: list[str]) -> dict[str, Any]:
         if not self.settings.enable_send:
             raise MailBridgeError(
