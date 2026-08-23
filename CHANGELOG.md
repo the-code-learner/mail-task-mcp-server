@@ -2,6 +2,21 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.5 - 2026-08-23
+
+### Fixed / changed
+- Restored the richer pre-v9.6.2 WebGUI presentation on top of the existing v9.6.2 lazy-fragment shell: grouped Operate / Organize / Control navigation, icons, Domain controls / Recipient controls footer, project color accents and the v9.5.3 account palette are restored without replacing routes, handlers, renderers or the lazy fragment script.
+- Bridged the v9.6.3 visual-restoration token names (`--surface` / `--border`) to the v9.6.2 shell tokens (`--card` / `--line`) and neutralized the obsolete fixed-sidebar `main` offset inside the grid shell while preserving responsive/mobile behavior.
+- Added release-identity correction for the reused lazy shell: WebGUI branding now derives from the checked-out local `VERSION`, and responses expose `X-Postmaster-WebGUI` for the actually loaded release instead of a hard-coded v9.6.2 identity.
+- Added production-integration regression coverage for the final composed runtime, including overlay install order, WebGUI groups/icons/footer/colors, all 18 lazy navigation targets, unchanged lazy lifecycle/AbortController/generation guard, active-target preservation, v9.6.3/v9.6.4 routes and final renderer composition.
+- Added real `MCPServer` registry/schema regression coverage for the composed application, including the modern `get_email` inspection/content-mode contract, Privacy Proxy arguments on `set_amp_account_state`, v9.6.4 version-control arguments on `build_status`, and per-send `confirm_suppressed_recipients` on send/reply/follow-up.
+
+### Compatibility / safety / deployment
+- Corrective patch release only: the MCP command-name surface remains exactly 90 names (`delta = 0`); schema corrections are additive/compatibility-restoring and add no new MCP command name.
+- `postmaster-mcp.yml` is unchanged; `requirements.txt` is unchanged; no persistent database/storage migration or schema change is introduced.
+- Stable source/release publication remains separate from production activation. Publishing v9.6.5 does not itself deploy, restart, switch, or otherwise alter the live production runtime.
+- The ChatGPT/client MCP discovery-cache mismatch remains classified separately. The release verifies the server-side composed registry/schema contract and does not claim that any stale client discovery cache has been physically invalidated.
+
 ## 9.6.4 - 2026-08-23
 
 ### Added / changed
@@ -216,7 +231,9 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - The latest-version checker preserves the last known good remote version when a refresh fails. With no previous successful value, `update_available` is unknown (`null`) rather than falsely reporting `false`. Explicitly pinned deployments still report a newer stable release when one exists but never auto-upgrade at runtime.
 
 ### Security / deployment
-- Public stored-file URLs never contain `file_id` in the path, query string or reversible encoding. There is no public `?file_id=` lookup and no new public File Store endpoint.
+- Public stored-file URLs never contain `file_id` in the path, query string or reversible encoding. There is no public `?file_id=` lookup and no new public File Store endpoint. Cloudflare Access continues to protect `/mcp`, dashboard/admin/private APIs and tracking analytics.
+- File Store attachment source authorization is evaluated against the canonical persistent record before reading bytes; metadata overrides affect MIME presentation only and cannot select another file or bypass owner/project scope.
+- Redirect targets for tracked stored-file downloads are resolved only from canonical server records and opaque tokens. The public endpoint never accepts an arbitrary target URL or file identifier from a query parameter.
 - The existing `/t/c/*` Cloudflare exposure, public base URL, opaque token generator, event/fingerprint pipeline and provider classification are reused. No new port, domain, Cloudflare rule, mandatory environment variable or signed File Store URL is introduced.
 - The pre-existing `/files/*` signed handoff remains a separate client-download feature and is not used by File Store → email attachment or tracked stored-file delivery.
 - The Persistent File Store and analytics schema remain under the existing `/data` volumes. The migration is backward-compatible and idempotent for existing databases.
