@@ -5,6 +5,7 @@ import os
 import uvicorn
 
 from . import runtime_core as _core
+from . import webgui_v963 as _webgui_v963
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
@@ -12,6 +13,7 @@ from .runtime_v953 import install_runtime_v953
 from .runtime_v960 import install_runtime_v960
 from .runtime_v960_knowledge import install_runtime_v960_knowledge
 from .runtime_v961 import install_runtime_v961
+from .runtime_v963 import install_runtime_v963
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -23,6 +25,8 @@ from .webgui_v960_scopes import install_webgui_v960_scopes
 from .webgui_v961 import install_webgui_v961
 from .webgui_v962 import install_webgui_v962
 from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
+from .webgui_v963 import install_webgui_v963
+from .webgui_v963_high_noise import install_webgui_v963_high_noise
 
 for _name in dir(_core):
     if _name.startswith("_"):
@@ -64,6 +68,16 @@ install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
 install_webgui_v962_collapsible_system()
 dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
+# v9.6.3 is additive: runtime/cache first, then privacy hooks and the presentation/Inbox
+# renderer layer over the already-installed v9.6.2 lazy shell. It does not replace that shell's
+# JS lifecycle and it does not add MCP command names.
+build_status = install_runtime_v963(_base, _core, build_status)
+install_webgui_v963_high_noise(_webgui_v963)
+install_webgui_v963(app, _base)
+# Keep the public v9.6.0/v9.6.3 renderer symbols on the explicit compatibility wrapper rather
+# than the transient lambda used during route installation. The wrapper remains cache-first.
+_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
+_webgui_v963.v951.render_inbox = _webgui_v963.render_inbox_v963
 link_store = _core.link_store
 
 

@@ -1,0 +1,17 @@
+name = "postmaster-email-privacy-proxy"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+workers_dev = true
+
+# Do not put POSTMASTER_PROXY_SECRET in this file or in Git.
+# Configure it with `wrangler secret put POSTMASTER_PROXY_SECRET` or an equivalent
+# authorized Cloudflare deployment workflow.
+
+[durable_objects]
+bindings = [
+  { name = "NONCE_GUARD", class_name = "NonceGuard" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["NonceGuard"]
