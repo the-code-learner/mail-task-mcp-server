@@ -44,6 +44,13 @@ _ALLOWED_PROXY_TYPES = {
 _MAX_PROXY_BYTES = 2_000_000
 _MAX_PROXY_URLS = 32
 _MAX_PROXY_CONCURRENCY = 4
+_MAX_DECOY_REQUESTS_PER_MESSAGE = 4
+_MAX_DECOY_REQUESTS_PER_DOMAIN = 2
+_MAX_DECOY_CONCURRENCY = 2
+_MAX_DECOY_RESPONSE_BYTES = 64_000
+_MAX_DECOY_TOTAL_BYTES = _MAX_DECOY_REQUESTS_PER_MESSAGE * _MAX_DECOY_RESPONSE_BYTES
+_DECOY_TIMEOUT_SECONDS = 3.0
+_MAX_DECOY_EXECUTION_SECONDS = 7.0
 
 
 def _now() -> str:
@@ -150,7 +157,6 @@ class _InventoryParser(HTMLParser):
         value = unescape(url or "").strip()
         if not value:
             return
-        # srcset contains multiple URL + descriptor pairs.
         values = [value]
         if source_type.endswith(" srcset"):
             values = [part.strip().split()[0] for part in value.split(",") if part.strip()]
@@ -358,6 +364,7 @@ class PrivacyProxyStore:
                     secret_enc TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 0,
                     tracking_obfuscation INTEGER NOT NULL DEFAULT 0,
+                    high_noise_decoy_enabled INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL DEFAULT '',
                     last_test_at TEXT NOT NULL DEFAULT '',
                     last_test_ok INTEGER,
@@ -369,8 +376,28 @@ class PrivacyProxyStore:
                     value TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS privacy_proxy_decoy_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id TEXT NOT NULL,
+                    mailbox TEXT NOT NULL,
+                    uid TEXT NOT NULL,
+                    url_hash TEXT NOT NULL,
+                    domain TEXT NOT NULL DEFAULT '',
+                    http_status INTEGER,
+                    response_bytes INTEGER NOT NULL DEFAULT 0,
+                    redirect_location TEXT NOT NULL DEFAULT '',
+                    error_state TEXT NOT NULL DEFAULT '',
+                    fetched_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS ix_privacy_decoy_message
+                    ON privacy_proxy_decoy_events(account_id,mailbox,uid,id DESC);
                 """
             )
+            columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(privacy_proxy_config)").fetchall()}
+            if "high_noise_decoy_enabled" not in columns:
+                conn.execute(
+                    "ALTER TABLE privacy_proxy_config ADD COLUMN high_noise_decoy_enabled INTEGER NOT NULL DEFAULT 0"
+                )
 
     def configure(
         self,
@@ -379,6 +406,7 @@ class PrivacyProxyStore:
         secret: str | None = None,
         enabled: bool | None = None,
         tracking_obfuscation: bool | None = None,
+        high_noise_decoy_enabled: bool | None = None,
     ) -> dict[str, Any]:
         with self._lock, self._connect() as conn:
             row = conn.execute("SELECT * FROM privacy_proxy_config WHERE singleton=1").fetchone()
@@ -397,14 +425,19 @@ class PrivacyProxyStore:
                 secret_enc = self._fernet.encrypt(value.encode("utf-8")).decode("ascii") if value else ""
             enabled_value = bool(current.get("enabled")) if enabled is None else bool(enabled)
             obfuscation_value = bool(current.get("tracking_obfuscation")) if tracking_obfuscation is None else bool(tracking_obfuscation)
+            high_noise_value = bool(current.get("high_noise_decoy_enabled")) if high_noise_decoy_enabled is None else bool(high_noise_decoy_enabled)
+            if tracking_obfuscation is False and high_noise_decoy_enabled is None:
+                high_noise_value = False
+            if high_noise_value and not obfuscation_value:
+                raise ValueError("High-noise decoy traffic requires tracking obfuscation to be enabled")
             if enabled_value and (not url or not secret_enc):
                 raise ValueError("Privacy Proxy cannot be enabled until Worker URL and shared secret are configured")
             conn.execute(
                 """
-                UPDATE privacy_proxy_config SET worker_url=?,secret_enc=?,enabled=?,tracking_obfuscation=?,updated_at=?
-                WHERE singleton=1
+                UPDATE privacy_proxy_config SET worker_url=?,secret_enc=?,enabled=?,tracking_obfuscation=?,
+                    high_noise_decoy_enabled=?,updated_at=? WHERE singleton=1
                 """,
-                (url, secret_enc, int(enabled_value), int(obfuscation_value), _now()),
+                (url, secret_enc, int(enabled_value), int(obfuscation_value), int(high_noise_value), _now()),
             )
         return self.status()
 
@@ -432,6 +465,7 @@ class PrivacyProxyStore:
             "secret": "configured" if secret_configured else "not configured",
             "enabled": bool(value.get("enabled")) and configured,
             "tracking_obfuscation": bool(value.get("tracking_obfuscation")),
+            "high_noise_decoy_enabled": bool(value.get("high_noise_decoy_enabled")),
             "updated_at": str(value.get("updated_at") or ""),
             "last_test_at": str(value.get("last_test_at") or ""),
             "last_test_ok": None if value.get("last_test_ok") is None else bool(value.get("last_test_ok")),
@@ -450,6 +484,44 @@ class PrivacyProxyStore:
             )
         return self.status()
 
+    def record_decoy_event(
+        self,
+        *,
+        account_id: str,
+        mailbox: str,
+        uid: str,
+        url_hash: str,
+        domain: str,
+        http_status: int | None,
+        response_bytes: int,
+        redirect_location: str = "",
+        error_state: str = "",
+    ) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO privacy_proxy_decoy_events(
+                    account_id,mailbox,uid,url_hash,domain,http_status,response_bytes,
+                    redirect_location,error_state,fetched_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?)
+                """,
+                (
+                    account_id, mailbox, str(uid), url_hash, domain[:255], http_status,
+                    max(0, int(response_bytes)), (redirect_location or "")[:1000],
+                    (error_state or "")[:500], _now(),
+                ),
+            )
+
+    def decoy_events(self, *, account_id: str, mailbox: str, uid: str, limit: int = 20) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT url_hash,domain,http_status,response_bytes,redirect_location,error_state,fetched_at "
+                "FROM privacy_proxy_decoy_events WHERE account_id=? AND mailbox=? AND uid=? "
+                "ORDER BY id DESC LIMIT ?",
+                (account_id, mailbox, str(uid), max(1, min(int(limit), 100))),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def set_onboarding(self, key: str, value: str) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -465,7 +537,6 @@ class PrivacyProxyStore:
             rows = conn.execute("SELECT key,value FROM privacy_onboarding_state").fetchall()
         state = {str(row["key"]): str(row["value"]) for row in rows}
         established = int(account_count) > 0
-        # Upgrade safety invariant: any configured email account makes this an established install.
         return {
             "established_installation": established,
             "full_onboarding": not established,
@@ -497,17 +568,18 @@ class PrivacyProxyClient:
             "User-Agent": "Postmaster-MCP-Privacy-Proxy/9.6.3",
         }
 
-    def _post(self, path: str, payload: dict[str, Any]) -> httpx.Response:
+    def _post(self, path: str, payload: dict[str, Any], *, timeout_seconds: float | None = None) -> httpx.Response:
         cfg = self.store.client_config()
         if not cfg.get("configured"):
             raise RuntimeError("Privacy Proxy is not configured")
         body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         url = str(cfg["worker_url"]).rstrip("/") + path
+        timeout = self.timeout_seconds if timeout_seconds is None else max(0.5, min(float(timeout_seconds), self.timeout_seconds))
         return httpx.post(
             url,
             content=body,
             headers=self._headers(str(cfg["secret_value"]), body),
-            timeout=self.timeout_seconds,
+            timeout=timeout,
             follow_redirects=False,
         )
 
@@ -522,21 +594,35 @@ class PrivacyProxyClient:
         self.store.record_test(ok, error)
         return {"ok": ok, "error": error, "status": self.store.status()}
 
-    def fetch(self, url: str, *, classification: str, tracking_score: int) -> dict[str, Any]:
+    def fetch(
+        self,
+        url: str,
+        *,
+        classification: str,
+        tracking_score: int,
+        request_kind: str = "render",
+        max_response_bytes: int = _MAX_PROXY_BYTES,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, Any]:
         parsed = urlparse(url)
         if parsed.scheme.casefold() not in {"http", "https"} or not parsed.netloc:
             raise ValueError("Only absolute HTTP(S) passive resource URLs may be proxied")
+        if request_kind not in {"render", "decoy"}:
+            raise ValueError("Unsupported Privacy Proxy request kind")
         cfg = self.store.client_config()
         if not cfg.get("enabled"):
             raise RuntimeError("Privacy Proxy is disabled")
+        if request_kind == "decoy" and not cfg.get("high_noise_decoy_enabled"):
+            raise RuntimeError("High-noise decoy traffic is disabled")
         payload = {
             "url": url,
             "classification": classification,
             "tracking_score": int(tracking_score),
             "tracking_obfuscation": bool(cfg.get("tracking_obfuscation")),
-            "max_response_bytes": _MAX_PROXY_BYTES,
+            "request_kind": request_kind,
+            "max_response_bytes": max(1, min(int(max_response_bytes), _MAX_PROXY_BYTES)),
         }
-        response = self._post("/fetch", payload)
+        response = self._post("/fetch", payload, timeout_seconds=timeout_seconds)
         if response.status_code != 200:
             raise RuntimeError(f"Privacy Proxy request failed with HTTP {response.status_code}")
         data = response.json()
@@ -547,7 +633,8 @@ class PrivacyProxyClient:
         encoded = data.get("body_base64")
         if encoded:
             body = base64.b64decode(str(encoded), validate=True)
-        if len(body) > _MAX_PROXY_BYTES:
+        local_limit = max(1, min(int(max_response_bytes), _MAX_PROXY_BYTES))
+        if len(body) > local_limit:
             raise RuntimeError("Privacy Proxy response exceeded the local response-size limit")
         status = int(data.get("status") or 0)
         if body and content_type not in _ALLOWED_PROXY_TYPES:
@@ -618,6 +705,8 @@ def fetch_passive_resources(
                 url,
                 classification=str(row.get("classification") or "unknown"),
                 tracking_score=int(row.get("tracking_score") or 0),
+                request_kind="render",
+                max_response_bytes=_MAX_PROXY_BYTES,
             )
             status = int(fetched.get("status") or 0)
             body = bytes(fetched.get("body") or b"") if status == 200 else None
@@ -665,6 +754,144 @@ def fetch_passive_resources(
     return results
 
 
+def _decoy_eligible(row: dict[str, Any]) -> bool:
+    if not row.get("passive_resource"):
+        return False
+    url = str(row.get("url") or "")
+    if not _remote(url):
+        return False
+    source = str(row.get("source_type") or "").casefold()
+    if source == "a href" or source not in {
+        "img src", "source src", "video poster", "style url()", "style-block url()",
+        "body background", "table background", "td background", "div background", "span background", "link href",
+    }:
+        return False
+    if source == "link href" and not re.search(
+        r"(?i)\brel\s*=\s*['\"][^'\"]*stylesheet", str(row.get("source_snippet") or "")
+    ):
+        return False
+    classification = str(row.get("classification") or "").casefold()
+    if classification in {"normal link", "analytics link", "unsubscribe", "action url", "redirector"}:
+        return False
+    return True
+
+
+def fetch_high_noise_decoys(
+    inventory: dict[str, Any],
+    *,
+    store: PrivacyProxyStore,
+    proxy: PrivacyProxyClient,
+    account_id: str,
+    mailbox: str,
+    uid: str,
+) -> dict[str, Any]:
+    """Bounded cover traffic for already-authorized passive resources only.
+
+    This function is deliberately separate from durable render caching: decoy responses are never
+    written to mailbox_cache_remote_resources and therefore never prove that a resource was needed
+    for rendering. Callers must invoke it only after the second Full HTML confirmation.
+    """
+    cfg = store.status()
+    if not (cfg.get("enabled") and cfg.get("tracking_obfuscation") and cfg.get("high_noise_decoy_enabled")):
+        return {"enabled": bool(cfg.get("high_noise_decoy_enabled")), "requests": 0, "response_bytes": 0, "events": []}
+
+    eligible: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw in inventory.get("urls") or []:
+        row = dict(raw)
+        url = str(row.get("url") or "")
+        if not _decoy_eligible(row) or url in seen:
+            continue
+        seen.add(url)
+        eligible.append(row)
+    if not eligible:
+        return {"enabled": True, "requests": 0, "response_bytes": 0, "events": []}
+
+    candidates: list[dict[str, Any]] = []
+    domain_counts: dict[str, int] = {}
+    rounds = 0
+    while len(candidates) < _MAX_DECOY_REQUESTS_PER_MESSAGE and rounds < _MAX_DECOY_REQUESTS_PER_DOMAIN:
+        added = False
+        for row in eligible:
+            domain = (urlparse(str(row.get("url") or "")).hostname or "").casefold()
+            if not domain or domain_counts.get(domain, 0) >= _MAX_DECOY_REQUESTS_PER_DOMAIN:
+                continue
+            candidates.append(row)
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+            added = True
+            if len(candidates) >= _MAX_DECOY_REQUESTS_PER_MESSAGE:
+                break
+        if not added:
+            break
+        rounds += 1
+
+    started = time.monotonic()
+
+    def one(row: dict[str, Any]) -> dict[str, Any]:
+        url = str(row.get("url") or "")
+        domain = (urlparse(url).hostname or "").casefold()
+        elapsed = time.monotonic() - started
+        remaining = max(0.5, min(_DECOY_TIMEOUT_SECONDS, _MAX_DECOY_EXECUTION_SECONDS - elapsed))
+        event: dict[str, Any] = {
+            "url_hash": _url_hash(url),
+            "domain": domain,
+            "http_status": None,
+            "response_bytes": 0,
+            "redirect_location": "",
+            "error_state": "",
+        }
+        try:
+            fetched = proxy.fetch(
+                url,
+                classification=str(row.get("classification") or "unknown"),
+                tracking_score=int(row.get("tracking_score") or 0),
+                request_kind="decoy",
+                max_response_bytes=_MAX_DECOY_RESPONSE_BYTES,
+                timeout_seconds=remaining,
+            )
+            event["http_status"] = int(fetched.get("status") or 0)
+            event["response_bytes"] = min(len(bytes(fetched.get("body") or b"")), _MAX_DECOY_RESPONSE_BYTES)
+            event["redirect_location"] = str(fetched.get("redirect_location") or "")[:1000]
+            event["error_state"] = str(fetched.get("error") or "")[:500]
+        except Exception as exc:
+            event["error_state"] = f"{type(exc).__name__}: {exc}"[:500]
+        store.record_decoy_event(
+            account_id=account_id,
+            mailbox=mailbox,
+            uid=uid,
+            url_hash=str(event["url_hash"]),
+            domain=domain,
+            http_status=event["http_status"],
+            response_bytes=int(event["response_bytes"]),
+            redirect_location=str(event["redirect_location"]),
+            error_state=str(event["error_state"]),
+        )
+        return event
+
+    events: list[dict[str, Any]] = []
+    if candidates:
+        with ThreadPoolExecutor(max_workers=_MAX_DECOY_CONCURRENCY, thread_name_prefix="postmaster-decoy-proxy") as pool:
+            futures = [pool.submit(one, row) for row in candidates]
+            for future in as_completed(futures):
+                events.append(future.result())
+    total_bytes = min(sum(int(event.get("response_bytes") or 0) for event in events), _MAX_DECOY_TOTAL_BYTES)
+    return {
+        "enabled": True,
+        "requests": len(events),
+        "response_bytes": total_bytes,
+        "events": events,
+        "limits": {
+            "per_message": _MAX_DECOY_REQUESTS_PER_MESSAGE,
+            "per_domain": _MAX_DECOY_REQUESTS_PER_DOMAIN,
+            "concurrency": _MAX_DECOY_CONCURRENCY,
+            "response_bytes": _MAX_DECOY_RESPONSE_BYTES,
+            "total_bytes": _MAX_DECOY_TOTAL_BYTES,
+            "timeout_seconds": _DECOY_TIMEOUT_SECONDS,
+            "execution_seconds": _MAX_DECOY_EXECUTION_SECONDS,
+        },
+    }
+
+
 class _FullHtmlRewriter(HTMLParser):
     _DROP_CONTENT = {"script", "iframe", "object", "embed", "form", "button", "input", "textarea", "select", "option"}
     _VOID = {"br", "hr", "img", "meta", "link", "source"}
@@ -700,8 +927,6 @@ class _FullHtmlRewriter(HTMLParser):
             if name.startswith("on") or name in {"srcset", "action", "formaction"}:
                 continue
             if tag == "a" and name == "href":
-                # Navigation/action URLs remain silent even in Full HTML. A future explicit
-                # navigation action may consume the inventory, but this rendering never does.
                 continue
             if name == "style":
                 out.append((name, self._css(value)))
@@ -767,6 +992,9 @@ def rewrite_full_html(html: str, resource_urls: dict[str, str]) -> str:
 
 __all__ = [
     "PrivacyProxyStore", "PrivacyProxyClient", "inventory_html", "safe_email_html",
-    "attach_cache_state", "fetch_passive_resources", "rewrite_full_html",
+    "attach_cache_state", "fetch_passive_resources", "fetch_high_noise_decoys", "rewrite_full_html",
     "_MAX_PROXY_BYTES", "_MAX_PROXY_URLS", "_MAX_PROXY_CONCURRENCY",
+    "_MAX_DECOY_REQUESTS_PER_MESSAGE", "_MAX_DECOY_REQUESTS_PER_DOMAIN", "_MAX_DECOY_CONCURRENCY",
+    "_MAX_DECOY_RESPONSE_BYTES", "_MAX_DECOY_TOTAL_BYTES", "_DECOY_TIMEOUT_SECONDS",
+    "_MAX_DECOY_EXECUTION_SECONDS",
 ]
