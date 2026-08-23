@@ -5,6 +5,7 @@ import os
 import uvicorn
 
 from . import runtime_core as _core
+from . import webgui_v962 as _webgui_v962
 from . import webgui_v963 as _webgui_v963
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
@@ -15,6 +16,7 @@ from .runtime_v960_knowledge import install_runtime_v960_knowledge
 from .runtime_v961 import install_runtime_v961
 from .runtime_v963 import install_runtime_v963
 from .runtime_v964 import install_runtime_v964
+from .webgui_release_identity import install_webgui_release_identity
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -80,6 +82,9 @@ install_webgui_v963(app, _base)
 # semantics: canonical detracking, manual WebGUI recipient policy and per-send suppression consent.
 build_status = install_runtime_v964(_base, _core, build_status)
 install_webgui_v964(app, _base)
+# The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
+# VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
+install_webgui_release_identity(_webgui_v962, _core._project_version())
 # Keep the public v9.6.0/v9.6.3 renderer symbols on the explicit compatibility wrapper rather
 # than the transient lambda used during route installation. The wrapper remains cache-first.
 _webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
