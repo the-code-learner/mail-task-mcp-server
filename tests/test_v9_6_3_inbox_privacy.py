@@ -394,7 +394,7 @@ class WebGuiAndOnboardingV963Tests(unittest.TestCase):
         def blob_sha(path: Path) -> str:
             data = path.read_bytes(); return hashlib.sha1(f"blob {len(data)}\0".encode() + data, usedforsecurity=False).hexdigest()
         self.assertEqual(blob_sha(ROOT / "postmaster-mcp.yml"), "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9")
-        self.assertEqual((ROOT / "VERSION").read_text().strip(), "9.6.3")
+        self.assertIn("## 9.6.3 - ", (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"))
         self.assertIn("new_mail_mcp_commands\": 0", (ROOT / "src/postmaster/runtime_v963.py").read_text(encoding="utf-8"))
         self.assertNotIn("@mcp.tool", (ROOT / "src/postmaster/runtime_v963.py").read_text(encoding="utf-8"))
         self.assertNotIn("postmaster-mcp.yml", "\n".join([
