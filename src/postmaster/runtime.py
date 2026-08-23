@@ -16,6 +16,7 @@ from .runtime_v960_knowledge import install_runtime_v960_knowledge
 from .runtime_v961 import install_runtime_v961
 from .runtime_v963 import install_runtime_v963
 from .runtime_v964 import install_runtime_v964
+from .runtime_v966 import install_runtime_v966
 from .webgui_release_identity import install_webgui_release_identity, project_release_version
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
@@ -83,6 +84,9 @@ install_webgui_v963(app, _base)
 # semantics: canonical detracking, manual WebGUI recipient policy and per-send suppression consent.
 build_status = install_runtime_v964(_base, _core, build_status)
 install_webgui_v964(app, _base)
+# v9.6.6 extends only the existing Privacy Proxy admin tool and status surfaces. The generated
+# HMAC secret and Ed25519 private key remain server-side; no MCP command name is added.
+build_status = install_runtime_v966(_base, _core, build_status)
 # Restore the richer pre-v9.6.2 navigation/palette only after all functional WebGUI overlays are
 # installed. The installer changes presentation on the existing lazy shell and does not replace
 # fragment routes, renderers or outbound handlers.
