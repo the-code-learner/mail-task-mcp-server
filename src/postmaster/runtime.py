@@ -35,6 +35,7 @@ from .webgui_v962_collapsible import install_webgui_v962_collapsible_system
 from .webgui_v963 import install_webgui_v963
 from .webgui_v963_high_noise import install_webgui_v963_high_noise
 from .webgui_v964 import install_webgui_v964
+from .webgui_v970 import install_webgui_v970
 from .webgui_visual_restoration import install_webgui_visual_restoration
 
 for _name in dir(_core):
@@ -110,6 +111,10 @@ runtime_status = install_runtime_v969_mcp(_base, _core, runtime_status)
 # installed. The installer changes presentation on the existing lazy shell and does not replace
 # fragment routes, renderers or outbound handlers.
 install_webgui_visual_restoration(_webgui_v962)
+# v9.7.0 is presentation-only. It overlays the already-frozen v9.6.9 shell with enterprise
+# hierarchy, responsive navigation, theme/accessibility tokens and mobile drill-down behavior.
+# It receives no app/backend registry and therefore cannot add or replace routes.
+install_webgui_v970(_webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
