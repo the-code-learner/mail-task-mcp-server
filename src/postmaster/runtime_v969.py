@@ -14,6 +14,7 @@ from .privacy_cache_v969 import (
     install_hashed_resource_keys,
     rewrite_full_html_v969,
 )
+from .privacy_css_cache_v969 import CacheAwareBoundedPassiveContentService
 from .privacy_css_v969 import BoundedPassiveContentService
 from .webgui_v969 import _install_webgui_v969
 
@@ -26,7 +27,7 @@ def install_runtime_v969_pre_webgui(
     cache = base.mailbox_cache_store()
     install_hashed_resource_keys(cache)
     _install_outbound_archive_boundary()
-    service = BoundedPassiveContentService(base)
+    service = CacheAwareBoundedPassiveContentService(base)
     base.passive_content_service_v969 = lambda: service
     core.passive_content_service_v969 = lambda: service
 
@@ -185,6 +186,7 @@ def install_runtime_v969_mcp(
 
 __all__ = [
     "BoundedPassiveContentService",
+    "CacheAwareBoundedPassiveContentService",
     "MCP_COMMAND_COUNT_V969",
     "PassiveContentService",
     "install_hashed_resource_keys",
