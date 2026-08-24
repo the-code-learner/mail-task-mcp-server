@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import atexit
 import base64
+from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import inspect
 import json
 import os
@@ -10,6 +13,7 @@ import socket
 import struct
 import subprocess
 import tempfile
+import threading
 import time
 from types import SimpleNamespace
 from urllib import request as urllib_request
@@ -181,6 +185,14 @@ def _browser_document(view: str) -> str:
     script = ENTERPRISE_SCRIPT.replace(
         "%VIEW_LABELS%", json.dumps(mapping, ensure_ascii=False, separators=(",", ":"))
     )
+    script = script.replace(
+        "function syncPresentation() { syncContext(); initTaskCalendar(); initKnowledgeDrilldown(); }",
+        "function syncPresentation() { window.__v970SyncCalls=(window.__v970SyncCalls||0)+1; syncContext(); initTaskCalendar(); initKnowledgeDrilldown(); }",
+    )
+    script = script.replace(
+        "const presentationObserver = new MutationObserver(schedulePresentationSync);",
+        "const presentationObserver = new MutationObserver(() => { window.__v970ObserverCallbacks=(window.__v970ObserverCallbacks||0)+1; schedulePresentationSync(); });",
+    )
     nav = enterprise_nav()
     knowledge_open = " open" if view == "knowledge" else ""
     special = {"overview", "inbox", "scheduler", "knowledge"}
@@ -234,7 +246,27 @@ def _browser_document(view: str) -> str:
 '''
     measurement = r'''
 <script>
-(() => {
+window.addEventListener('load', async () => {
+  const later = ms => new Promise(resolve => setTimeout(resolve,ms));
+  await later(0);
+  let themeStorageReadable=true;
+  try { localStorage.getItem('postmaster:v970:theme'); } catch (_error) { themeStorageReadable=false; }
+
+  const observerBefore=window.__v970ObserverCallbacks||0;
+  const syncBefore=window.__v970SyncCalls||0;
+  const external=document.createElement('span');
+  external.hidden=true; external.dataset.v970ExternalMutation='1';
+  (document.querySelector('.tab-panel.active') || document.body).append(external);
+  await later(0);
+  const observerAfter=window.__v970ObserverCallbacks||0;
+  const syncAfter=window.__v970SyncCalls||0;
+  await later(40);
+  const observerQuiet=window.__v970ObserverCallbacks||0;
+  const syncQuiet=window.__v970SyncCalls||0;
+  const presentationConverged=observerAfter===observerQuiet && syncAfter===syncQuiet;
+  const observerDelta=observerAfter-observerBefore;
+  const syncDelta=syncAfter-syncBefore;
+
   if (document.body.dataset.v970View === 'scheduler') {
     const days=document.querySelectorAll('#calendar-grid .task-calendar-day'); if(days[1]) days[1].click();
   }
@@ -252,6 +284,8 @@ def _browser_document(view: str) -> str:
   const openState={role:sheet?.getAttribute('role'),ariaModal:sheet?.getAttribute('aria-modal'),ariaHidden:sheet?.getAttribute('aria-hidden'),workspaceInert:document.querySelector('.v970-workspace')?.hasAttribute('inert'),initialFocus:trapped};
   document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   const result={
+    origin:location.origin, documentLoadComplete:document.readyState==='complete', eventLoopResponsive:true,
+    presentationConverged, observerDelta, syncDelta, mutationStorm:!presentationConverged || observerDelta>2 || syncDelta>2, themeStorageReadable,
     viewport:{w:innerWidth,h:innerHeight}, activeView:document.body.dataset.v970View || '', activeVisible:active ? getComputedStyle(active).display !== 'none' : false, activePrimaryVisible:activePrimaryRect ? activePrimaryRect.width > 0 && activePrimaryRect.height > 0 : true,
     headingFont:getComputedStyle(document.querySelector('#computed-heading')).fontSize,
     metricsGap:metrics ? getComputedStyle(metrics).gap : '', metricsRadius:metrics ? getComputedStyle(metrics).borderRadius : '', metricPadding:metric ? getComputedStyle(metric).paddingTop : '', toolbarWrap:toolbar ? getComputedStyle(toolbar).flexWrap : '',
@@ -261,22 +295,52 @@ def _browser_document(view: str) -> str:
     more:openState, moreClosed:sheet ? !sheet.classList.contains('v970-open') : false, returnFocus:document.activeElement===trigger, workspaceRestored:!document.querySelector('.v970-workspace')?.hasAttribute('inert')
   };
   document.querySelector('#v970-browser-result').textContent=JSON.stringify(result);
-})();
+});
 </script>
 '''
-    return f'''<!doctype html><html><head><meta charset="utf-8"><style>{legacy}\n{ENTERPRISE_STYLE}</style></head><body><div class="shell">{nav}<div class="v970-workspace"><header class="v970-contextbar"><div class="v970-context-title"><strong data-v970-context-title>Dashboard</strong><span data-v970-context-subtitle>Test</span></div></header><main>{panels}</main></div></div>{script}<pre id="v970-browser-result"></pre>{measurement}</body></html>'''
+    return f'''<!doctype html><html><head><meta charset="utf-8"><style>{legacy}\n{ENTERPRISE_STYLE}</style></head><body><div class="shell">{nav}<div class="v970-workspace"><header class="v970-contextbar"><div class="v970-context-title"><strong data-v970-context-title>Dashboard</strong><span data-v970-context-subtitle>Test</span></div><div class="v970-context-actions"><button class="v970-theme-toggle" type="button" data-v970-theme-toggle aria-label="Theme: system. Activate to change.">◐</button></div></header><main>{panels}</main></div></div>{script}<pre id="v970-browser-result"></pre>{measurement}</body></html>'''
 
 
-def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
-    browser = _browser_path()
-    if not browser:
-        raise AssertionError("Canonical browser acceptance requires Chrome/Chromium")
-    document = _browser_document(view)
-    with tempfile.TemporaryDirectory(prefix="postmaster-v970-browser-", ignore_cleanup_errors=True) as tmp:
-        root = Path(tmp)
-        profile = root / "chrome-profile"
+@contextmanager
+def _serve_browser_document(document: str):
+    payload = document.encode("utf-8")
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path.split("?", 1)[0] != "/fixture":
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, _format, *args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/fixture"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=1)
+
+
+class _BrowserSession:
+    def __init__(self):
+        browser = _browser_path()
+        if not browser:
+            raise AssertionError("Canonical browser acceptance requires Chrome/Chromium")
+        self._tmp = tempfile.TemporaryDirectory(prefix="postmaster-v970-browser-", ignore_cleanup_errors=True)
+        profile = Path(self._tmp.name) / "chrome-profile"
         profile.mkdir()
-        proc = subprocess.Popen(
+        self._proc = subprocess.Popen(
             [
                 browser,
                 "--headless=new",
@@ -297,13 +361,14 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        ws = None
+        self._ws = None
+        self._message_id = 0
         try:
             active_port = profile / "DevToolsActivePort"
             deadline = time.monotonic() + 8
             while not active_port.exists() and time.monotonic() < deadline:
-                if proc.poll() is not None:
-                    raise AssertionError(f"Chrome exited before exposing DevTools: {proc.returncode}")
+                if self._proc.poll() is not None:
+                    raise AssertionError(f"Chrome exited before exposing DevTools: {self._proc.returncode}")
                 time.sleep(0.05)
             if not active_port.exists():
                 raise AssertionError("Chrome did not expose DevToolsActivePort")
@@ -321,19 +386,42 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
             target = next((item for item in targets if item.get("type") == "page"), None)
             if not target:
                 raise AssertionError(f"No Chrome page target available: {targets!r}")
-            ws = _ws_connect(target["webSocketDebuggerUrl"])
-            _cdp_call(ws, 1, "Emulation.setDeviceMetricsOverride", {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
-            _cdp_call(ws, 2, "Page.enable")
-            tree = _cdp_call(ws, 3, "Page.getFrameTree")
-            frame_id = tree["result"]["frameTree"]["frame"]["id"]
-            _cdp_call(ws, 4, "Page.setDocumentContent", {"frameId": frame_id, "html": document})
+            self._ws = _ws_connect(target["webSocketDebuggerUrl"])
+            self._call("Page.enable")
+        except Exception:
+            self.close()
+            raise
+
+    def _call(self, method: str, params: dict | None = None) -> dict:
+        if self._ws is None:
+            raise AssertionError("Chrome DevTools session is not available")
+        self._message_id += 1
+        return _cdp_call(self._ws, self._message_id, method, params)
+
+    def fixture(self, view: str, width: int, height: int) -> dict[str, object]:
+        document = _browser_document(view)
+        with _serve_browser_document(document) as url:
+            self._call(
+                "Emulation.setDeviceMetricsOverride",
+                {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
+            )
+            navigation = self._call("Page.navigate", {"url": url})
+            error_text = navigation.get("result", {}).get("errorText")
+            if error_text:
+                raise AssertionError(f"Browser fixture navigation failed: {error_text}")
+            expected_url = json.dumps(url)
+            expression = (
+                "(() => {"
+                f"if (location.href !== {expected_url}) return '';"
+                "if (document.readyState !== 'complete') return '';"
+                "return document.querySelector('#v970-browser-result')?.textContent || '';"
+                "})()"
+            )
             result_text = ""
-            for attempt in range(40):
-                evaluated = _cdp_call(
-                    ws,
-                    100 + attempt,
+            for _attempt in range(40):
+                evaluated = self._call(
                     "Runtime.evaluate",
-                    {"expression": "document.querySelector('#v970-browser-result')?.textContent || ''", "returnByValue": True},
+                    {"expression": expression, "returnByValue": True},
                 )
                 result_text = evaluated.get("result", {}).get("result", {}).get("value", "")
                 if result_text:
@@ -342,18 +430,38 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
             if not result_text:
                 raise AssertionError("Browser fixture did not emit acceptance results")
             return json.loads(result_text)
-        finally:
-            if ws is not None:
-                try:
-                    ws.close()
-                except OSError:
-                    pass
-            if proc.poll() is None:
-                proc.kill()
+
+    def close(self) -> None:
+        if self._ws is not None:
             try:
-                proc.wait(timeout=3)
+                self._ws.close()
+            except OSError:
+                pass
+            self._ws = None
+        if hasattr(self, "_proc") and self._proc.poll() is None:
+            self._proc.kill()
+        if hasattr(self, "_proc"):
+            try:
+                self._proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
                 pass
+        if hasattr(self, "_tmp"):
+            self._tmp.cleanup()
+
+
+_BROWSER_SESSION: _BrowserSession | None = None
+
+
+def _browser_session() -> _BrowserSession:
+    global _BROWSER_SESSION
+    if _BROWSER_SESSION is None:
+        _BROWSER_SESSION = _BrowserSession()
+        atexit.register(_BROWSER_SESSION.close)
+    return _BROWSER_SESSION
+
+
+def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
+    return _browser_session().fixture(view, width, height)
 
 
 class WebGuiV970Tests(unittest.TestCase):
@@ -427,6 +535,33 @@ class WebGuiV970Tests(unittest.TestCase):
             self.assertIn(f'data-v962-nav="{view}"', nav)
 
     # New blocker/regression coverage.
+    def test_presentation_sync_source_is_idempotent_and_storage_safe(self):
+        for token in (
+            "node.textContent !== value",
+            "schedulePresentationSync",
+            "readThemePreference",
+            "writeThemePreference",
+            "const presentationObserver = new MutationObserver(schedulePresentationSync)",
+            "Lazy fragments replace panel DOM asynchronously",
+        ):
+            self.assertIn(token, ENTERPRISE_SCRIPT)
+        self.assertNotIn("if (title) title.textContent = item[0]", ENTERPRISE_SCRIPT)
+        self.assertNotIn("if (sub) sub.textContent = item[1]", ENTERPRISE_SCRIPT)
+        self.assertNotIn("setInterval(", ENTERPRISE_SCRIPT)
+
+    def test_browser_load_and_presentation_sync_converge_without_mutation_storm(self):
+        result = _browser_fixture("overview", 390, 844)
+        self.assertTrue(result["origin"].startswith("http://127.0.0.1:"))
+        self.assertTrue(result["themeStorageReadable"])
+        self.assertTrue(result["documentLoadComplete"])
+        self.assertTrue(result["eventLoopResponsive"])
+        self.assertTrue(result["presentationConverged"])
+        self.assertFalse(result["mutationStorm"])
+        self.assertGreaterEqual(result["observerDelta"], 1)
+        self.assertLessEqual(result["observerDelta"], 2)
+        self.assertGreaterEqual(result["syncDelta"], 1)
+        self.assertLessEqual(result["syncDelta"], 2)
+
     def test_v970_style_is_last_in_effective_cascade(self):
         v962 = _fake_v962()
         install_webgui_v970(v962)
@@ -439,6 +574,7 @@ class WebGuiV970Tests(unittest.TestCase):
         self.assertEqual(result["metricsRadius"], "8px")
         self.assertEqual(result["metricPadding"], "9px")
         self.assertEqual(result["toolbarWrap"], "nowrap")
+        self.assertLessEqual(result["horizontalOverflow"], 0)
 
     def test_mobile_inbox_reader_keeps_scroll_ancestor_visible(self):
         self.assertIn("#panel-inbox:has(.v963-detail)>.scroll{display:block", ENTERPRISE_STYLE)
@@ -463,6 +599,7 @@ class WebGuiV970Tests(unittest.TestCase):
         self.assertEqual(result["calendarColumns"], 7)
         self.assertEqual(result["selectedDate"], "2")
         self.assertIn("Task B", result["agendaText"])
+        self.assertLessEqual(result["horizontalOverflow"], 0)
 
     def test_mobile_knowledge_drilldown_uses_existing_view_and_editor_contracts(self):
         self.assertIn("v970-knowledge-detail", ENTERPRISE_STYLE)
@@ -477,6 +614,7 @@ class WebGuiV970Tests(unittest.TestCase):
         self.assertTrue(result["knowledgeEditorClass"])
         self.assertEqual(result["knowledgeEditorFixed"], "fixed")
         self.assertTrue(result["knowledgeEditorBack"])
+        self.assertLessEqual(result["horizontalOverflow"], 0)
 
     def test_more_sheet_has_dialog_focus_containment_and_restore_contract(self):
         nav = enterprise_nav()
@@ -494,6 +632,7 @@ class WebGuiV970Tests(unittest.TestCase):
         self.assertTrue(result["moreClosed"])
         self.assertTrue(result["returnFocus"])
         self.assertTrue(result["workspaceRestored"])
+        self.assertLessEqual(result["horizontalOverflow"], 0)
 
     def test_browser_acceptance_breakpoints_and_navigation_surfaces(self):
         viewports = ((1440, 900), (1280, 800), (1024, 768), (768, 1024), (430, 932), (390, 844), (375, 812))
@@ -506,6 +645,10 @@ class WebGuiV970Tests(unittest.TestCase):
                     self.assertEqual(result["activeView"], view)
                     self.assertTrue(result["activeVisible"])
                     self.assertTrue(result["activePrimaryVisible"])
+                    self.assertTrue(result["documentLoadComplete"])
+                    self.assertTrue(result["eventLoopResponsive"])
+                    self.assertTrue(result["presentationConverged"])
+                    self.assertFalse(result["mutationStorm"])
                     self.assertLessEqual(result["horizontalOverflow"], 0)
 
 
