@@ -84,6 +84,7 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
         "%VIEW_LABELS%", json.dumps(mapping, ensure_ascii=False, separators=(",", ":"))
     )
     nav = enterprise_nav()
+    knowledge_open = " open" if view == "knowledge" else ""
     panels = f'''
 <section class="tab-panel {'active' if view == 'overview' else ''}" id="panel-overview" data-panel="overview">
   <div class="v951-pagehead"><div><h2 id="computed-heading">Operations Dashboard</h2></div></div>
@@ -116,47 +117,42 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
 <section class="tab-panel {'active' if view == 'knowledge' else ''}" id="panel-knowledge" data-panel="knowledge"><div class="grid">
   <section class="card wide"><div class="panel-title"><div><h2>Memory One</h2></div></div><div class="markdown-viewer">Knowledge detail</div></section>
   <section class="card wide"><h2>Knowledge / Skills</h2></section>
-  <details class="v962-collapsible" data-v962-state-key="knowledge-editor"><summary>Add memory / skill</summary><div class="v962-collapsible-body"><section class="card wide"><form><div class="v951-formgrid"><label>Priority<input value="0.70"></label><label>Title<input value="Memory One"></label><label class="wide">Content<textarea>Content</textarea></label><label><input type="checkbox" checked> Always include</label><label><input type="checkbox" checked> Enabled</label></div></form></section></div></details>
+  <details class="v962-collapsible" data-v962-state-key="knowledge-editor"{knowledge_open}><summary>Add memory / skill</summary><div class="v962-collapsible-body"><section class="card wide"><form><div class="v951-formgrid"><label>Priority<input value="0.70"></label><label>Title<input value="Memory One"></label><label class="wide">Content<textarea>Content</textarea></label><label><input type="checkbox" checked> Always include</label><label><input type="checkbox" checked> Enabled</label></div></form></section></div></details>
   <section class="card wide"><h2>Search</h2></section>
   <section class="card wide"><div class="scroll"><table><thead><tr><th>Item</th><th>Kind</th><th>Scopes</th><th>Priority</th><th></th></tr></thead><tbody><tr><td><strong>Memory One</strong><div class="small muted mono">k1</div></td><td><span class="badge">memory</span></td><td>Project Alpha</td><td>0.70</td><td class="actions"><button>View</button><button>Edit</button></td></tr></tbody></table></div></section>
 </div></section>
 '''
     measurement = r'''
 <script>
-setTimeout(() => {
+(() => {
   if (document.body.dataset.v970View === 'scheduler') {
     const days=document.querySelectorAll('#calendar-grid .task-calendar-day'); if(days[1]) days[1].click();
   }
-  if (document.body.dataset.v970View === 'knowledge') {
-    const editor=document.querySelector('[data-v962-state-key="knowledge-editor"]'); if(editor) editor.open=true;
-  }
-  setTimeout(() => {
-    const rect = selector => { const el=document.querySelector(selector); if(!el)return {w:0,h:0}; const r=el.getBoundingClientRect(); return {w:r.width,h:r.height}; };
-    const metrics=document.querySelector('#computed-metrics'), metric=document.querySelector('#computed-metric'), toolbar=document.querySelector('#computed-toolbar');
-    const shell=document.querySelector('#calendar-shell'), grid=document.querySelector('#calendar-grid');
-    const trigger=document.querySelector('[data-v970-more]'); trigger?.focus(); trigger?.click();
-    const sheet=document.querySelector('#v970-more-sheet'), first=sheet?.querySelector('[data-v970-more-close]');
-    const focusables=[...(sheet?.querySelectorAll('a[href],button:not([disabled])') || [])]; const last=focusables[focusables.length-1];
-    if(last){last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));}
-    const trapped=document.activeElement===first;
-    const openState={role:sheet?.getAttribute('role'),ariaModal:sheet?.getAttribute('aria-modal'),ariaHidden:sheet?.getAttribute('aria-hidden'),workspaceInert:document.querySelector('.v970-workspace')?.hasAttribute('inert'),initialFocus:trapped};
-    document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
-    const result={
-      headingFont:getComputedStyle(document.querySelector('#computed-heading')).fontSize,
-      metricsGap:metrics ? getComputedStyle(metrics).gap : '', metricsRadius:metrics ? getComputedStyle(metrics).borderRadius : '', metricPadding:metric ? getComputedStyle(metric).paddingTop : '', toolbarWrap:toolbar ? getComputedStyle(toolbar).flexWrap : '',
-      readerScrollDisplay:getComputedStyle(document.querySelector('#reader-scroll')).display, readerDetail:rect('#reader-detail'), readerSubject:rect('#reader-subject'), readerBody:rect('#reader-body'), reply:rect('#reader-reply'), replyAll:rect('#reader-reply-all'), forward:rect('#reader-forward'), horizontalOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
-      calendarOverflow:shell ? getComputedStyle(shell).overflowX : '', calendarScroll:shell ? shell.scrollWidth-shell.clientWidth : -1, calendarColumns:grid ? getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length : 0, selectedDate:document.querySelector('.task-calendar-day.v970-selected .task-calendar-date')?.textContent?.trim() || '', agendaText:document.querySelector('.v970-task-day-agenda')?.textContent?.replace(/\s+/g,' ').trim() || '',
-      knowledgeDetailClass:document.querySelector('#panel-knowledge .v970-knowledge-detail') !== null, knowledgeBack:document.querySelector('#panel-knowledge .v970-knowledge-detail > .v970-overlay-back') !== null, knowledgeMeta:document.querySelector('.v970-knowledge-meta')?.textContent?.replace(/\s+/g,' ').trim() || '', knowledgeEditorClass:document.querySelector('#panel-knowledge .v970-knowledge-editor') !== null, knowledgeEditorFixed:document.querySelector('#panel-knowledge .v970-knowledge-editor') ? getComputedStyle(document.querySelector('#panel-knowledge .v970-knowledge-editor')).position : '', knowledgeEditorBack:document.querySelector('#panel-knowledge .v970-knowledge-editor .v970-overlay-back') !== null,
-      more:openState, moreClosed:sheet ? !sheet.classList.contains('v970-open') : false, returnFocus:document.activeElement===trigger, workspaceRestored:!document.querySelector('.v970-workspace')?.hasAttribute('inert')
-    };
-    document.querySelector('#v970-browser-result').textContent=JSON.stringify(result);
-  },25);
-},25);
+  const rect = selector => { const el=document.querySelector(selector); if(!el)return {w:0,h:0}; const r=el.getBoundingClientRect(); return {w:r.width,h:r.height}; };
+  const metrics=document.querySelector('#computed-metrics'), metric=document.querySelector('#computed-metric'), toolbar=document.querySelector('#computed-toolbar');
+  const shell=document.querySelector('#calendar-shell'), grid=document.querySelector('#calendar-grid');
+  const trigger=document.querySelector('[data-v970-more]'); trigger?.focus(); trigger?.click();
+  const sheet=document.querySelector('#v970-more-sheet'), first=sheet?.querySelector('[data-v970-more-close]');
+  const focusables=[...(sheet?.querySelectorAll('a[href],button:not([disabled])') || [])]; const last=focusables[focusables.length-1];
+  if(last){last.focus();last.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));}
+  const trapped=document.activeElement===first;
+  const openState={role:sheet?.getAttribute('role'),ariaModal:sheet?.getAttribute('aria-modal'),ariaHidden:sheet?.getAttribute('aria-hidden'),workspaceInert:document.querySelector('.v970-workspace')?.hasAttribute('inert'),initialFocus:trapped};
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+  const result={
+    headingFont:getComputedStyle(document.querySelector('#computed-heading')).fontSize,
+    metricsGap:metrics ? getComputedStyle(metrics).gap : '', metricsRadius:metrics ? getComputedStyle(metrics).borderRadius : '', metricPadding:metric ? getComputedStyle(metric).paddingTop : '', toolbarWrap:toolbar ? getComputedStyle(toolbar).flexWrap : '',
+    readerScrollDisplay:getComputedStyle(document.querySelector('#reader-scroll')).display, readerDetail:rect('#reader-detail'), readerSubject:rect('#reader-subject'), readerBody:rect('#reader-body'), reply:rect('#reader-reply'), replyAll:rect('#reader-reply-all'), forward:rect('#reader-forward'), horizontalOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+    calendarOverflow:shell ? getComputedStyle(shell).overflowX : '', calendarScroll:shell ? shell.scrollWidth-shell.clientWidth : -1, calendarColumns:grid ? getComputedStyle(grid).gridTemplateColumns.trim().split(/\s+/).length : 0, selectedDate:document.querySelector('.task-calendar-day.v970-selected .task-calendar-date')?.textContent?.trim() || '', agendaText:document.querySelector('.v970-task-day-agenda')?.textContent?.replace(/\s+/g,' ').trim() || '',
+    knowledgeDetailClass:document.querySelector('#panel-knowledge .v970-knowledge-detail') !== null, knowledgeBack:document.querySelector('#panel-knowledge .v970-knowledge-detail > .v970-overlay-back') !== null, knowledgeMeta:document.querySelector('.v970-knowledge-meta')?.textContent?.replace(/\s+/g,' ').trim() || '', knowledgeEditorClass:document.querySelector('#panel-knowledge .v970-knowledge-editor') !== null, knowledgeEditorFixed:document.querySelector('#panel-knowledge .v970-knowledge-editor') ? getComputedStyle(document.querySelector('#panel-knowledge .v970-knowledge-editor')).position : '', knowledgeEditorBack:document.querySelector('#panel-knowledge .v970-knowledge-editor .v970-overlay-back') !== null,
+    more:openState, moreClosed:sheet ? !sheet.classList.contains('v970-open') : false, returnFocus:document.activeElement===trigger, workspaceRestored:!document.querySelector('.v970-workspace')?.hasAttribute('inert')
+  };
+  document.querySelector('#v970-browser-result').textContent=JSON.stringify(result);
+})();
 </script>
 '''
     document = f'''<!doctype html><html><head><meta charset="utf-8"><style>{legacy}\n{ENTERPRISE_STYLE}</style></head><body><div class="shell">{nav}<div class="v970-workspace"><header class="v970-contextbar"><div class="v970-context-title"><strong data-v970-context-title>Dashboard</strong><span data-v970-context-subtitle>Test</span></div></header><main>{panels}</main></div></div>{script}<pre id="v970-browser-result"></pre>{measurement}</body></html>'''
 
-    with tempfile.TemporaryDirectory(prefix="postmaster-v970-browser-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="postmaster-v970-browser-", ignore_cleanup_errors=True) as tmp:
         root = Path(tmp)
         page = root / "fixture.html"
         page.write_text(document, encoding="utf-8")
@@ -168,20 +164,23 @@ setTimeout(() => {
         completed = subprocess.run(
             [
                 browser,
-                "--headless",
+                "--headless=new",
                 "--no-sandbox",
                 "--disable-gpu",
                 "--disable-dev-shm-usage",
+                "--disable-background-networking",
+                "--disable-default-apps",
+                "--disable-extensions",
+                "--disable-sync",
+                "--metrics-recording-only",
                 "--no-first-run",
-                f"--user-data-dir={root / 'profile'}",
                 f"--window-size={width},{height}",
-                "--virtual-time-budget=1200",
                 "--dump-dom",
                 url,
             ],
             text=True,
             capture_output=True,
-            timeout=20,
+            timeout=12,
         )
         if completed.returncode != 0:
             raise AssertionError(f"Chrome acceptance failed: {completed.stderr[-1200:]}")
