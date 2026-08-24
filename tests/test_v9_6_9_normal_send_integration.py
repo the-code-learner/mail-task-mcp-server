@@ -52,6 +52,12 @@ class NormalSendIntegrationV969Tests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         root = self.temp.name
+        self.env_patch = patch.dict(
+            os.environ,
+            {"RECIPIENT_POLICY_DB_PATH": os.path.join(root, "mail_policy.db")},
+        )
+        self.env_patch.start()
+        self.addCleanup(self.env_patch.stop)
         self.operation_store = OutboundOperationStore(os.path.join(root, "logical.db"))
         self.safety = OutboundSafetyStore(
             os.path.join(root, "safety.db"), duplicate_window_seconds=0
