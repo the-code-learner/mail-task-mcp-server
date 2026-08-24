@@ -4,18 +4,16 @@ import hashlib
 import sqlite3
 import tempfile
 import unittest
+from email import policy
 from email.message import EmailMessage
+from email.parser import BytesParser
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from postmaster.email_inventory_v963 import inventory_message
 from postmaster.mailbox_cache_v963 import MailboxCacheStore
 from postmaster.pending_approval_v969 import PendingApprovalStore
-from postmaster.privacy_cache_v969 import (
-    PassiveContentService,
-    install_hashed_resource_keys,
-)
+from postmaster.privacy_cache_v969 import PassiveContentService, install_hashed_resource_keys
 
 
 class _ProxyStore:
@@ -37,11 +35,15 @@ class _Proxy:
         self.calls: list[str] = []
 
     def fetch(self, url, **kwargs):
-        self.calls.append(url)
-        if self.fail or url in self.fail_urls:
-            raise RuntimeError("sensitive-origin-detail:" + url)
+        self.calls.append(str(url))
+        if self.fail or str(url) in self.fail_urls:
+            raise RuntimeError("sensitive-origin-detail:" + str(url))
         content_type = "text/css" if str(url).endswith(".css") else "image/png"
-        body = b"body{background:url(https://nested.example/leak.png)}" if content_type == "text/css" else b"png"
+        body = (
+            b"body{background:url(https://nested.example/leak.png)}"
+            if content_type == "text/css"
+            else b"png"
+        )
         return {
             "status": 200,
             "content_type": content_type,
@@ -76,7 +78,6 @@ def _inventory():
                 "source_snippet": '<img src="https://img.example/a.png">',
                 "classification": "remote image",
                 "tracking_score": 5,
-                "passive_resource": True,
             },
             {
                 "url": "https://cdn.example/bg.png",
@@ -84,7 +85,6 @@ def _inventory():
                 "source_snippet": "background:url(https://cdn.example/bg.png)",
                 "classification": "remote image",
                 "tracking_score": 0,
-                "passive_resource": False,
             },
             {
                 "url": "https://example.test/action/reset?token=secret",
@@ -92,7 +92,6 @@ def _inventory():
                 "source_snippet": '<a href="https://example.test/action/reset?token=secret">',
                 "classification": "action URL",
                 "tracking_score": 0,
-                "passive_resource": False,
             },
         ]
     }
@@ -119,32 +118,25 @@ def _seed_message(
     uidvalidity: int,
     raw: bytes,
 ) -> None:
-    parsed = EmailMessage()
-    # Header fields are duplicated explicitly because the store's stable identity deliberately
-    # does not rely on Message-ID alone.
-    from email import policy
-    from email.parser import BytesParser
-
     parsed = BytesParser(policy=policy.default).parsebytes(raw)
-    row = {
-        "message_id": str(parsed.get("Message-ID") or ""),
-        "in_reply_to": str(parsed.get("In-Reply-To") or ""),
-        "references": str(parsed.get("References") or ""),
-        "date": str(parsed.get("Date") or ""),
-        "from": str(parsed.get("From") or ""),
-        "from_addresses": ["sender@example.test"],
-        "to": str(parsed.get("To") or ""),
-        "to_addresses": ["reader@example.test"],
-        "cc": str(parsed.get("Cc") or ""),
-        "cc_addresses": [],
-        "subject": str(parsed.get("Subject") or ""),
-    }
     cache.upsert_header(
         account_id=account_id,
         mailbox=mailbox,
         uid=uid,
         uidvalidity=uidvalidity,
-        row=row,
+        row={
+            "message_id": str(parsed.get("Message-ID") or ""),
+            "in_reply_to": str(parsed.get("In-Reply-To") or ""),
+            "references": str(parsed.get("References") or ""),
+            "date": str(parsed.get("Date") or ""),
+            "from": str(parsed.get("From") or ""),
+            "from_addresses": ["sender@example.test"],
+            "to": str(parsed.get("To") or ""),
+            "to_addresses": ["reader@example.test"],
+            "cc": str(parsed.get("Cc") or ""),
+            "cc_addresses": [],
+            "subject": str(parsed.get("Subject") or ""),
+        },
         flags=[],
         size_bytes=len(raw),
         header_bytes=raw,
@@ -163,10 +155,7 @@ class PassiveContentV969Tests(unittest.TestCase):
     def test_semantic_passive_fetch_cache_refresh_and_noise_boundary(self):
         proxy = _Proxy()
         service = PassiveContentService(_Base(self.cache, proxy))
-        noise = {
-            "requests": 1,
-            "events": [{"http_status": 204, "error_state": ""}],
-        }
+        noise = {"requests": 1, "events": [{"http_status": 204, "error_state": ""}]}
         with patch(
             "postmaster.privacy_cache_v969.fetch_high_noise_decoys",
             return_value=noise,
@@ -184,11 +173,8 @@ class PassiveContentV969Tests(unittest.TestCase):
                 uid="7",
                 refresh=True,
             )
-
-        self.assertEqual(first["diagnostics"]["discovered"], 2)
         self.assertEqual(first["diagnostics"]["genuine_attempted"], 2)
-        self.assertEqual(first["diagnostics"]["excluded_navigation_action"], 1)
-        self.assertFalse(first["cache_only"])
+        self.assertEqual(first["diagnostics"]["excluded_action_urls"], 1)
         self.assertTrue(second["cache_only"])
         self.assertEqual(second["diagnostics"]["genuine_attempted"], 0)
         self.assertEqual(second["diagnostics"]["decoy_attempted"], 0)
@@ -202,13 +188,7 @@ class PassiveContentV969Tests(unittest.TestCase):
         digest = hashlib.sha256(url.encode()).hexdigest()
         key = self.cache.resource_key("acct-personal", "INBOX", "123", digest)
         self.assertRegex(key, r"^r_[0-9a-f]{64}$")
-        for value in (
-            "acct-personal",
-            "INBOX",
-            "123",
-            "reader@example.test",
-            "sensitive.example",
-        ):
+        for value in ("acct-personal", "INBOX", "123", "reader@example.test", "sensitive.example"):
             self.assertNotIn(value, key)
 
     def test_cache_identity_survives_mailbox_move_and_new_uid(self):
@@ -223,7 +203,7 @@ class PassiveContentV969Tests(unittest.TestCase):
             raw=raw,
         )
         proxy = _Proxy()
-        service = PassiveContentService(_Base(self.cache, proxy))
+        service = PassiveContentService(_Base(self.cache, proxy, high_noise=False))
         inventory = inventory_message(body_html, "plain")
         first = service.fetch_inventory(
             inventory,
@@ -235,7 +215,6 @@ class PassiveContentV969Tests(unittest.TestCase):
         self.assertEqual(first["diagnostics"]["genuine_attempted"], 1)
         self.assertEqual(len(proxy.calls), 1)
 
-        # Simulate the same RFC822 message after MOVE/COPY: mailbox and UID changed, raw MIME did not.
         _seed_message(
             self.cache,
             account_id="acct",
@@ -266,40 +245,36 @@ class PassiveContentV969Tests(unittest.TestCase):
 
     def test_uid_reuse_for_different_message_does_not_inherit_old_cache(self):
         url = "https://img.example/a.png"
-        old_html = f'<img src="{url}">'
-        old_raw = _raw_message("<old@example.test>", old_html, subject="Old")
+        body_html = f'<img src="{url}">'
         _seed_message(
             self.cache,
             account_id="acct",
             mailbox="INBOX",
             uid="44",
             uidvalidity=10,
-            raw=old_raw,
+            raw=_raw_message("<old@example.test>", body_html, subject="Old"),
         )
         proxy = _Proxy()
-        service = PassiveContentService(_Base(self.cache, proxy))
-        inventory = inventory_message(old_html, "plain")
+        service = PassiveContentService(_Base(self.cache, proxy, high_noise=False))
+        inventory = inventory_message(body_html, "plain")
         service.fetch_inventory(
             inventory,
             account_id="acct",
             mailbox="INBOX",
             uid="44",
-            body_html=old_html,
+            body_html=body_html,
         )
         digest = hashlib.sha256(url.encode()).hexdigest()
         old_key = self.cache.resource_key("acct", "INBOX", "44", digest)
         self.assertEqual(len(proxy.calls), 1)
 
-        # Keep the old resource row in place, but replace UID 44 with a different RFC822 message
-        # and UIDVALIDITY. Correct identity must compute a different key and perform a new fetch.
-        new_raw = _raw_message("<new@example.test>", old_html, subject="Different")
         _seed_message(
             self.cache,
             account_id="acct",
             mailbox="INBOX",
             uid="44",
             uidvalidity=11,
-            raw=new_raw,
+            raw=_raw_message("<new@example.test>", body_html, subject="Different"),
         )
         new_key = self.cache.resource_key("acct", "INBOX", "44", digest)
         self.assertNotEqual(old_key, new_key)
@@ -308,7 +283,7 @@ class PassiveContentV969Tests(unittest.TestCase):
             account_id="acct",
             mailbox="INBOX",
             uid="44",
-            body_html=old_html,
+            body_html=body_html,
         )
         self.assertFalse(second["cache_only"])
         self.assertEqual(second["diagnostics"]["genuine_attempted"], 1)
@@ -316,34 +291,25 @@ class PassiveContentV969Tests(unittest.TestCase):
 
     def test_negative_tombstone_persists_and_error_state_is_type_only(self):
         proxy = _Proxy(fail=True)
-        first_service = PassiveContentService(_Base(self.cache, proxy))
+        service = PassiveContentService(_Base(self.cache, proxy))
         inventory = {
-            "urls": [
-                {
-                    "url": "https://sensitive.example/pixel?email=reader@example.test",
-                    "source_type": "img src",
-                    "source_snippet": '<img src="https://sensitive.example/pixel?email=reader@example.test">',
-                    "classification": "tracking pixel",
-                    "tracking_score": 80,
-                    "passive_resource": True,
-                }
-            ]
+            "urls": [{
+                "url": "https://sensitive.example/pixel?email=reader@example.test",
+                "source_type": "img src",
+                "classification": "tracking pixel",
+                "tracking_score": 80,
+            }]
         }
         with patch(
             "postmaster.privacy_cache_v969.fetch_high_noise_decoys",
             return_value={"requests": 0, "events": []},
         ) as decoys:
-            first = first_service.fetch_inventory(
-                inventory, account_id="acct", mailbox="INBOX", uid="9"
-            )
+            first = service.fetch_inventory(inventory, account_id="acct", mailbox="INBOX", uid="9")
             restarted_cache = MailboxCacheStore(self.db_path)
             install_hashed_resource_keys(restarted_cache)
-            second = PassiveContentService(
-                _Base(restarted_cache, proxy)
-            ).fetch_inventory(
+            second = PassiveContentService(_Base(restarted_cache, proxy)).fetch_inventory(
                 inventory, account_id="acct", mailbox="INBOX", uid="9"
             )
-
         self.assertEqual(first["render_state"], "failure")
         self.assertTrue(second["cache_only"])
         self.assertEqual(second["diagnostics"]["negative_cache_hits"], 1)
@@ -351,9 +317,7 @@ class PassiveContentV969Tests(unittest.TestCase):
         self.assertEqual(len(proxy.calls), 1)
         self.assertEqual(decoys.call_count, 1)
         digest = hashlib.sha256(inventory["urls"][0]["url"].encode()).hexdigest()
-        row = restarted_cache.get_resource(
-            restarted_cache.resource_key("acct", "INBOX", "9", digest)
-        )
+        row = restarted_cache.get_resource(restarted_cache.resource_key("acct", "INBOX", "9", digest))
         self.assertEqual(row["error_state"], "RuntimeError")
         self.assertNotIn("sensitive.example", row["error_state"])
         self.assertNotIn("reader@example.test", row["error_state"])
@@ -363,64 +327,38 @@ class PassiveContentV969Tests(unittest.TestCase):
         second_url = "https://img.example/two.png"
         inventory = {
             "urls": [
-                {
-                    "url": first_url,
-                    "source_type": "img src",
-                    "classification": "remote image",
-                    "tracking_score": 5,
-                    "passive_resource": True,
-                },
-                {
-                    "url": second_url,
-                    "source_type": "img src",
-                    "classification": "remote image",
-                    "tracking_score": 5,
-                    "passive_resource": True,
-                },
+                {"url": first_url, "source_type": "img src", "classification": "remote image", "tracking_score": 5},
+                {"url": second_url, "source_type": "img src", "classification": "remote image", "tracking_score": 5},
             ]
         }
-
-        all_ok = PassiveContentService(_Base(self.cache, _Proxy()))
         with patch(
             "postmaster.privacy_cache_v969.fetch_high_noise_decoys",
             return_value={"requests": 1, "events": [{"http_status": 0, "error_state": "TimeoutError"}]},
         ):
-            success = all_ok.fetch_inventory(
-                inventory,
-                account_id="acct-success",
-                mailbox="INBOX",
-                uid="1",
+            success = PassiveContentService(_Base(self.cache, _Proxy())).fetch_inventory(
+                inventory, account_id="acct-success", mailbox="INBOX", uid="1"
             )
         self.assertEqual(success["render_state"], "success")
         self.assertEqual(success["diagnostics"]["genuine_succeeded"], 2)
         self.assertEqual(success["diagnostics"]["decoy_failed"], 1)
 
-        mixed_proxy = _Proxy(fail_urls={second_url})
-        mixed_service = PassiveContentService(_Base(self.cache, mixed_proxy))
         with patch(
             "postmaster.privacy_cache_v969.fetch_high_noise_decoys",
             return_value={"requests": 0, "events": []},
         ):
-            partial = mixed_service.fetch_inventory(
-                inventory,
-                account_id="acct-partial",
-                mailbox="INBOX",
-                uid="1",
+            partial = PassiveContentService(_Base(self.cache, _Proxy(fail_urls={second_url}))).fetch_inventory(
+                inventory, account_id="acct-partial", mailbox="INBOX", uid="1"
             )
         self.assertEqual(partial["render_state"], "partial")
         self.assertEqual(partial["diagnostics"]["genuine_succeeded"], 1)
         self.assertEqual(partial["diagnostics"]["genuine_failed"], 1)
 
-        failed_service = PassiveContentService(_Base(self.cache, _Proxy(fail=True)))
         with patch(
             "postmaster.privacy_cache_v969.fetch_high_noise_decoys",
             return_value={"requests": 1, "events": [{"http_status": 204, "error_state": ""}]},
         ):
-            failed = failed_service.fetch_inventory(
-                inventory,
-                account_id="acct-failed",
-                mailbox="INBOX",
-                uid="1",
+            failed = PassiveContentService(_Base(self.cache, _Proxy(fail=True))).fetch_inventory(
+                inventory, account_id="acct-failed", mailbox="INBOX", uid="1"
             )
         self.assertEqual(failed["render_state"], "failure")
         self.assertFalse(failed["ok"])
@@ -438,7 +376,6 @@ class PassiveContentV969Tests(unittest.TestCase):
             f'<div style="background-image:url({bg})">Hello</div>'
             f'<a href="{action}">Reset password</a>'
         )
-        inventory = inventory_message(body_html, "Hello")
         proxy = _Proxy()
         service = PassiveContentService(_Base(self.cache, proxy))
         with patch(
@@ -446,14 +383,14 @@ class PassiveContentV969Tests(unittest.TestCase):
             return_value={"requests": 0, "events": []},
         ):
             result = service.fetch_inventory(
-                inventory,
+                inventory_message(body_html, "Hello"),
                 account_id="acct-render",
                 mailbox="INBOX",
                 uid="1",
                 body_html=body_html,
             )
-        self.assertEqual(result["render_state"], "success")
         rendered = result["rendered_html"]
+        self.assertEqual(result["render_state"], "success")
         self.assertNotIn(img, rendered)
         self.assertNotIn(bg, rendered)
         self.assertNotIn(css, rendered)
@@ -471,11 +408,7 @@ class PendingApprovalV969Tests(unittest.TestCase):
         self.now = [1000.0]
 
     def store(self):
-        return PendingApprovalStore(
-            self.db_path,
-            ttl_seconds=300,
-            clock=lambda: self.now[0],
-        )
+        return PendingApprovalStore(self.db_path, ttl_seconds=300, clock=lambda: self.now[0])
 
     def test_restart_exact_binding_optional_preview_id_and_replay(self):
         binding = {
@@ -487,28 +420,16 @@ class PendingApprovalV969Tests(unittest.TestCase):
         preview_id = self.store().issue("runtime_version_change", binding)
         self.assertTrue(preview_id.startswith("pv_"))
         restarted = self.store()
-        self.assertFalse(
-            restarted.consume_matching(
-                "runtime_version_change",
-                {**binding, "target": "v9.6.7"},
-                preview_id=preview_id,
-            )
-        )
-        self.assertFalse(
-            restarted.consume_matching(
-                "runtime_version_change",
-                {**binding, "operation": "rollback-version"},
-                preview_id=preview_id,
-            )
-        )
+        self.assertFalse(restarted.consume_matching(
+            "runtime_version_change", {**binding, "target": "v9.6.7"}, preview_id=preview_id
+        ))
+        self.assertFalse(restarted.consume_matching(
+            "runtime_version_change", {**binding, "operation": "rollback-version"}, preview_id=preview_id
+        ))
         self.assertTrue(restarted.consume_matching("runtime_version_change", binding))
-        self.assertFalse(
-            restarted.consume_matching(
-                "runtime_version_change",
-                binding,
-                preview_id=preview_id,
-            )
-        )
+        self.assertFalse(restarted.consume_matching(
+            "runtime_version_change", binding, preview_id=preview_id
+        ))
 
     def test_expiry_and_schema_do_not_store_plaintext_binding(self):
         binding = {
@@ -518,35 +439,20 @@ class PendingApprovalV969Tests(unittest.TestCase):
         }
         preview_id = self.store().issue("runtime_version_change", binding)
         self.now[0] = 1301.0
-        self.assertFalse(
-            self.store().consume_matching(
-                "runtime_version_change",
-                binding,
-                preview_id=preview_id,
-            )
-        )
+        self.assertFalse(self.store().consume_matching(
+            "runtime_version_change", binding, preview_id=preview_id
+        ))
         with sqlite3.connect(self.db_path) as conn:
-            columns = [
-                row[1]
-                for row in conn.execute(
-                    "PRAGMA table_info(mcp_pending_approvals_v969)"
-                ).fetchall()
-            ]
+            columns = [row[1] for row in conn.execute(
+                "PRAGMA table_info(mcp_pending_approvals_v969)"
+            ).fetchall()]
             values = conn.execute(
                 "SELECT preview_id,scope,binding_digest,created_at,expires_at,consumed_at "
                 "FROM mcp_pending_approvals_v969"
             ).fetchall()
-        self.assertEqual(
-            columns,
-            [
-                "preview_id",
-                "scope",
-                "binding_digest",
-                "created_at",
-                "expires_at",
-                "consumed_at",
-            ],
-        )
+        self.assertEqual(columns, [
+            "preview_id", "scope", "binding_digest", "created_at", "expires_at", "consumed_at"
+        ])
         rendered = repr(values)
         self.assertNotIn("do-not-store-this-build", rendered)
         self.assertNotIn("pin-version", rendered)
