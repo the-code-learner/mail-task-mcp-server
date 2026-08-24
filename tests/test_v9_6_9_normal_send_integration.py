@@ -11,6 +11,7 @@ from unittest.mock import patch
 from starlette.requests import Request
 
 from postmaster.delivery_reliability import ReliabilityStore, RetryPolicy, ThrottleController
+from postmaster.file_store import FileStore
 from postmaster.mail_bridge import Settings
 from postmaster.mail_v950 import PostmasterV950MailClient
 from postmaster.mail_v960_unsubscribe import PostmasterV960NewsletterMailClient
@@ -56,6 +57,10 @@ class NormalSendIntegrationV969Tests(unittest.TestCase):
             os.path.join(root, "safety.db"), duplicate_window_seconds=0
         )
         self.reliability = ReliabilityStore(os.path.join(root, "reliability.db"))
+        self.file_store = FileStore(
+            db_path=os.path.join(root, "files.db"),
+            root=os.path.join(root, "files"),
+        )
         self.settings = Settings(
             email_address="sender@example.com",
             email_password="pw",
@@ -78,6 +83,7 @@ class NormalSendIntegrationV969Tests(unittest.TestCase):
             ),
             retry_policy=RetryPolicy(max_attempts=1),
             unsubscribe_manager=_NoopUnsubscribeManager(),
+            file_store=self.file_store,
             sleeper=lambda _seconds: None,
         )
         self.smtp: list[tuple[bytes, list[str]]] = []
