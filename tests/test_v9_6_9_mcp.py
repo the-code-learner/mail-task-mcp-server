@@ -189,6 +189,14 @@ class McpV969Tests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("/dashboard/inbox/resource?", fetched["rendered_html"])
             self.assertEqual(fetched["network_requests_performed"], 1)
             self.assertFalse(fetched["navigation_action_urls_auto_fetched"])
+            self.assertEqual(fetched["diagnostics"]["decoy_attempted"], 0)
+            contract = fetched["cached_resource_contract"]
+            self.assertEqual(contract["representation"], "postmaster-local")
+            self.assertEqual(
+                contract["reference_prefix"], "/dashboard/inbox/resource?key="
+            )
+            self.assertFalse(contract["resource_bytes_embedded"])
+            self.assertTrue(contract["bounded_css_nested_resources"])
             self.assertEqual(len(self.service.fetch_calls), 1)
 
             cached = _payload(
@@ -207,8 +215,27 @@ class McpV969Tests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(cached["remote_fetch_performed"])
             self.assertEqual(cached["network_requests_performed"], 0)
             self.assertEqual(cached["rendered_html"], fetched["rendered_html"])
+            self.assertEqual(cached["diagnostics"]["decoy_attempted"], 0)
+            self.assertEqual(cached["cached_resource_contract"], contract)
             self.assertEqual(len(self.service.fetch_calls), 1)
             self.assertEqual(len(self.service.cache_calls), 1)
+
+            cached_again = _payload(
+                await client.call_tool(
+                    "fetch_email_remote_content",
+                    {
+                        "mailbox": "INBOX",
+                        "uid": "7",
+                        "account_id": "acct",
+                        "cache_only": True,
+                    },
+                )
+            )
+            self.assertTrue(cached_again["ok"])
+            self.assertEqual(cached_again["network_requests_performed"], 0)
+            self.assertEqual(cached_again["rendered_html"], fetched["rendered_html"])
+            self.assertEqual(len(self.service.fetch_calls), 1)
+            self.assertEqual(len(self.service.cache_calls), 2)
 
             invalid = _payload(
                 await client.call_tool(
@@ -225,7 +252,7 @@ class McpV969Tests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(invalid["ok"])
             self.assertEqual(invalid["network_requests_performed"], 0)
             self.assertEqual(len(self.service.fetch_calls), 1)
-            self.assertEqual(len(self.service.cache_calls), 1)
+            self.assertEqual(len(self.service.cache_calls), 2)
 
             refreshed = _payload(
                 await client.call_tool(
