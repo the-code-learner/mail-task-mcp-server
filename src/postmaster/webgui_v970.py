@@ -146,6 +146,9 @@ th,td{padding:7px 9px;border-bottom:1px solid var(--v970-line);vertical-align:to
 /* Knowledge, Tasks, Tracking, Security, System. */
 #panel-knowledge .v962-collapsible{margin:7px 0}#panel-knowledge .v962-collapsible>summary{padding:9px 11px}
 #panel-knowledge textarea{resize:vertical}.v962-collapsible>summary{padding:9px 11px}.v962-collapsible-body{padding:0 8px 8px}
+.v970-overlay-back{display:inline-flex;align-items:center;min-height:32px;margin:0 0 9px;padding:5px 8px;border:1px solid var(--v970-line);border-radius:6px;text-decoration:none;color:var(--v970-text);background:var(--v970-surface-2)}
+.v970-knowledge-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:8px 0 12px;padding:8px;border:1px solid var(--v970-line);border-radius:6px;background:var(--v970-surface-2)}
+.v970-knowledge-meta div{min-width:0}.v970-knowledge-meta span{display:block;color:var(--v970-muted);font-size:9px;text-transform:uppercase;letter-spacing:.06em}.v970-knowledge-meta strong{display:block;margin-top:2px;overflow-wrap:anywhere;font-size:11px}
 .task-view-toggle{display:inline-flex;border:1px solid var(--v970-line);border-radius:6px;overflow:hidden;background:var(--v970-surface-2)}
 .task-view-toggle a{padding:5px 9px;text-decoration:none;color:var(--v970-muted);border-right:1px solid var(--v970-line)}.task-view-toggle a:last-child{border-right:0}.task-view-toggle a.active{background:var(--v970-accent-soft);color:var(--v970-text)}
 .task-calendar-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:9px 0}.task-calendar-month{font-size:15px;font-weight:800}.task-calendar-controls{display:flex;gap:4px}
@@ -154,6 +157,8 @@ th,td{padding:7px 9px;border-bottom:1px solid var(--v970-line);vertical-align:to
 .task-calendar-day{min-height:96px;padding:6px;border-right:1px solid var(--v970-line);border-top:1px solid var(--v970-line);background:var(--v970-surface)}.task-calendar-day.outside{background:var(--v970-surface-2);opacity:.64}.task-calendar-day.today{box-shadow:inset 0 0 0 1px var(--v970-accent)}
 .task-calendar-date{font-size:10px;font-weight:800;color:var(--v970-muted);margin-bottom:4px}.task-calendar-event{display:block;margin:3px 0;padding:4px 5px;border-radius:5px;text-decoration:none;font-size:10px;overflow:hidden;text-overflow:ellipsis;background:var(--v970-surface-2);border:1px solid var(--v970-line)}
 .task-calendar-event small{display:block;color:var(--v970-muted);font-size:9px;margin-top:1px}
+.v970-task-day-agenda{margin:8px 0;padding:9px;border:1px solid var(--v970-line);border-radius:var(--v970-radius);background:var(--v970-surface)}
+.v970-task-day-agenda-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px}.v970-task-day-agenda-head strong{font-size:12px}.v970-task-day-agenda-head span{font-size:10px;color:var(--v970-muted)}
 .v962-loading{min-height:180px;border:1px dashed var(--v970-line);border-radius:var(--v970-radius);background:var(--v970-surface);font-size:12px}
 
 .v970-mobile-nav,.v970-more-sheet,.v970-sheet-backdrop{display:none}
@@ -177,12 +182,40 @@ th,td{padding:7px 9px;border-bottom:1px solid var(--v970-line);vertical-align:to
   .v951-toolbar{margin:6px 0;padding:7px;display:flex;overflow-x:auto;flex-wrap:nowrap}.v951-toolbar label{min-width:150px}.v951-toolbar button{align-self:end;min-width:78px}
   .v951-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.scroll{border-radius:6px;max-width:calc(100vw - 18px)}.scroll table{min-width:650px}
   .v960-mailbox-tabs{overflow-x:auto;flex-wrap:nowrap;white-space:nowrap}.v963-refresh{width:100%;justify-content:space-between}
-  #panel-inbox:has(.v963-detail)>.v963-inbox-head,#panel-inbox:has(.v963-detail)>.v960-mailbox-tabs,#panel-inbox:has(.v963-detail)>.v951-toolbar,#panel-inbox:has(.v963-detail)>.scroll,#panel-inbox:has(.v963-detail)>.v960-pagination,#panel-inbox:has(.v963-detail)>.v963-proxy-card{display:none}
-  #panel-inbox .v963-detail{position:fixed;inset:52px 0 64px 0;z-index:58;margin:0;border:0!important;border-radius:0!important;padding:11px;overflow:auto;background:var(--v970-bg)!important}
+
+  /* Reader mode keeps the detail's .scroll ancestor alive. Only list chrome and non-detail rows disappear. */
+  #panel-inbox:has(.v963-detail)>.v963-inbox-head,#panel-inbox:has(.v963-detail)>.v960-mailbox-tabs,#panel-inbox:has(.v963-detail)>.v951-toolbar,#panel-inbox:has(.v963-detail)>.v960-pagination,#panel-inbox:has(.v963-detail)>.v963-proxy-card{display:none}
+  #panel-inbox:has(.v963-detail)>.scroll{display:block;overflow:visible;max-width:none;border:0;background:transparent}
+  #panel-inbox:has(.v963-detail)>.scroll>.v960-mail-table{display:block;width:100%;min-width:0;table-layout:auto}
+  #panel-inbox:has(.v963-detail)>.scroll>.v960-mail-table>thead{display:none}
+  #panel-inbox:has(.v963-detail)>.scroll>.v960-mail-table>tbody,#panel-inbox:has(.v963-detail) .v960-inline-detail,#panel-inbox:has(.v963-detail) .v960-inline-detail>td{display:block;width:100%;min-width:0}
+  #panel-inbox:has(.v963-detail)>.scroll>.v960-mail-table>tbody>tr:not(.v960-inline-detail){display:none}
+  #panel-inbox:has(.v963-detail) .v960-inline-detail>td{padding:0!important;border:0}
+  #panel-inbox .v963-detail{position:fixed;inset:52px 0 64px 0;z-index:58;margin:0;border:0!important;border-radius:0!important;padding:11px;overflow:auto;max-width:100vw;background:var(--v970-bg)!important}
+  #panel-inbox .v963-detail>.v963-inbox-head{display:flex}
   #panel-inbox .v963-detail-actions{position:sticky;top:-11px;z-index:4;background:var(--v970-bg);padding:7px 0;border-bottom:1px solid var(--v970-line)}
+
+  /* Knowledge uses list -> full-screen detail -> full-screen create/edit sheet, preserving existing routes/forms. */
   #panel-knowledge textarea{min-height:40vh}
+  #panel-knowledge .v970-knowledge-detail,#panel-knowledge .v970-knowledge-editor[open]{position:fixed;inset:52px 0 64px;z-index:58;overflow:auto;margin:0;border:0!important;border-radius:0!important;background:var(--v970-bg)!important;padding:11px}
+  #panel-knowledge .v970-knowledge-editor[open]>summary{position:sticky;top:-11px;z-index:4;margin:-11px -11px 8px;padding:11px!important;border-bottom:1px solid var(--v970-line);background:var(--v970-bg)}
+  #panel-knowledge .v970-knowledge-editor[open]>.v962-collapsible-body{padding:0}
+  #panel-knowledge .grid>.card.wide:last-child .scroll{overflow:visible;max-width:none;border:0;background:transparent}
+  #panel-knowledge .grid>.card.wide:last-child table,#panel-knowledge .grid>.card.wide:last-child tbody,#panel-knowledge .grid>.card.wide:last-child tr,#panel-knowledge .grid>.card.wide:last-child td{display:block;width:100%;min-width:0}
+  #panel-knowledge .grid>.card.wide:last-child table{min-width:0}#panel-knowledge .grid>.card.wide:last-child thead{display:none}
+  #panel-knowledge .grid>.card.wide:last-child tr{margin:6px 0;padding:7px;border:1px solid var(--v970-line);border-radius:7px;background:var(--v970-surface)}
+  #panel-knowledge .grid>.card.wide:last-child td{padding:2px 0;border:0}#panel-knowledge .grid>.card.wide:last-child td.actions{display:flex;gap:5px;margin-top:5px}
+  .v970-knowledge-meta{grid-template-columns:1fr}
+
+  /* Existing task registry, compact seven-column mobile representation plus selected-day agenda. */
   #panel-scheduler .card.wide:has(form[action="/dashboard/job/update"]){position:fixed;inset:52px 0 64px;z-index:58;overflow:auto;margin:0;border:0!important;border-radius:0!important;background:var(--v970-bg)!important;padding:11px}
-  .task-calendar-shell{overflow-x:auto}.task-calendar-head,.task-calendar-grid{min-width:620px}.task-calendar-day{min-height:76px}
+  .task-calendar-toolbar{align-items:flex-start;flex-wrap:wrap}.task-calendar-shell{overflow:hidden;max-width:100%}
+  .task-calendar-head,.task-calendar-grid{width:100%;min-width:0;grid-template-columns:repeat(7,minmax(0,1fr))}
+  .task-calendar-head>div{min-width:0;padding:4px 1px;font-size:8px}.task-calendar-day{min-width:0;min-height:54px;padding:3px;overflow:hidden;cursor:pointer}
+  .task-calendar-date{margin-bottom:2px;text-align:center;font-size:9px}.task-calendar-day.v970-selected{background:var(--v970-accent-soft);box-shadow:inset 0 0 0 1px var(--v970-accent)}
+  .task-calendar-grid .task-calendar-event{height:5px;min-height:0;margin:2px 0;padding:0;border:0;border-radius:3px;font-size:0;line-height:0;background:var(--v970-accent)}
+  .task-calendar-grid .task-calendar-event small{display:none}.v970-task-day-agenda .task-calendar-event{height:auto;min-height:34px;margin:4px 0;padding:6px 7px;font-size:11px;line-height:1.35;border:1px solid var(--v970-line);background:var(--v970-surface-2)}
+  .v970-task-day-agenda .task-calendar-event small{display:block;font-size:9px;line-height:1.3}
   .v963-proxy-form,#panel-knowledge .v951-formgrid{grid-template-columns:1fr}
 }
 @media(max-width:430px){.v970-context-title span{max-width:52vw}.v951-metric strong{font-size:16px}}
@@ -193,6 +226,8 @@ ENTERPRISE_SCRIPT = r'''
 <script id="v970-enterprise-shell">
 (() => {
   const labels = %VIEW_LABELS%;
+  let moreReturnFocus = null;
+
   function currentView() {
     const active = document.querySelector('.tab-panel.active');
     if (active && active.dataset.panel) return active.dataset.panel;
@@ -214,18 +249,62 @@ ENTERPRISE_SCRIPT = r'''
     });
     document.body.dataset.v970View = view;
   }
-  function closeMore() {
-    document.querySelector('.v970-more-sheet')?.classList.remove('v970-open');
-    document.querySelector('.v970-sheet-backdrop')?.classList.remove('v970-open');
-    document.querySelector('[data-v970-more]')?.setAttribute('aria-expanded','false');
+
+  function setBackgroundInert(open) {
+    const nodes = [
+      document.querySelector('.v970-workspace'),
+      ...document.querySelectorAll('.v970-mobile-nav a,.v970-mobile-nav button:not([data-v970-more])')
+    ].filter(Boolean);
+    nodes.forEach(node => {
+      if (open) {
+        node.dataset.v970InertWas = node.hasAttribute('inert') ? '1' : '0';
+        node.setAttribute('inert','');
+      } else if (node.dataset.v970InertWas !== undefined) {
+        if (node.dataset.v970InertWas === '0') node.removeAttribute('inert');
+        delete node.dataset.v970InertWas;
+      }
+    });
   }
-  function toggleMore() {
+  function moreIsOpen() {
+    return document.querySelector('.v970-more-sheet')?.classList.contains('v970-open') || false;
+  }
+  function closeMore(restoreFocus=true) {
+    if (!moreIsOpen()) return;
+    const sheet=document.querySelector('.v970-more-sheet');
+    const back=document.querySelector('.v970-sheet-backdrop');
+    const button=document.querySelector('[data-v970-more]');
+    sheet?.classList.remove('v970-open');
+    back?.classList.remove('v970-open');
+    sheet?.setAttribute('aria-hidden','true');
+    button?.setAttribute('aria-expanded','false');
+    setBackgroundInert(false);
+    if (restoreFocus) {
+      const target = moreReturnFocus && document.contains(moreReturnFocus) ? moreReturnFocus : button;
+      target?.focus();
+    }
+    moreReturnFocus = null;
+  }
+  function openMore() {
     const sheet=document.querySelector('.v970-more-sheet'), back=document.querySelector('.v970-sheet-backdrop'), button=document.querySelector('[data-v970-more]');
-    const open=!sheet?.classList.contains('v970-open');
-    sheet?.classList.toggle('v970-open',open); back?.classList.toggle('v970-open',open);
-    button?.setAttribute('aria-expanded',open?'true':'false');
-    if(open) sheet?.querySelector('a,button')?.focus();
+    if (!sheet || !button) return;
+    moreReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : button;
+    sheet.classList.add('v970-open'); back?.classList.add('v970-open');
+    sheet.setAttribute('aria-hidden','false'); button.setAttribute('aria-expanded','true');
+    setBackgroundInert(true);
+    (sheet.querySelector('[data-v970-more-close]') || sheet.querySelector('a,button'))?.focus();
   }
+  function toggleMore() { moreIsOpen() ? closeMore(true) : openMore(); }
+  function trapMoreFocus(ev) {
+    if (ev.key !== 'Tab' || !moreIsOpen()) return;
+    const sheet=document.querySelector('.v970-more-sheet');
+    const focusables=[...(sheet?.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') || [])]
+      .filter(el => !el.hasAttribute('hidden') && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden');
+    if (!focusables.length) { ev.preventDefault(); sheet?.focus(); return; }
+    const first=focusables[0], last=focusables[focusables.length-1];
+    if (ev.shiftKey && document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+  }
+
   function applyTheme(value) {
     const root=document.documentElement;
     if(value==='dark'||value==='light') root.dataset.v970Theme=value; else delete root.dataset.v970Theme;
@@ -238,19 +317,104 @@ ENTERPRISE_SCRIPT = r'''
     if(next==='system') localStorage.removeItem('postmaster:v970:theme'); else localStorage.setItem('postmaster:v970:theme',next);
     applyTheme(next);
   }
+
+  function taskDays() { return [...document.querySelectorAll('#panel-scheduler .task-calendar-grid .task-calendar-day')]; }
+  function selectTaskDay(day) {
+    const days=taskDays(); if (!day || !days.includes(day)) return;
+    days.forEach(candidate => {
+      const selected=candidate === day;
+      candidate.classList.toggle('v970-selected', selected);
+      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+      candidate.tabIndex = selected ? 0 : -1;
+    });
+    const shell=day.closest('.task-calendar-shell'); if (!shell) return;
+    let agenda=shell.nextElementSibling;
+    if (!agenda?.classList.contains('v970-task-day-agenda')) {
+      agenda=document.createElement('section'); agenda.className='v970-task-day-agenda'; shell.insertAdjacentElement('afterend',agenda);
+    }
+    const date=day.querySelector('.task-calendar-date')?.textContent?.trim() || 'Selected day';
+    const month=document.querySelector('#panel-scheduler .task-calendar-month')?.textContent?.trim() || '';
+    agenda.replaceChildren();
+    const head=document.createElement('div'); head.className='v970-task-day-agenda-head';
+    const strong=document.createElement('strong'); strong.textContent=date;
+    const span=document.createElement('span'); span.textContent=month;
+    head.append(strong,span); agenda.append(head);
+    const events=[...day.querySelectorAll(':scope > .task-calendar-event')];
+    if (!events.length) {
+      const empty=document.createElement('p'); empty.className='small muted'; empty.textContent='No tasks for this day.'; agenda.append(empty);
+    } else {
+      events.forEach(event => { const clone=event.cloneNode(true); clone.classList.add('v970-agenda-event'); agenda.append(clone); });
+    }
+  }
+  function initTaskCalendar() {
+    const days=taskDays(); if (!days.length) return;
+    days.forEach(day => {
+      day.setAttribute('role','button'); day.setAttribute('aria-label','Show task agenda for '+(day.querySelector('.task-calendar-date')?.textContent?.trim() || 'day'));
+      if (!day.hasAttribute('aria-selected')) day.setAttribute('aria-selected','false');
+      if (!day.hasAttribute('tabindex')) day.tabIndex=-1;
+    });
+    const existing=days.find(day => day.classList.contains('v970-selected'));
+    if (existing) return;
+    const initial=days.find(day => day.classList.contains('today') && !day.classList.contains('outside')) || days.find(day => !day.classList.contains('outside') && day.querySelector('.task-calendar-event')) || days.find(day => !day.classList.contains('outside')) || days[0];
+    selectTaskDay(initial);
+  }
+
+  function cleanKnowledgeUrl() {
+    const url=new URL(location.href); url.searchParams.delete('view_knowledge'); url.searchParams.delete('edit_knowledge'); url.hash='knowledge'; return url.toString();
+  }
+  function ensureKnowledgeBack(container) {
+    if (!container || container.querySelector(':scope > .v970-overlay-back')) return;
+    const back=document.createElement('a'); back.className='v970-overlay-back'; back.href=cleanKnowledgeUrl(); back.dataset.v960Fragment='knowledge'; back.textContent='← Back to list'; container.insertBefore(back,container.firstChild);
+  }
+  function initKnowledgeDrilldown() {
+    const panel=document.querySelector('#panel-knowledge'); if (!panel) return;
+    const detail=panel.querySelector('.grid > .card.wide:has(.markdown-viewer)');
+    if (detail) {
+      detail.classList.add('v970-knowledge-detail'); ensureKnowledgeBack(detail);
+      if (!detail.querySelector('.v970-knowledge-meta')) {
+        const id=new URL(location.href).searchParams.get('view_knowledge');
+        const rows=[...panel.querySelectorAll('.grid > .card.wide:last-child tbody tr')];
+        const row=rows.find(candidate => candidate.querySelector('.small.muted.mono')?.textContent?.trim() === id);
+        const cells=row ? [...row.children] : [];
+        if (cells.length >= 4) {
+          const meta=document.createElement('div'); meta.className='v970-knowledge-meta';
+          [['Kind',cells[1]],['Scopes',cells[2]],['Priority',cells[3]]].forEach(([label,cell]) => {
+            const box=document.createElement('div'), name=document.createElement('span'), value=document.createElement('strong');
+            name.textContent=label; value.textContent=cell.textContent?.trim() || '—'; box.append(name,value); meta.append(box);
+          });
+          detail.querySelector('.markdown-viewer')?.insertAdjacentElement('beforebegin',meta);
+        }
+      }
+    }
+    const editor=panel.querySelector('.v962-collapsible[data-v962-state-key="knowledge-editor"]');
+    if (editor) {
+      editor.classList.add('v970-knowledge-editor');
+      if (editor.open) ensureKnowledgeBack(editor.querySelector('.v962-collapsible-body'));
+    }
+  }
+
+  function syncPresentation() { syncContext(); initTaskCalendar(); initKnowledgeDrilldown(); }
+
   document.addEventListener('click',ev=>{
     if(ev.target.closest('[data-v970-more]')){toggleMore();return}
-    if(ev.target.closest('[data-v970-more-close],.v970-sheet-backdrop')){closeMore();return}
+    if(ev.target.closest('[data-v970-more-close],.v970-sheet-backdrop')){closeMore(true);return}
     if(ev.target.closest('[data-v970-theme-toggle]')){cycleTheme();return}
-    if(ev.target.closest('.v970-more-sheet a'))closeMore();
-    queueMicrotask(syncContext);
+    if(ev.target.closest('.v970-more-sheet a'))closeMore(false);
+    const day=ev.target.closest('.task-calendar-day');
+    if(day && !ev.target.closest('a,button,input,form,select,textarea')){selectTaskDay(day);return}
+    queueMicrotask(syncPresentation);
   });
-  window.addEventListener('popstate',()=>queueMicrotask(syncContext));
-  window.addEventListener('hashchange',()=>queueMicrotask(syncContext));
-  document.addEventListener('keydown',ev=>{if(ev.key==='Escape')closeMore()});
-  new MutationObserver(syncContext).observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});
+  window.addEventListener('popstate',()=>queueMicrotask(syncPresentation));
+  window.addEventListener('hashchange',()=>queueMicrotask(syncPresentation));
+  document.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape' && moreIsOpen()){ev.preventDefault();closeMore(true);return}
+    trapMoreFocus(ev);
+    const day=ev.target.closest?.('.task-calendar-day');
+    if(day && (ev.key==='Enter'||ev.key===' ')){ev.preventDefault();selectTaskDay(day);}
+  });
+  new MutationObserver(()=>queueMicrotask(syncPresentation)).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','open']});
   applyTheme(localStorage.getItem('postmaster:v970:theme')||'system');
-  syncContext();
+  syncPresentation();
 })();
 </script>
 '''
@@ -284,8 +448,8 @@ def enterprise_nav() -> str:
     parts.append('<nav class="v970-mobile-nav" aria-label="Mobile primary navigation">')
     parts.extend(_link(view,label,code,mobile=True) for view,label,code in primary)
     parts.append('<button type="button" data-v970-more aria-expanded="false" aria-controls="v970-more-sheet"><span class="v970-nav-code" aria-hidden="true">••</span><span>More</span></button></nav>')
-    parts.append('<div class="v970-sheet-backdrop" data-v970-more-close></div>')
-    parts.append('<section class="v970-more-sheet" id="v970-more-sheet" aria-label="More sections"><div class="v970-more-head"><span>More sections</span><button type="button" data-v970-more-close aria-label="Close more sections">×</button></div><div class="v970-more-grid">')
+    parts.append('<div class="v970-sheet-backdrop" data-v970-more-close aria-hidden="true"></div>')
+    parts.append('<section class="v970-more-sheet" id="v970-more-sheet" role="dialog" aria-modal="true" aria-labelledby="v970-more-title" aria-hidden="true" tabindex="-1"><div class="v970-more-head"><span id="v970-more-title">More sections</span><button type="button" data-v970-more-close aria-label="Close more sections">×</button></div><div class="v970-more-grid">')
     for _heading, links in NAV_GROUPS:
         for view,label,code in links:
             if view not in {"overview","inbox","compose","scheduler"}:
@@ -305,10 +469,25 @@ def _context_bar() -> str:
     )
 
 
+def _install_final_style(v962: Any) -> None:
+    original_styles = v962._styles
+    if getattr(original_styles, "_postmaster_v970_styles", False):
+        return
+
+    def enterprise_styles() -> str:
+        styles = str(original_styles())
+        # If an earlier experimental installer placed this exact overlay in BASE_STYLE,
+        # remove that copy before appending it after every legacy stylesheet.
+        styles = styles.replace(ENTERPRISE_STYLE, "")
+        return styles.rstrip() + "\n" + ENTERPRISE_STYLE
+
+    enterprise_styles._postmaster_v970_styles = True  # type: ignore[attr-defined]
+    v962._styles = enterprise_styles
+
+
 def install_webgui_v970(v962: Any) -> None:
     # Visual overlay only: mutate shell presentation primitives, never application routes.
-    if "webgui-v970-enterprise-operational-refresh" not in str(v962.BASE_STYLE):
-        v962.BASE_STYLE += ENTERPRISE_STYLE
+    _install_final_style(v962)
 
     if 'id="v970-enterprise-shell"' not in str(v962.SCRIPT):
         mapping = {key: [title, subtitle] for key, (title, subtitle) in VIEW_LABELS.items()}
