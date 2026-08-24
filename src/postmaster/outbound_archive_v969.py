@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 from contextvars import ContextVar
 from email.message import EmailMessage
 from typing import Any
@@ -75,21 +74,19 @@ def _recipient_groups(
     return _dedupe(to_values), cc_values, bcc_values
 
 
-def _normal_group_deliveries(
-    operation_id: str,
+def _normal_group_recipient_mappings(
     canonical_message_id: str,
     *,
     to_values: list[str],
     cc_values: list[str],
     bcc_values: list[str],
 ) -> list[dict[str, str]]:
-    """Represent one normal group SMTP submission as logical per-recipient deliveries.
+    """Return logical RCPT mappings for one normal, non-individualized SMTP message.
 
-    A normal send still uses one MIME/one DATA transaction and one canonical Sent APPEND.
-    These records model the RCPT envelope recipients for reply correlation and private
-    sender-side metadata without pretending the transport was individualized.
+    These rows intentionally have no delivery_id: they describe which envelope recipient
+    and sender-private role shared one Message-ID. They are not tracking/delivery rows and
+    must never be exposed as if a tracking API could resolve them.
     """
-
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for role, values in (("to", to_values), ("cc", cc_values), ("bcc", bcc_values)):
@@ -98,10 +95,8 @@ def _normal_group_deliveries(
             if key in seen:
                 continue
             seen.add(key)
-            seed = f"{operation_id}\x00{role}\x00{key}"
             rows.append(
                 {
-                    "delivery_id": "delivery_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24],
                     "message_id": canonical_message_id,
                     "recipient": recipient,
                     "recipient_role": role,
@@ -139,26 +134,29 @@ def _record_logical_operation(
         if "canonical_sent_copy_saved" in result
         else result.get("sent_copy_saved")
     )
+
+    # The underlying result contract remains authoritative. If it already contains real
+    # individualized/tracking deliveries, persist them unchanged. A normal one-message
+    # send instead gets private logical recipient mappings and does not gain a public
+    # result["deliveries"] field or synthetic delivery IDs here.
     deliveries = [
         dict(row)
         for row in (result.get("deliveries") or [])
-        if isinstance(row, dict)
+        if isinstance(row, dict) and str(row.get("delivery_id") or "").strip()
     ]
+    recipient_mappings: list[dict[str, str]] = []
     if (
         not deliveries
-        and action == "send_email"
+        and action in {"send_email", "reply_email", "follow_up_email"}
         and bool(result.get("sent"))
         and canonical_message_id
     ):
-        deliveries = _normal_group_deliveries(
-            operation_id,
+        recipient_mappings = _normal_group_recipient_mappings(
             canonical_message_id,
             to_values=to_values,
             cc_values=cc_values,
             bcc_values=bcc_values,
         )
-        result["deliveries"] = [dict(row) for row in deliveries]
-        result["logical_group_delivery_count"] = len(deliveries)
 
     metadata_saved = False
     try:
@@ -171,6 +169,7 @@ def _record_logical_operation(
             cc=cc_values,
             bcc=bcc_values,
             deliveries=deliveries,
+            recipient_mappings=recipient_mappings,
         )
         metadata_saved = True
     except Exception:
@@ -180,6 +179,16 @@ def _record_logical_operation(
 
     result["sender_private_recipient_metadata_saved"] = metadata_saved
     return result
+
+
+def _public_reply_correlation(correlation: dict[str, Any]) -> dict[str, Any]:
+    """Remove sender-private Bcc role details from an inbound/public correlation result."""
+    public = dict(correlation)
+    if str(public.get("recipient_role") or "").strip().casefold() == "bcc":
+        # Keep the logical-operation match and the sender address correlation useful to
+        # internal processing, but do not disclose that this address was a historical Bcc.
+        public["recipient_role"] = ""
+    return public
 
 
 def _install_outbound_archive_boundary() -> None:
@@ -293,7 +302,9 @@ def _install_outbound_archive_boundary() -> None:
                 result["logical_outbound_operation_id"] = correlation[
                     "logical_outbound_operation_id"
                 ]
-                result["logical_outbound_correlation"] = correlation
+                result["logical_outbound_correlation"] = _public_reply_correlation(
+                    correlation
+                )
                 result["logical_outbound_root_created"] = False
             return result
 
@@ -304,6 +315,7 @@ def _install_outbound_archive_boundary() -> None:
 __all__ = [
     "_ARCHIVE_CONTEXT",
     "_install_outbound_archive_boundary",
-    "_normal_group_deliveries",
+    "_normal_group_recipient_mappings",
+    "_public_reply_correlation",
     "_record_logical_operation",
 ]
