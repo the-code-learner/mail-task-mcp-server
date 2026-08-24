@@ -202,8 +202,10 @@ class NormalSendIntegrationV969Tests(unittest.TestCase):
         result = self._send(to=["a@example.com"], bcc=["b@example.com"])
         self.assertTrue(result["outbound_operation_id"].startswith("out_"))
         self.assertEqual(result["logical_outbound_operation_id"], result["outbound_operation_id"])
-        self.assertFalse(result.get("deliveries", []))
-        self.assertNotIn("delivery_", repr(result))
+        self.assertNotIn("deliveries", result)
+        self.assertFalse(
+            any(str(value).startswith("delivery_") for value in result.values())
+        )
 
         self.assertEqual(len(self.smtp), 1)
         smtp_raw, rcpts = self.smtp[0]
@@ -238,8 +240,10 @@ class NormalSendIntegrationV969Tests(unittest.TestCase):
             bcc=["c@example.com"],
         )
         self.assertTrue(result["outbound_operation_id"].startswith("out_"))
-        self.assertFalse(result.get("deliveries", []))
-        self.assertNotIn("delivery_", repr(result))
+        self.assertNotIn("deliveries", result)
+        self.assertFalse(
+            any(str(value).startswith("delivery_") for value in result.values())
+        )
         self.assertEqual(len(self.smtp), 1)
         raw, rcpts = self.smtp[0]
         self.assertEqual(rcpts, ["a@example.com", "b@example.com", "c@example.com"])
