@@ -73,7 +73,8 @@ class DeliveryContractV969Tests(unittest.TestCase):
                 self.analytics.list_open_events(delivery_id=delivery_id), []
             )
             summary = self.links.summary(delivery_id=delivery_id)
-            self.assertEqual(summary["delivery_id"], delivery_id)
+            self.assertEqual(summary["link_occurrences"], 0)
+            self.assertEqual(summary["total_clicks"], 0)
             self.assertEqual(
                 self.links.unified_events(delivery_id=delivery_id), []
             )
