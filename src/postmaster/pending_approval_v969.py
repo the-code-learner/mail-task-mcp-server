@@ -16,6 +16,19 @@ _PENDING_DB_ENV = "POSTMASTER_MCP_PENDING_APPROVAL_DB_PATH"
 _DEFAULT_PENDING_DB = Path("/data/mcp_pending_approvals_v969.db")
 
 
+class AmbiguousPendingPreviewError(RuntimeError):
+    """Multiple valid server-side previews match an implicit execute request."""
+
+    code = "ambiguous_pending_preview"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "ambiguous_pending_preview: multiple matching pending previews exist; "
+            "use the specific non-secret preview_id from the intended preview or "
+            "request a fresh preview"
+        )
+
+
 def _canonical(value: dict[str, Any]) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -129,8 +142,8 @@ class PendingApprovalStore:
         """Atomically consume one exact pending approval.
 
         A supplied preview_id only narrows correlation; it is never sufficient without
-        the exact binding. Omitting it remains valid, which deliberately prevents the ID
-        from becoming bearer authority.
+        the exact binding. Omitting it remains valid only when exactly one valid
+        server-side pending row matches the current binding.
         """
         normalized_scope = str(scope or "").strip().lower()
         digest = _digest(binding)
@@ -149,21 +162,21 @@ class PendingApprovalStore:
                         SELECT preview_id FROM mcp_pending_approvals_v969
                         WHERE preview_id=? AND scope=? AND binding_digest=?
                           AND consumed_at IS NULL AND expires_at>=?
-                        LIMIT 1
                         """,
                         (candidate_id, normalized_scope, digest, now),
                     ).fetchone()
                 else:
-                    row = conn.execute(
+                    rows = conn.execute(
                         """
                         SELECT preview_id FROM mcp_pending_approvals_v969
                         WHERE scope=? AND binding_digest=?
                           AND consumed_at IS NULL AND expires_at>=?
-                        ORDER BY created_at DESC
-                        LIMIT 1
                         """,
                         (normalized_scope, digest, now),
-                    ).fetchone()
+                    ).fetchall()
+                    if len(rows) > 1:
+                        raise AmbiguousPendingPreviewError()
+                    row = rows[0] if rows else None
                 if not row:
                     conn.rollback()
                     return False
@@ -238,6 +251,7 @@ class PendingConfirmationAdapter:
 
 
 __all__ = [
+    "AmbiguousPendingPreviewError",
     "PENDING_APPROVAL_TTL_SECONDS",
     "PendingApprovalStore",
     "PendingConfirmationAdapter",
