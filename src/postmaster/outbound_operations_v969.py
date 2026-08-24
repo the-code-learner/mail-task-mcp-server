@@ -172,7 +172,7 @@ class OutboundOperationStore:
                         op,
                         str(row.get("message_id") or ""),
                         str(row.get("recipient") or ""),
-                        str(row.get("role") or ""),
+                        str(row.get("role") or row.get("recipient_role") or ""),
                     ),
                 )
         return self.get_operation(op) or {}
@@ -209,10 +209,11 @@ class OutboundOperationStore:
         mid = str(message_id or "").strip()
         if not mid:
             return None
+        operation_id = ""
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT o.* FROM outbound_operations_v969 o
+                SELECT o.operation_id FROM outbound_operations_v969 o
                 WHERE o.account_id=? AND o.canonical_message_id=?
                 LIMIT 1
                 """,
@@ -221,7 +222,7 @@ class OutboundOperationStore:
             if not row:
                 row = conn.execute(
                     """
-                    SELECT o.* FROM outbound_operations_v969 o
+                    SELECT o.operation_id FROM outbound_operations_v969 o
                     JOIN outbound_operation_deliveries_v969 d
                       ON d.operation_id=o.operation_id
                     WHERE o.account_id=? AND d.message_id=?
@@ -229,7 +230,9 @@ class OutboundOperationStore:
                     """,
                     (str(account_id or ""), mid),
                 ).fetchone()
-        return self._public_row(row) if row else None
+            if row:
+                operation_id = str(row["operation_id"] or "")
+        return self.get_operation(operation_id) if operation_id else None
 
 
 @lru_cache(maxsize=1)
