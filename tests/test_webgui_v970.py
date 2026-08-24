@@ -5,10 +5,13 @@ import base64
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import inspect
+import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
+import signal
 import socket
 import struct
 import subprocess
@@ -75,6 +78,228 @@ def _browser_path() -> str | None:
         if path:
             return path
     return None
+
+
+_BROWSER_CAPTURE_LIMIT = 16 * 1024
+_BROWSER_DIAGNOSTIC_TAIL = 4096
+_BROWSER_POLL_INTERVAL = 0.05
+_BROWSER_STARTUP_TIMEOUT = 15.0
+_BROWSER_TARGET_TIMEOUT = 5.0
+_BROWSER_TERM_GRACE = 1.0
+_BROWSER_KILL_GRACE = 1.0
+_DIAGNOSTIC_SECRET_RE = re.compile(
+    r"(?i)\b(password|passwd|secret|token|authorization|cookie)=([^\s,;]+)"
+)
+
+
+class _BrowserBootstrapError(RuntimeError):
+    def __init__(self, category: str, detail: str = ""):
+        super().__init__(detail)
+        self.category = category
+        self.detail = detail
+
+
+class _BoundedPipeCapture:
+    def __init__(self, stream, limit: int = _BROWSER_CAPTURE_LIMIT):
+        self._stream = stream
+        self._limit = max(1, int(limit))
+        self._buffer = bytearray()
+        self._lock = threading.Lock()
+        self._thread = threading.Thread(target=self._drain, daemon=True)
+        self._thread.start()
+
+    def _drain(self) -> None:
+        try:
+            while True:
+                chunk = self._stream.read(4096)
+                if not chunk:
+                    break
+                if isinstance(chunk, str):
+                    chunk = chunk.encode("utf-8", "replace")
+                with self._lock:
+                    self._buffer.extend(chunk)
+                    excess = len(self._buffer) - self._limit
+                    if excess > 0:
+                        del self._buffer[:excess]
+        except (OSError, ValueError):
+            pass
+
+    def tail(self) -> str:
+        with self._lock:
+            raw = bytes(self._buffer)
+        return raw.decode("utf-8", "replace")
+
+    def close(self) -> None:
+        self._thread.join(timeout=0.5)
+
+
+def _redact_diagnostic_text(value: str) -> str:
+    value = _DIAGNOSTIC_SECRET_RE.sub(
+        lambda match: f"{match.group(1)}=<redacted>", value or ""
+    )
+    return value[-_BROWSER_DIAGNOSTIC_TAIL:]
+
+
+def _sanitize_browser_args(args: list[str]) -> list[str]:
+    sanitized = []
+    for arg in args:
+        if arg.startswith("--user-data-dir="):
+            sanitized.append("--user-data-dir=<temporary-profile>")
+        else:
+            sanitized.append(_redact_diagnostic_text(arg))
+    return sanitized
+
+
+def _parse_devtools_active_port(path: Path) -> int | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError):
+        return None
+    if not lines:
+        return None
+    token = lines[0].strip()
+    if not token.isascii() or not token.isdigit():
+        return None
+    try:
+        port = int(token)
+    except ValueError:
+        return None
+    return port if 1 <= port <= 65535 else None
+
+
+def _wait_for_devtools_active_port(
+    proc,
+    active_port: Path,
+    deadline: float,
+    *,
+    sleep_fn=time.sleep,
+) -> int:
+    while True:
+        exit_code = proc.poll()
+        if exit_code is not None:
+            raise _BrowserBootstrapError(
+                "Chrome process exited", f"exit_code={exit_code}"
+            )
+        port = _parse_devtools_active_port(active_port)
+        if port is not None:
+            return port
+        now = time.monotonic()
+        if now >= deadline:
+            state = "present but unreadable" if active_port.exists() else "missing"
+            raise _BrowserBootstrapError(
+                "DevToolsActivePort missing/unreadable", state
+            )
+        sleep_fn(min(_BROWSER_POLL_INTERVAL, max(0.0, deadline - now)))
+
+
+def _wait_for_page_target(proc, port: int, deadline: float) -> dict:
+    endpoint_seen = False
+    last_error = ""
+    last_targets: object = []
+    while True:
+        exit_code = proc.poll()
+        if exit_code is not None:
+            raise _BrowserBootstrapError(
+                "Chrome process exited", f"exit_code={exit_code}"
+            )
+        now = time.monotonic()
+        if now >= deadline:
+            if endpoint_seen:
+                raise _BrowserBootstrapError(
+                    "page target unavailable", f"targets={last_targets!r}"
+                )
+            raise _BrowserBootstrapError(
+                "CDP endpoint unavailable", last_error or "endpoint did not respond"
+            )
+        timeout = min(1.0, max(0.05, deadline - now))
+        try:
+            with urllib_request.urlopen(
+                f"http://127.0.0.1:{port}/json/list", timeout=timeout
+            ) as response:
+                payload = json.load(response)
+            endpoint_seen = True
+            last_targets = payload
+            if isinstance(payload, list):
+                target = next(
+                    (item for item in payload if isinstance(item, dict) and item.get("type") == "page"),
+                    None,
+                )
+                if target:
+                    return target
+        except (OSError, ValueError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
+        time.sleep(min(_BROWSER_POLL_INTERVAL, max(0.0, deadline - time.monotonic())))
+
+
+def _terminate_browser_process(
+    proc,
+    *,
+    signal_group=None,
+    grace_timeout: float = _BROWSER_TERM_GRACE,
+    kill_timeout: float = _BROWSER_KILL_GRACE,
+) -> None:
+    if proc is None:
+        return
+    if proc.poll() is not None:
+        try:
+            proc.wait(timeout=0)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+        return
+
+    def send(sig: int) -> None:
+        if signal_group is not None:
+            signal_group(proc.pid, sig)
+            return
+        try:
+            os.killpg(proc.pid, sig)
+        except (AttributeError, ProcessLookupError, PermissionError, OSError):
+            if sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
+
+    send(signal.SIGTERM)
+    try:
+        proc.wait(timeout=grace_timeout)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    send(signal.SIGKILL)
+    try:
+        proc.wait(timeout=kill_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=kill_timeout)
+
+
+def _browser_failure_diagnostics(
+    category: str,
+    detail: str,
+    *,
+    executable: str,
+    args: list[str],
+    exit_code,
+    elapsed: float,
+    profile_exists: bool,
+    active_port_exists: bool,
+    stdout_tail: str,
+    stderr_tail: str,
+) -> str:
+    return "\n".join(
+        (
+            f"Browser bootstrap failure: {category}",
+            f"detail={_redact_diagnostic_text(detail)}",
+            f"executable={executable}",
+            f"launch_args={_sanitize_browser_args(args)!r}",
+            f"exit_code={exit_code!r}",
+            f"elapsed={elapsed:.3f}s",
+            f"profile_exists={profile_exists}",
+            f"active_port_exists={active_port_exists}",
+            f"stdout_tail={_redact_diagnostic_text(stdout_tail)!r}",
+            f"stderr_tail={_redact_diagnostic_text(stderr_tail)!r}",
+        )
+    )
 
 
 def _recv_exact(sock: socket.socket, size: int) -> bytes:
@@ -337,60 +562,97 @@ class _BrowserSession:
         browser = _browser_path()
         if not browser:
             raise AssertionError("Canonical browser acceptance requires Chrome/Chromium")
-        self._tmp = tempfile.TemporaryDirectory(prefix="postmaster-v970-browser-", ignore_cleanup_errors=True)
-        profile = Path(self._tmp.name) / "chrome-profile"
-        profile.mkdir()
-        self._proc = subprocess.Popen(
-            [
-                browser,
-                "--headless=new",
-                "--no-sandbox",
-                "--disable-gpu",
-                "--disable-dev-shm-usage",
-                "--disable-background-networking",
-                "--disable-default-apps",
-                "--disable-extensions",
-                "--disable-sync",
-                "--metrics-recording-only",
-                "--no-first-run",
-                "--remote-debugging-port=0",
-                "--remote-allow-origins=*",
-                f"--user-data-dir={profile}",
-                "about:blank",
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        self._tmp = tempfile.TemporaryDirectory(
+            prefix="postmaster-v970-browser-", ignore_cleanup_errors=True
         )
+        self._profile = Path(self._tmp.name) / "chrome-profile"
+        self._profile.mkdir()
+        self._active_port = self._profile / "DevToolsActivePort"
+        self._args = [
+            browser,
+            "--headless=new",
+            "--no-sandbox",
+            "--disable-gpu",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-default-apps",
+            "--disable-extensions",
+            "--disable-sync",
+            "--metrics-recording-only",
+            "--no-first-run",
+            "--remote-debugging-port=0",
+            "--remote-allow-origins=*",
+            f"--user-data-dir={self._profile}",
+            "about:blank",
+        ]
+        self._started = time.monotonic()
         self._ws = None
         self._message_id = 0
+        self._stdout_capture = None
+        self._stderr_capture = None
+        self._proc = None
         try:
-            active_port = profile / "DevToolsActivePort"
-            deadline = time.monotonic() + 8
-            while not active_port.exists() and time.monotonic() < deadline:
-                if self._proc.poll() is not None:
-                    raise AssertionError(f"Chrome exited before exposing DevTools: {self._proc.returncode}")
-                time.sleep(0.05)
-            if not active_port.exists():
-                raise AssertionError("Chrome did not expose DevToolsActivePort")
-            port = int(active_port.read_text(encoding="utf-8").splitlines()[0])
-            target_deadline = time.monotonic() + 5
-            targets = []
-            while time.monotonic() < target_deadline:
-                try:
-                    with urllib_request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2) as response:
-                        targets = json.load(response)
-                    if targets:
-                        break
-                except OSError:
-                    time.sleep(0.05)
-            target = next((item for item in targets if item.get("type") == "page"), None)
-            if not target:
-                raise AssertionError(f"No Chrome page target available: {targets!r}")
-            self._ws = _ws_connect(target["webSocketDebuggerUrl"])
-            self._call("Page.enable")
-        except Exception:
-            self.close()
-            raise
+            self._proc = subprocess.Popen(
+                self._args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+            self._stdout_capture = _BoundedPipeCapture(self._proc.stdout)
+            self._stderr_capture = _BoundedPipeCapture(self._proc.stderr)
+            port = _wait_for_devtools_active_port(
+                self._proc,
+                self._active_port,
+                self._started + _BROWSER_STARTUP_TIMEOUT,
+            )
+            target = _wait_for_page_target(
+                self._proc,
+                port,
+                time.monotonic() + _BROWSER_TARGET_TIMEOUT,
+            )
+            websocket_url = target.get("webSocketDebuggerUrl")
+            if not isinstance(websocket_url, str) or not websocket_url:
+                raise _BrowserBootstrapError(
+                    "websocket unavailable", "page target has no websocket URL"
+                )
+            try:
+                self._ws = _ws_connect(websocket_url)
+                self._call("Page.enable")
+            except Exception as exc:
+                raise _BrowserBootstrapError(
+                    "websocket unavailable", f"{type(exc).__name__}: {exc}"
+                ) from exc
+        except _BrowserBootstrapError as exc:
+            self._raise_bootstrap_failure(exc)
+        except Exception as exc:
+            self._raise_bootstrap_failure(
+                _BrowserBootstrapError(
+                    "Chrome process exited", f"launcher error {type(exc).__name__}: {exc}"
+                )
+            )
+
+    def _raise_bootstrap_failure(self, exc: _BrowserBootstrapError) -> None:
+        proc = self._proc
+        exit_code = proc.poll() if proc is not None else None
+        elapsed = time.monotonic() - self._started
+        profile_exists = self._profile.exists()
+        active_port_exists = self._active_port.exists()
+        self.close()
+        stdout_tail = self._stdout_capture.tail() if self._stdout_capture is not None else ""
+        stderr_tail = self._stderr_capture.tail() if self._stderr_capture is not None else ""
+        diagnostic = _browser_failure_diagnostics(
+            exc.category,
+            exc.detail,
+            executable=self._args[0],
+            args=self._args[1:],
+            exit_code=exit_code,
+            elapsed=elapsed,
+            profile_exists=profile_exists,
+            active_port_exists=active_port_exists,
+            stdout_tail=stdout_tail,
+            stderr_tail=stderr_tail,
+        )
+        raise AssertionError(diagnostic) from exc
 
     def _call(self, method: str, params: dict | None = None) -> dict:
         if self._ws is None:
@@ -399,37 +661,46 @@ class _BrowserSession:
         return _cdp_call(self._ws, self._message_id, method, params)
 
     def fixture(self, view: str, width: int, height: int) -> dict[str, object]:
-        document = _browser_document(view)
-        with _serve_browser_document(document) as url:
-            self._call(
-                "Emulation.setDeviceMetricsOverride",
-                {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
-            )
-            navigation = self._call("Page.navigate", {"url": url})
-            error_text = navigation.get("result", {}).get("errorText")
-            if error_text:
-                raise AssertionError(f"Browser fixture navigation failed: {error_text}")
-            expected_url = json.dumps(url)
-            expression = (
-                "(() => {"
-                f"if (location.href !== {expected_url}) return '';"
-                "if (document.readyState !== 'complete') return '';"
-                "return document.querySelector('#v970-browser-result')?.textContent || '';"
-                "})()"
-            )
-            result_text = ""
-            for _attempt in range(40):
-                evaluated = self._call(
-                    "Runtime.evaluate",
-                    {"expression": expression, "returnByValue": True},
+        try:
+            document = _browser_document(view)
+            with _serve_browser_document(document) as url:
+                self._call(
+                    "Emulation.setDeviceMetricsOverride",
+                    {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False},
                 )
-                result_text = evaluated.get("result", {}).get("result", {}).get("value", "")
-                if result_text:
-                    break
-                time.sleep(0.025)
-            if not result_text:
-                raise AssertionError("Browser fixture did not emit acceptance results")
-            return json.loads(result_text)
+                navigation = self._call("Page.navigate", {"url": url})
+                error_text = navigation.get("result", {}).get("errorText")
+                if error_text:
+                    raise AssertionError(f"Browser fixture navigation failed: {error_text}")
+                expected_url = json.dumps(url)
+                expression = (
+                    "(() => {"
+                    f"if (location.href !== {expected_url}) return '';"
+                    "if (document.readyState !== 'complete') return '';"
+                    "return document.querySelector('#v970-browser-result')?.textContent || '';"
+                    "})()"
+                )
+                result_text = ""
+                for _attempt in range(40):
+                    evaluated = self._call(
+                        "Runtime.evaluate",
+                        {"expression": expression, "returnByValue": True},
+                    )
+                    result_text = evaluated.get("result", {}).get("result", {}).get("value", "")
+                    if result_text:
+                        break
+                    time.sleep(0.025)
+                if not result_text:
+                    raise AssertionError("Browser fixture did not emit acceptance results")
+                return json.loads(result_text)
+        except Exception as exc:
+            if isinstance(exc, AssertionError) and str(exc).startswith(
+                "navigation/assertion failure:"
+            ):
+                raise
+            raise AssertionError(
+                f"navigation/assertion failure: {type(exc).__name__}: {exc}"
+            ) from exc
 
     def close(self) -> None:
         if self._ws is not None:
@@ -438,13 +709,19 @@ class _BrowserSession:
             except OSError:
                 pass
             self._ws = None
-        if hasattr(self, "_proc") and self._proc.poll() is None:
-            self._proc.kill()
-        if hasattr(self, "_proc"):
+        if self._proc is not None:
             try:
-                self._proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                pass
+                _terminate_browser_process(self._proc)
+            except (OSError, subprocess.TimeoutExpired):
+                try:
+                    self._proc.kill()
+                    self._proc.wait(timeout=_BROWSER_KILL_GRACE)
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+        if self._stdout_capture is not None:
+            self._stdout_capture.close()
+        if self._stderr_capture is not None:
+            self._stderr_capture.close()
         if hasattr(self, "_tmp"):
             self._tmp.cleanup()
 
@@ -465,6 +742,129 @@ def _browser_fixture(view: str, width: int, height: int) -> dict[str, object]:
 
 
 class WebGuiV970Tests(unittest.TestCase):
+    def test_devtools_active_port_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "DevToolsActivePort"
+            self.assertIsNone(_parse_devtools_active_port(path))
+            for payload in ("", "not-a-port\n", "0\n", "70000\n", "9222x\n"):
+                path.write_text(payload, encoding="utf-8")
+                self.assertIsNone(_parse_devtools_active_port(path), payload)
+            path.write_text(" 9222 \n/devtools/browser/example\n", encoding="utf-8")
+            self.assertEqual(_parse_devtools_active_port(path), 9222)
+
+    def test_browser_harness_successful_bootstrap_wait(self):
+        class Proc:
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "DevToolsActivePort"
+            path.write_text("43123\n/devtools/browser/example\n", encoding="utf-8")
+            port = _wait_for_devtools_active_port(
+                Proc(), path, time.monotonic() + 0.2, sleep_fn=lambda _seconds: None
+            )
+            self.assertEqual(port, 43123)
+
+    def test_browser_harness_detects_early_exit(self):
+        class Proc:
+            def poll(self):
+                return 17
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "DevToolsActivePort"
+            with self.assertRaises(_BrowserBootstrapError) as raised:
+                _wait_for_devtools_active_port(
+                    Proc(), path, time.monotonic() + 1, sleep_fn=lambda _seconds: None
+                )
+            self.assertEqual(raised.exception.category, "Chrome process exited")
+            self.assertIn("17", raised.exception.detail)
+
+    def test_browser_harness_timeout_is_bounded(self):
+        class Proc:
+            def poll(self):
+                return None
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "DevToolsActivePort"
+            started = time.monotonic()
+            with self.assertRaises(_BrowserBootstrapError) as raised:
+                _wait_for_devtools_active_port(
+                    Proc(), path, started + 0.02, sleep_fn=time.sleep
+                )
+            elapsed = time.monotonic() - started
+            self.assertEqual(
+                raised.exception.category, "DevToolsActivePort missing/unreadable"
+            )
+            self.assertLess(elapsed, 0.5)
+
+    def test_browser_harness_stderr_diagnostics_are_bounded_and_redacted(self):
+        capture = _BoundedPipeCapture(
+            io.BytesIO(b"x" * (_BROWSER_CAPTURE_LIMIT + 200) + b" password=hunter2 token=abc tail"),
+            _BROWSER_CAPTURE_LIMIT,
+        )
+        capture.close()
+        raw_tail = capture.tail()
+        self.assertLessEqual(len(raw_tail.encode("utf-8")), _BROWSER_CAPTURE_LIMIT)
+        diagnostic = _browser_failure_diagnostics(
+            "CDP endpoint unavailable",
+            "endpoint timeout",
+            executable="/usr/bin/google-chrome",
+            args=["--headless=new", "--user-data-dir=/tmp/profile-secret"],
+            exit_code=None,
+            elapsed=1.25,
+            profile_exists=True,
+            active_port_exists=False,
+            stdout_tail="",
+            stderr_tail=raw_tail,
+        )
+        self.assertIn("CDP endpoint unavailable", diagnostic)
+        self.assertIn("--user-data-dir=<temporary-profile>", diagnostic)
+        self.assertIn("password=<redacted>", diagnostic)
+        self.assertIn("token=<redacted>", diagnostic)
+        self.assertNotIn("hunter2", diagnostic)
+        self.assertNotIn("/tmp/profile-secret", diagnostic)
+
+    def test_browser_harness_process_cleanup_terminates_then_kills_and_reaps(self):
+        class Proc:
+            pid = 12345
+
+            def __init__(self):
+                self.returncode = None
+                self.wait_calls = 0
+
+            def poll(self):
+                return self.returncode
+
+            def wait(self, timeout=None):
+                self.wait_calls += 1
+                if self.returncode is None:
+                    raise subprocess.TimeoutExpired("fake-chrome", timeout)
+                return self.returncode
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                self.returncode = -signal.SIGKILL
+
+        proc = Proc()
+        signals = []
+
+        def signal_group(_pid, sig):
+            signals.append(sig)
+            if sig == signal.SIGKILL:
+                proc.returncode = -signal.SIGKILL
+
+        _terminate_browser_process(
+            proc,
+            signal_group=signal_group,
+            grace_timeout=0,
+            kill_timeout=0,
+        )
+        self.assertEqual(signals, [signal.SIGTERM, signal.SIGKILL])
+        self.assertEqual(proc.poll(), -signal.SIGKILL)
+        self.assertGreaterEqual(proc.wait_calls, 2)
+
     # Existing seven UI-specific tests remain in place.
     def test_installer_has_no_app_or_backend_registry_parameter(self):
         self.assertEqual(list(inspect.signature(install_webgui_v970).parameters), ["v962"])
