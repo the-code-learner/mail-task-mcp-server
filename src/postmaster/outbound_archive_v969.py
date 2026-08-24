@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from contextvars import ContextVar
 from email.message import EmailMessage
 from typing import Any
@@ -73,6 +74,42 @@ def _recipient_groups(
     return _dedupe(to_values), cc_values, bcc_values
 
 
+def _normal_group_deliveries(
+    operation_id: str,
+    canonical_message_id: str,
+    *,
+    to_values: list[str],
+    cc_values: list[str],
+    bcc_values: list[str],
+) -> list[dict[str, str]]:
+    """Represent one normal group SMTP submission as logical per-recipient deliveries.
+
+    A normal send still uses one MIME/one DATA transaction and one canonical Sent APPEND.
+    These records model the RCPT envelope recipients for reply correlation and private
+    sender-side metadata without pretending the transport was individualized.
+    """
+
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for role, values in (("to", to_values), ("cc", cc_values), ("bcc", bcc_values)):
+        for recipient in values:
+            key = recipient.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            seed = f"{operation_id}\x00{role}\x00{key}"
+            rows.append(
+                {
+                    "delivery_id": "delivery_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24],
+                    "message_id": canonical_message_id,
+                    "recipient": recipient,
+                    "recipient_role": role,
+                    "role": role,
+                }
+            )
+    return rows
+
+
 def _record_logical_operation(
     client: Any,
     *,
@@ -106,6 +143,22 @@ def _record_logical_operation(
         for row in (result.get("deliveries") or [])
         if isinstance(row, dict)
     ]
+    if (
+        not deliveries
+        and action == "send_email"
+        and bool(result.get("sent"))
+        and canonical_message_id
+    ):
+        deliveries = _normal_group_deliveries(
+            operation_id,
+            canonical_message_id,
+            to_values=to_values,
+            cc_values=cc_values,
+            bcc_values=bcc_values,
+        )
+        result["deliveries"] = [dict(row) for row in deliveries]
+        result["logical_group_delivery_count"] = len(deliveries)
+
     metadata_saved = False
     try:
         outbound_operation_store().record_operation(
@@ -223,5 +276,6 @@ def _install_outbound_archive_boundary() -> None:
 __all__ = [
     "_ARCHIVE_CONTEXT",
     "_install_outbound_archive_boundary",
+    "_normal_group_deliveries",
     "_record_logical_operation",
 ]
