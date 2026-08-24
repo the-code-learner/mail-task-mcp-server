@@ -21,14 +21,15 @@ MAX_NESTED_RESOURCES_PER_STYLESHEET = 12
 MAX_TOTAL_RESOURCES_PER_MESSAGE_CYCLE = 32
 MAX_CUMULATIVE_BYTES_PER_STYLESHEET = 4_000_000
 MAX_NESTED_EXECUTION_SECONDS = 8.0
-CSS_IMPORT_MAX_DEPTH = 0  # v9.6.9: @import is explicitly unsupported/sterilized.
+CSS_IMPORT_MAX_DEPTH = 0  # v9.6.9 deliberately sterilizes @import instead of recursing.
 
 _CSS_URL_RE = re.compile(r"(?is)url\(\s*(['\"]?)(.*?)\1\s*\)")
 _CSS_IMPORT_RE = re.compile(
     r"(?is)@import\s+(?:url\([^)]*\)|['\"][^'\"]*['\"])[^;]*;?"
 )
-_CSS_EXECUTABLE_RE = re.compile(r"(?is)(?:expression\s*\(|-moz-binding\s*:|behavior\s*:)")
+_CSS_DANGEROUS_RE = re.compile(r"(?is)(?:expression\s*\(|-moz-binding\s*:|behavior\s*:)")
 _NESTED_ALLOWED_TYPES = set(_ALLOWED_PROXY_TYPES) - {"text/css"}
+_LOCAL_RESOURCE_PREFIX = "/dashboard/inbox/resource?"
 
 
 def _is_success(row: dict[str, Any] | None) -> bool:
@@ -40,18 +41,22 @@ def _is_success(row: dict[str, Any] | None) -> bool:
     )
 
 
-class BoundedPassiveContentService(PassiveContentService):
-    """v9.6.9 bounded second-level passive resolver for remote stylesheets.
+def _clean_target(value: str) -> str:
+    return str(value or "").strip().strip("\"'")
 
-    This deliberately is not a generic crawler. Only top-level cached CSS is inspected,
-    @import is stripped (depth 0), and passive CSS url(...) resources are resolved once
-    through the same Privacy Proxy and stable message cache used by the base pipeline.
+
+class BoundedPassiveContentService(PassiveContentService):
+    """One-level, bounded passive CSS resolver shared by WebGUI and MCP.
+
+    It is intentionally not a crawler: only successful top-level stylesheets already selected
+    by the base passive pipeline are inspected; @import depth is zero; each CSS url(...) is
+    resolved once and fetched only through the existing authenticated Privacy Proxy.
     """
 
     @staticmethod
     def _nested_spec(stylesheet_url: str, raw_target: str) -> dict[str, Any] | None:
-        target = str(raw_target or "").strip().strip("\"'")
-        if not target or target.startswith(("#", "data:", "cid:")):
+        target = _clean_target(raw_target)
+        if not target or target.startswith(("#", "data:", "cid:", _LOCAL_RESOURCE_PREFIX)):
             return None
         resolved = urljoin(stylesheet_url, target)
         if urlparse(resolved).scheme.casefold() not in {"http", "https"}:
@@ -64,9 +69,7 @@ class BoundedPassiveContentService(PassiveContentService):
         classification, score, _, _ = _classification(record)
         record["classification"] = classification
         record["tracking_score"] = score
-        if not _passive_allowed(record):
-            return None
-        return record
+        return record if _passive_allowed(record) else None
 
     @staticmethod
     def _delete_keys(cache: Any, keys: list[str]) -> None:
@@ -79,80 +82,92 @@ class BoundedPassiveContentService(PassiveContentService):
                     "DELETE FROM mailbox_cache_remote_resources WHERE cache_key=?",
                     [(key,) for key in keys],
                 )
-            return
-        with lock, cache._connect() as conn:
-            conn.executemany(
-                "DELETE FROM mailbox_cache_remote_resources WHERE cache_key=?",
-                [(key,) for key in keys],
-            )
+        else:
+            with lock, cache._connect() as conn:
+                conn.executemany(
+                    "DELETE FROM mailbox_cache_remote_resources WHERE cache_key=?",
+                    [(key,) for key in keys],
+                )
 
-    def _nested_fetch(
-        self,
-        *,
-        spec: dict[str, Any],
-        account_id: str,
-        mailbox: str,
-        uid: str,
-        remaining_bytes: list[int],
-    ) -> dict[str, Any]:
-        cache = self.base.mailbox_cache_store()
+    def _fetch_nested_remote(self, spec: dict[str, Any]) -> dict[str, Any]:
         proxy = self.base.privacy_proxy_client()
-        url = str(spec["url"])
-        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
-        key = cache.resource_key(account_id, mailbox, uid, digest)
         try:
             fetched = proxy.fetch(
-                url,
+                str(spec["url"]),
                 classification=str(spec.get("classification") or "remote image"),
                 tracking_score=int(spec.get("tracking_score") or 0),
                 request_kind="render",
-                max_response_bytes=min(_MAX_PROXY_BYTES, max(1, remaining_bytes[0])),
+                max_response_bytes=_MAX_PROXY_BYTES,
             )
             status = int(fetched.get("status") or 0)
             content_type = (
                 str(fetched.get("content_type") or "").split(";", 1)[0].strip().casefold()
             )
             body = bytes(fetched.get("body") or b"") if status == 200 else None
-            error_state = "proxy_error" if str(fetched.get("error") or "") else ""
             if body is not None:
                 if len(body) > _MAX_PROXY_BYTES:
                     raise RuntimeError("nested_resource_size_limit")
                 if content_type not in _NESTED_ALLOWED_TYPES:
                     raise RuntimeError("nested_resource_content_type_rejected")
-                if len(body) > remaining_bytes[0]:
-                    raise RuntimeError("nested_cumulative_size_limit")
-                remaining_bytes[0] -= len(body)
-            return cache.put_resource(
-                cache_key=key,
-                account_id=account_id,
-                mailbox=mailbox,
-                uid=uid,
-                url=url,
-                url_hash=digest,
-                content_type=content_type,
-                body=body,
-                http_status=status,
-                redirect_location=str(fetched.get("redirect_location") or ""),
-                classification=str(spec.get("classification") or "remote image"),
-                tracking_score=int(spec.get("tracking_score") or 0),
-                error_state=error_state,
-            )
+            return {
+                "status": status,
+                "content_type": content_type,
+                "body": body,
+                "redirect_location": str(fetched.get("redirect_location") or ""),
+                "error_state": "proxy_error" if str(fetched.get("error") or "") else "",
+            }
         except Exception as exc:
-            return cache.put_resource(
-                cache_key=key,
-                account_id=account_id,
-                mailbox=mailbox,
-                uid=uid,
-                url=url,
-                url_hash=digest,
-                content_type="",
-                body=None,
-                http_status=None,
-                redirect_location="",
-                classification=str(spec.get("classification") or "remote image"),
-                tracking_score=int(spec.get("tracking_score") or 0),
-                error_state=type(exc).__name__,
-            )
+            return {
+                "status": None,
+                "content_type": "",
+                "body": None,
+                "redirect_location": "",
+                "error_state": type(exc).__name__,
+            }
+
+    def _store_nested(
+        self,
+        *,
+        spec: dict[str, Any],
+        fetched: dict[str, Any],
+        account_id: str,
+        mailbox: str,
+        uid: str,
+        cumulative_remaining: int,
+    ) -> tuple[dict[str, Any], int]:
+        cache = self.base.mailbox_cache_store()
+        url = str(spec["url"])
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        key = cache.resource_key(account_id, mailbox, uid, digest)
+        body = fetched.get("body")
+        error_state = str(fetched.get("error_state") or "")
+        status = fetched.get("status")
+        content_type = str(fetched.get("content_type") or "")
+        if body is not None and not error_state:
+            body = bytes(body)
+            if len(body) > cumulative_remaining:
+                body = None
+                status = None
+                content_type = ""
+                error_state = "nested_cumulative_size_limit"
+            else:
+                cumulative_remaining -= len(body)
+        row = cache.put_resource(
+            cache_key=key,
+            account_id=account_id,
+            mailbox=mailbox,
+            uid=uid,
+            url=url,
+            url_hash=digest,
+            content_type=content_type,
+            body=body,
+            http_status=status,
+            redirect_location=str(fetched.get("redirect_location") or ""),
+            classification=str(spec.get("classification") or "remote image"),
+            tracking_score=int(spec.get("tracking_score") or 0),
+            error_state=error_state,
+        )
+        return row, cumulative_remaining
 
     def _process_stylesheets(
         self,
@@ -180,13 +195,12 @@ class BoundedPassiveContentService(PassiveContentService):
             "nested_negative_cache_hits": 0,
             "imports_stripped": 0,
             "bounded_skipped": 0,
+            "top_positive_after": 0,
             "nested_ms": 0.0,
         }
         started = time.perf_counter()
 
         for top in top_level:
-            if remaining_global <= 0:
-                break
             if str(top.get("source_type") or "").casefold() != "link href":
                 continue
             stylesheet_url = str(top.get("url") or "")
@@ -197,8 +211,8 @@ class BoundedPassiveContentService(PassiveContentService):
             content_type = str(css_row.get("content_type") or "").split(";", 1)[0].casefold()
             if content_type != "text/css":
                 continue
-            raw_body = bytes(css_row.get("body") or b"")
             stats["stylesheets_processed"] += 1
+            raw_body = bytes(css_row.get("body") or b"")
             if len(raw_body) > MAX_STYLESHEET_BYTES:
                 cache.put_resource(
                     cache_key=css_key,
@@ -223,34 +237,40 @@ class BoundedPassiveContentService(PassiveContentService):
             if imports:
                 stats["imports_stripped"] += imports
                 css = _CSS_IMPORT_RE.sub("", css)
-            if _CSS_EXECUTABLE_RE.search(css):
-                css = _CSS_EXECUTABLE_RE.sub("blocked(", css)
+            if _CSS_DANGEROUS_RE.search(css):
+                css = _CSS_DANGEROUS_RE.sub("blocked(", css)
 
-            refs: list[tuple[str, dict[str, Any]]] = []
+            refs: list[dict[str, Any]] = []
+            key_by_url: dict[str, str] = {}
             seen: set[str] = set()
             for match in _CSS_URL_RE.finditer(css):
-                raw_target = str(match.group(2) or "").strip()
-                spec = self._nested_spec(stylesheet_url, raw_target)
+                target = _clean_target(match.group(2) or "")
+                if target.startswith(_LOCAL_RESOURCE_PREFIX):
+                    continue
+                spec = self._nested_spec(stylesheet_url, target)
                 if not spec:
                     continue
                 url = str(spec["url"])
                 if url in seen:
                     continue
                 seen.add(url)
-                if len(refs) >= MAX_NESTED_RESOURCES_PER_STYLESHEET or remaining_global <= 0:
+                if (
+                    len(refs) >= MAX_NESTED_RESOURCES_PER_STYLESHEET
+                    or remaining_global <= 0
+                ):
                     stats["bounded_skipped"] += 1
                     continue
-                refs.append((raw_target, spec))
+                refs.append(spec)
                 remaining_global -= 1
+                nested_digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                key_by_url[url] = cache.resource_key(
+                    account_id, mailbox, uid, nested_digest
+                )
 
             stats["nested_discovered"] += len(refs)
-            key_by_url: dict[str, str] = {}
             work: list[dict[str, Any]] = []
-            for _, spec in refs:
-                url = str(spec["url"])
-                nested_digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
-                key = cache.resource_key(account_id, mailbox, uid, nested_digest)
-                key_by_url[url] = key
+            for spec in refs:
+                key = key_by_url[str(spec["url"])]
                 if refresh:
                     self._delete_keys(cache, [key])
                 row = cache.get_resource(key)
@@ -261,74 +281,80 @@ class BoundedPassiveContentService(PassiveContentService):
                 elif network_allowed:
                     work.append(spec)
 
-            remaining_bytes = [
-                max(0, MAX_CUMULATIVE_BYTES_PER_STYLESHEET - len(raw_body))
-            ]
-            if work and remaining_bytes[0] > 0:
+            cumulative_remaining = max(
+                0, MAX_CUMULATIVE_BYTES_PER_STYLESHEET - len(raw_body)
+            )
+            if work and cumulative_remaining > 0:
                 stats["nested_attempted"] += len(work)
-                with ThreadPoolExecutor(
+                pool = ThreadPoolExecutor(
                     max_workers=_MAX_PROXY_CONCURRENCY,
                     thread_name_prefix="postmaster-v969-css",
-                ) as pool:
-                    futures = {
-                        pool.submit(
-                            self._nested_fetch,
-                            spec=spec,
-                            account_id=account_id,
-                            mailbox=mailbox,
-                            uid=uid,
-                            remaining_bytes=remaining_bytes,
-                        ): spec
-                        for spec in work
-                    }
-                    done, pending = wait(
-                        futures,
-                        timeout=MAX_NESTED_EXECUTION_SECONDS,
+                )
+                futures = {pool.submit(self._fetch_nested_remote, spec): spec for spec in work}
+                done, pending = wait(futures, timeout=MAX_NESTED_EXECUTION_SECONDS)
+                for future in done:
+                    spec = futures[future]
+                    fetched = future.result()
+                    row, cumulative_remaining = self._store_nested(
+                        spec=spec,
+                        fetched=fetched,
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                        cumulative_remaining=cumulative_remaining,
                     )
-                    for future in done:
-                        row = future.result()
-                        if _is_success(row):
-                            stats["nested_succeeded"] += 1
-                        else:
-                            stats["nested_failed"] += 1
-                    for future in pending:
-                        spec = futures[future]
-                        future.cancel()
-                        url = str(spec["url"])
-                        nested_digest = hashlib.sha256(url.encode("utf-8")).hexdigest()
-                        key = cache.resource_key(account_id, mailbox, uid, nested_digest)
-                        cache.put_resource(
-                            cache_key=key,
-                            account_id=account_id,
-                            mailbox=mailbox,
-                            uid=uid,
-                            url=url,
-                            url_hash=nested_digest,
-                            content_type="",
-                            body=None,
-                            http_status=None,
-                            redirect_location="",
-                            classification=str(spec.get("classification") or "remote image"),
-                            tracking_score=int(spec.get("tracking_score") or 0),
-                            error_state="nested_timeout",
-                        )
+                    if _is_success(row):
+                        stats["nested_succeeded"] += 1
+                    else:
                         stats["nested_failed"] += 1
+                for future in pending:
+                    spec = futures[future]
+                    future.cancel()
+                    row, cumulative_remaining = self._store_nested(
+                        spec=spec,
+                        fetched={
+                            "status": None,
+                            "content_type": "",
+                            "body": None,
+                            "redirect_location": "",
+                            "error_state": "nested_timeout",
+                        },
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                        cumulative_remaining=cumulative_remaining,
+                    )
+                    stats["nested_failed"] += 1
+                pool.shutdown(wait=False, cancel_futures=True)
             elif work:
+                for spec in work:
+                    self._store_nested(
+                        spec=spec,
+                        fetched={
+                            "status": None,
+                            "content_type": "",
+                            "body": None,
+                            "redirect_location": "",
+                            "error_state": "nested_cumulative_size_limit",
+                        },
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                        cumulative_remaining=0,
+                    )
                 stats["nested_failed"] += len(work)
 
             def rewrite_url(match: re.Match[str]) -> str:
-                raw_target = str(match.group(2) or "").strip()
-                stripped = raw_target.strip().strip("\"'")
-                if not stripped or stripped.startswith(("#", "data:", "cid:")):
+                target = _clean_target(match.group(2) or "")
+                if not target or target.startswith(("#", "data:", "cid:", _LOCAL_RESOURCE_PREFIX)):
                     return match.group(0)
-                spec = self._nested_spec(stylesheet_url, raw_target)
+                spec = self._nested_spec(stylesheet_url, target)
                 if not spec:
                     return 'url("")'
-                url = str(spec["url"])
-                key = key_by_url.get(url)
+                key = key_by_url.get(str(spec["url"]))
                 row = cache.get_resource(key) if key else None
                 if _is_success(row):
-                    local = "/dashboard/inbox/resource?" + urlencode({"key": key})
+                    local = _LOCAL_RESOURCE_PREFIX + urlencode({"key": key})
                     return f'url("{local}")'
                 return 'url("")'
 
@@ -350,6 +376,13 @@ class BoundedPassiveContentService(PassiveContentService):
             )
             stats["stylesheets_rewritten"] += 1
 
+        positive_after = 0
+        for row in top_level:
+            url = str(row.get("url") or "")
+            _, key = self._key(cache, account_id, mailbox, uid, url)
+            if _is_success(cache.get_resource(key)):
+                positive_after += 1
+        stats["top_positive_after"] = positive_after
         stats["nested_ms"] = round((time.perf_counter() - started) * 1000.0, 2)
         return stats
 
@@ -385,6 +418,8 @@ class BoundedPassiveContentService(PassiveContentService):
             "max_nested_execution_seconds": MAX_NESTED_EXECUTION_SECONDS,
             "max_concurrency": _MAX_PROXY_CONCURRENCY,
             "import_max_depth": CSS_IMPORT_MAX_DEPTH,
+            "mime_allowlist": sorted(_NESTED_ALLOWED_TYPES),
+            "ssrf_redirect_auth": "existing Privacy Proxy enforcement",
         }
 
         prior = str(result.get("render_state") or "success")
@@ -392,7 +427,7 @@ class BoundedPassiveContentService(PassiveContentService):
         if prior == "failure":
             state = "failure"
         elif extra_failures:
-            state = "partial" if int(diag.get("cached_succeeded") or 0) or int(diag.get("genuine_succeeded") or 0) else "failure"
+            state = "partial" if int(nested.get("top_positive_after") or 0) > 0 else "failure"
         else:
             state = prior
         result["render_state"] = state
