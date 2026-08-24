@@ -17,7 +17,7 @@ NAV_GROUPS = (
         ("tracking", "Tracking", "TR"),
         ("deliveries", "Deliveries", "DL"),
     )),
-    ("Manage", (
+    ("Organize", (
         ("accounts", "Accounts", "AC"),
         ("mail-health", "Mail Health", "MH"),
         ("suppressions", "Suppressions", "SP"),
