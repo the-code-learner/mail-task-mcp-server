@@ -14,6 +14,7 @@ from .privacy_cache_v969 import (
     install_hashed_resource_keys,
     rewrite_full_html_v969,
 )
+from .privacy_css_v969 import BoundedPassiveContentService
 from .webgui_v969 import _install_webgui_v969
 
 
@@ -25,7 +26,7 @@ def install_runtime_v969_pre_webgui(
     cache = base.mailbox_cache_store()
     install_hashed_resource_keys(cache)
     _install_outbound_archive_boundary()
-    service = PassiveContentService(base)
+    service = BoundedPassiveContentService(base)
     base.passive_content_service_v969 = lambda: service
     core.passive_content_service_v969 = lambda: service
 
@@ -146,6 +147,12 @@ def install_runtime_v969_mcp(
                 "diagnostics": diag,
                 "shared_with_webgui": True,
                 "navigation_action_urls_auto_fetched": False,
+                "cached_resource_contract": {
+                    "representation": "postmaster-local",
+                    "reference_prefix": "/dashboard/inbox/resource?key=",
+                    "resource_bytes_embedded": False,
+                    "bounded_css_nested_resources": True,
+                },
             }
         except Exception as exc:
             return {
@@ -177,6 +184,7 @@ def install_runtime_v969_mcp(
 
 
 __all__ = [
+    "BoundedPassiveContentService",
     "MCP_COMMAND_COUNT_V969",
     "PassiveContentService",
     "install_hashed_resource_keys",
