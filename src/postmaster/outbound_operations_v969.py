@@ -8,6 +8,7 @@ import threading
 from datetime import datetime, timezone
 from email import policy
 from email.parser import BytesParser
+from email.utils import getaddresses
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from typing import Any
 _OUTBOUND_DB_ENV = "POSTMASTER_OUTBOUND_OPERATION_DB_PATH"
 _DEFAULT_OUTBOUND_DB = Path("/data/outbound_operations_v969.db")
 _MESSAGE_ID_RE = re.compile(r"<[^<>\s]+>")
+_LEGACY_PSEUDO_DELIVERY_RE = re.compile(r"delivery_[0-9a-f]{24}\Z")
 
 
 def _now() -> str:
@@ -47,9 +49,10 @@ def resolve_outbound_operation_path(explicit: str | Path | None = None) -> Path:
 class OutboundOperationStore:
     """Private sender-side logical-send metadata.
 
-    Delivery MIME never reads from this store. The canonical Sent message and every
-    per-recipient delivery Message-ID map to the same logical operation, while original
-    Bcc is kept only in this server-side database.
+    Real tracked/individualized deliveries and normal-group logical recipient mappings
+    are intentionally persisted separately. A public ``delivery_id`` is stored only for
+    a real delivery row from the tracking/delivery subsystem; a normal one-MIME group
+    send keeps recipient/role/message correlation without manufacturing a delivery ID.
     """
 
     def __init__(self, db_path: str | Path | None = None) -> None:
@@ -82,6 +85,7 @@ class OutboundOperationStore:
                 );
                 CREATE INDEX IF NOT EXISTS ix_outbound_operations_v969_canonical
                     ON outbound_operations_v969(account_id,canonical_message_id);
+
                 CREATE TABLE IF NOT EXISTS outbound_operation_deliveries_v969 (
                     delivery_id TEXT PRIMARY KEY,
                     operation_id TEXT NOT NULL,
@@ -94,7 +98,59 @@ class OutboundOperationStore:
                     ON outbound_operation_deliveries_v969(message_id);
                 CREATE INDEX IF NOT EXISTS ix_outbound_deliveries_v969_operation
                     ON outbound_operation_deliveries_v969(operation_id);
+
+                CREATE TABLE IF NOT EXISTS outbound_operation_recipient_mappings_v969 (
+                    operation_id TEXT NOT NULL,
+                    message_id TEXT NOT NULL DEFAULT '',
+                    recipient TEXT NOT NULL DEFAULT '',
+                    recipient_role TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(operation_id,message_id,recipient,recipient_role),
+                    FOREIGN KEY(operation_id) REFERENCES outbound_operations_v969(operation_id)
+                );
+                CREATE INDEX IF NOT EXISTS ix_outbound_recipient_mappings_v969_message
+                    ON outbound_operation_recipient_mappings_v969(message_id);
+                CREATE INDEX IF NOT EXISTS ix_outbound_recipient_mappings_v969_operation
+                    ON outbound_operation_recipient_mappings_v969(operation_id);
                 """
+            )
+            self._migrate_legacy_pseudo_deliveries(conn)
+
+    @staticmethod
+    def _migrate_legacy_pseudo_deliveries(conn: sqlite3.Connection) -> None:
+        """Move only the unreleased v9.6.9 synthetic group rows into mapping storage.
+
+        Earlier branch revisions generated IDs exactly as ``delivery_<24 lowercase hex>``.
+        Real analytics deliveries use their authoritative delivery-subsystem IDs and are
+        left untouched. This makes an existing branch-local DB converge forward without
+        exposing old pseudo-delivery IDs after the corrective pass.
+        """
+        rows = conn.execute(
+            """
+            SELECT delivery_id,operation_id,message_id,recipient,recipient_role
+            FROM outbound_operation_deliveries_v969
+            WHERE delivery_id LIKE 'delivery_%'
+            """
+        ).fetchall()
+        for row in rows:
+            delivery_id = str(row["delivery_id"] or "")
+            if not _LEGACY_PSEUDO_DELIVERY_RE.fullmatch(delivery_id):
+                continue
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO outbound_operation_recipient_mappings_v969(
+                    operation_id,message_id,recipient,recipient_role
+                ) VALUES(?,?,?,?)
+                """,
+                (
+                    str(row["operation_id"] or ""),
+                    str(row["message_id"] or ""),
+                    str(row["recipient"] or ""),
+                    str(row["recipient_role"] or ""),
+                ),
+            )
+            conn.execute(
+                "DELETE FROM outbound_operation_deliveries_v969 WHERE delivery_id=?",
+                (delivery_id,),
             )
 
     @staticmethod
@@ -123,6 +179,7 @@ class OutboundOperationStore:
         cc: list[str],
         bcc: list[str],
         deliveries: list[dict[str, Any]],
+        recipient_mappings: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         op = str(operation_id or "").strip()
         if not op:
@@ -156,6 +213,18 @@ class OutboundOperationStore:
                     now,
                 ),
             )
+
+            # A record_operation call describes the complete logical operation state.
+            # Replace its child rows so stale branch-local pseudo rows cannot survive.
+            conn.execute(
+                "DELETE FROM outbound_operation_deliveries_v969 WHERE operation_id=?",
+                (op,),
+            )
+            conn.execute(
+                "DELETE FROM outbound_operation_recipient_mappings_v969 WHERE operation_id=?",
+                (op,),
+            )
+
             for row in deliveries:
                 did = str(row.get("delivery_id") or "").strip()
                 if not did:
@@ -165,11 +234,6 @@ class OutboundOperationStore:
                     INSERT INTO outbound_operation_deliveries_v969(
                         delivery_id,operation_id,message_id,recipient,recipient_role
                     ) VALUES(?,?,?,?,?)
-                    ON CONFLICT(delivery_id) DO UPDATE SET
-                        operation_id=excluded.operation_id,
-                        message_id=excluded.message_id,
-                        recipient=excluded.recipient,
-                        recipient_role=excluded.recipient_role
                     """,
                     (
                         did,
@@ -177,6 +241,25 @@ class OutboundOperationStore:
                         str(row.get("message_id") or ""),
                         str(row.get("recipient") or ""),
                         str(row.get("role") or row.get("recipient_role") or ""),
+                    ),
+                )
+
+            for row in recipient_mappings or []:
+                recipient = str(row.get("recipient") or "").strip()
+                role = str(row.get("role") or row.get("recipient_role") or "").strip()
+                if not recipient:
+                    continue
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO outbound_operation_recipient_mappings_v969(
+                        operation_id,message_id,recipient,recipient_role
+                    ) VALUES(?,?,?,?)
+                    """,
+                    (
+                        op,
+                        str(row.get("message_id") or canonical_message_id or ""),
+                        recipient,
+                        role,
                     ),
                 )
         return self.get_operation(op) or {}
@@ -205,19 +288,27 @@ class OutboundOperationStore:
                 """,
                 (str(operation_id or ""),),
             ).fetchall()
+            mappings = conn.execute(
+                """
+                SELECT message_id,recipient,recipient_role AS role
+                FROM outbound_operation_recipient_mappings_v969
+                WHERE operation_id=? ORDER BY rowid
+                """,
+                (str(operation_id or ""),),
+            ).fetchall()
         result = self._public_row(row)
         result["deliveries"] = [dict(item) for item in deliveries]
+        result["recipient_mappings"] = [dict(item) for item in mappings]
         return result
 
-    def delivery_by_message_id(
+    def deliveries_by_message_id(
         self, account_id: str, message_id: str
-    ) -> dict[str, Any] | None:
-        """Return the exact delivery row and its logical operation for a Message-ID."""
+    ) -> list[dict[str, Any]]:
         mid = str(message_id or "").strip()
         if not mid:
-            return None
+            return []
         with self._connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
                 SELECT d.delivery_id,d.message_id,d.recipient,
                        d.recipient_role AS role,o.operation_id,
@@ -225,51 +316,89 @@ class OutboundOperationStore:
                 FROM outbound_operation_deliveries_v969 d
                 JOIN outbound_operations_v969 o ON o.operation_id=d.operation_id
                 WHERE o.account_id=? AND d.message_id=?
-                ORDER BY d.rowid LIMIT 1
+                ORDER BY d.rowid
                 """,
                 (str(account_id or ""), mid),
-            ).fetchone()
-        if not row:
-            return None
-        value = dict(row)
-        value["canonical_sent_archived"] = bool(value.get("canonical_sent_archived"))
-        return value
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            value = dict(row)
+            value["canonical_sent_archived"] = bool(value.get("canonical_sent_archived"))
+            result.append(value)
+        return result
+
+    def delivery_by_message_id(
+        self, account_id: str, message_id: str
+    ) -> dict[str, Any] | None:
+        """Return a real delivery only when Message-ID identifies it uniquely."""
+        rows = self.deliveries_by_message_id(account_id, message_id)
+        return rows[0] if len(rows) == 1 else None
+
+    def recipient_mappings_by_message_id(
+        self, account_id: str, message_id: str
+    ) -> list[dict[str, Any]]:
+        mid = str(message_id or "").strip()
+        if not mid:
+            return []
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT m.message_id,m.recipient,m.recipient_role AS role,
+                       o.operation_id,o.canonical_message_id,o.canonical_sent_archived
+                FROM outbound_operation_recipient_mappings_v969 m
+                JOIN outbound_operations_v969 o ON o.operation_id=m.operation_id
+                WHERE o.account_id=? AND m.message_id=?
+                ORDER BY m.rowid
+                """,
+                (str(account_id or ""), mid),
+            ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            value = dict(row)
+            value["canonical_sent_archived"] = bool(value.get("canonical_sent_archived"))
+            result.append(value)
+        return result
 
     def by_message_id(self, account_id: str, message_id: str) -> dict[str, Any] | None:
         mid = str(message_id or "").strip()
         if not mid:
             return None
-        operation_id = ""
         with self._connect() as conn:
-            row = conn.execute(
+            rows = conn.execute(
                 """
+                SELECT operation_id FROM outbound_operations_v969
+                WHERE account_id=? AND canonical_message_id=?
+                UNION
                 SELECT o.operation_id FROM outbound_operations_v969 o
-                WHERE o.account_id=? AND o.canonical_message_id=?
-                LIMIT 1
+                JOIN outbound_operation_deliveries_v969 d
+                  ON d.operation_id=o.operation_id
+                WHERE o.account_id=? AND d.message_id=?
+                UNION
+                SELECT o.operation_id FROM outbound_operations_v969 o
+                JOIN outbound_operation_recipient_mappings_v969 m
+                  ON m.operation_id=o.operation_id
+                WHERE o.account_id=? AND m.message_id=?
                 """,
-                (str(account_id or ""), mid),
-            ).fetchone()
-            if not row:
-                row = conn.execute(
-                    """
-                    SELECT o.operation_id FROM outbound_operations_v969 o
-                    JOIN outbound_operation_deliveries_v969 d
-                      ON d.operation_id=o.operation_id
-                    WHERE o.account_id=? AND d.message_id=?
-                    LIMIT 1
-                    """,
-                    (str(account_id or ""), mid),
-                ).fetchone()
-            if row:
-                operation_id = str(row["operation_id"] or "")
-        return self.get_operation(operation_id) if operation_id else None
+                (
+                    str(account_id or ""),
+                    mid,
+                    str(account_id or ""),
+                    mid,
+                    str(account_id or ""),
+                    mid,
+                ),
+            ).fetchall()
+        operation_ids = [str(row["operation_id"] or "") for row in rows if row["operation_id"]]
+        if len(operation_ids) != 1:
+            return None
+        return self.get_operation(operation_ids[0])
 
     @staticmethod
-    def _reply_reference_ids(raw: bytes) -> list[tuple[str, str]]:
+    def _parse_reply(raw: bytes) -> tuple[list[tuple[str, str]], set[str]]:
         try:
             msg = BytesParser(policy=policy.default).parsebytes(raw)
         except Exception:
-            return []
+            return [], set()
         ordered: list[tuple[str, str]] = []
         seen: set[str] = set()
         in_reply_to = str(msg.get("In-Reply-To") or "")
@@ -283,42 +412,120 @@ class OutboundOperationStore:
                     continue
                 seen.add(mid)
                 ordered.append((source, mid))
-        return ordered
+        senders = {
+            str(address or "").strip().casefold()
+            for _, address in getaddresses([str(msg.get("From") or "")])
+            if str(address or "").strip()
+        }
+        return ordered, senders
+
+    @staticmethod
+    def _unique_sender_match(
+        rows: list[dict[str, Any]], senders: set[str]
+    ) -> dict[str, Any] | None:
+        if not senders:
+            return None
+        matches = [
+            row
+            for row in rows
+            if str(row.get("recipient") or "").strip().casefold() in senders
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    @staticmethod
+    def _delivery_correlation(
+        delivery: dict[str, Any], *, source: str
+    ) -> dict[str, Any]:
+        return {
+            "logical_outbound_operation_id": str(delivery["operation_id"]),
+            "matched_delivery_id": str(delivery["delivery_id"]),
+            "matched_delivery_message_id": str(delivery["message_id"]),
+            "canonical_sent_message_id": str(delivery["canonical_message_id"]),
+            "recipient": str(delivery.get("recipient") or ""),
+            "recipient_role": str(delivery.get("role") or ""),
+            "matched_via": source,
+            "logical_outbound_root_created": False,
+        }
+
+    @staticmethod
+    def _mapping_correlation(
+        mapping: dict[str, Any], *, source: str
+    ) -> dict[str, Any]:
+        return {
+            "logical_outbound_operation_id": str(mapping["operation_id"]),
+            # A logical recipient mapping is intentionally not a persisted delivery.
+            "matched_delivery_id": "",
+            "matched_delivery_message_id": str(mapping["message_id"]),
+            "canonical_sent_message_id": str(mapping["canonical_message_id"]),
+            "recipient": str(mapping.get("recipient") or ""),
+            "recipient_role": str(mapping.get("role") or ""),
+            "matched_via": source,
+            "logical_outbound_root_created": False,
+        }
+
+    @staticmethod
+    def _operation_correlation(
+        operation: dict[str, Any], *, message_id: str, source: str
+    ) -> dict[str, Any]:
+        return {
+            "logical_outbound_operation_id": str(operation["operation_id"]),
+            "matched_delivery_id": "",
+            "matched_delivery_message_id": str(message_id or ""),
+            "canonical_sent_message_id": str(
+                operation.get("canonical_message_id") or ""
+            ),
+            "recipient": "",
+            "recipient_role": "",
+            "matched_via": source,
+            "logical_outbound_root_created": False,
+        }
 
     def resolve_reply(self, account_id: str, raw: bytes) -> dict[str, Any] | None:
-        """Resolve an inbound reply to one delivery and the existing logical root.
+        """Resolve an inbound reply without inventing a delivery/recipient match.
 
-        This is read-only: it never creates or mutates a logical outbound operation.
-        In-Reply-To wins; References are checked newest-first as a fallback.
+        Individualized delivery Message-IDs remain exact when unique. For a normal group
+        send the shared Message-ID identifies the logical outbound operation, while the
+        inbound From address is required to select one logical recipient mapping. Unknown
+        or ambiguous senders therefore return the operation with no exact delivery/mapping.
         """
         account = str(account_id or "")
-        for source, mid in self._reply_reference_ids(raw):
-            delivery = self.delivery_by_message_id(account, mid)
-            if delivery:
-                return {
-                    "logical_outbound_operation_id": str(delivery["operation_id"]),
-                    "matched_delivery_id": str(delivery["delivery_id"]),
-                    "matched_delivery_message_id": str(delivery["message_id"]),
-                    "canonical_sent_message_id": str(delivery["canonical_message_id"]),
-                    "recipient": str(delivery.get("recipient") or ""),
-                    "recipient_role": str(delivery.get("role") or ""),
-                    "matched_via": source,
-                    "logical_outbound_root_created": False,
+        references, senders = self._parse_reply(raw)
+        for source, mid in references:
+            deliveries = self.deliveries_by_message_id(account, mid)
+            if len(deliveries) == 1:
+                # Individualized Message-ID is sufficient by contract.
+                return self._delivery_correlation(deliveries[0], source=source)
+            if len(deliveries) > 1:
+                matched_delivery = self._unique_sender_match(deliveries, senders)
+                if matched_delivery:
+                    return self._delivery_correlation(matched_delivery, source=source)
+                operation = self.by_message_id(account, mid)
+                if operation:
+                    return self._operation_correlation(
+                        operation, message_id=mid, source=source
+                    )
+
+            mappings = self.recipient_mappings_by_message_id(account, mid)
+            if mappings:
+                operation_ids = {
+                    str(row.get("operation_id") or "") for row in mappings
                 }
+                operation_ids.discard("")
+                if len(operation_ids) == 1:
+                    matched_mapping = self._unique_sender_match(mappings, senders)
+                    if matched_mapping:
+                        return self._mapping_correlation(matched_mapping, source=source)
+                    operation = self.get_operation(next(iter(operation_ids)))
+                    if operation:
+                        return self._operation_correlation(
+                            operation, message_id=mid, source=source
+                        )
+
             operation = self.by_message_id(account, mid)
             if operation:
-                return {
-                    "logical_outbound_operation_id": str(operation["operation_id"]),
-                    "matched_delivery_id": "",
-                    "matched_delivery_message_id": mid,
-                    "canonical_sent_message_id": str(
-                        operation.get("canonical_message_id") or ""
-                    ),
-                    "recipient": "",
-                    "recipient_role": "",
-                    "matched_via": source,
-                    "logical_outbound_root_created": False,
-                }
+                return self._operation_correlation(
+                    operation, message_id=mid, source=source
+                )
         return None
 
 
