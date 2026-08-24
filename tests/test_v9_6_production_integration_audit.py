@@ -151,7 +151,8 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 96)
+        self.assertEqual(len(by_name), 97)
+        self.assertIn("fetch_email_remote_content", by_name)
 
         get_email = by_name["get_email"].input_schema["properties"]
         self.assertTrue(

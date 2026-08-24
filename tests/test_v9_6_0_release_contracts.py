@@ -252,8 +252,11 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
             self.assertTrue(line, completed.stdout)
             actual = set(json.loads(line.split("=", 1)[1]))
             self.assertTrue(BASELINE_MCP_NAMES <= actual)
-            self.assertEqual(actual - BASELINE_MCP_NAMES, V967_LIFECYCLE_MCP_NAMES)
-            self.assertEqual(len(actual), 96)
+            self.assertEqual(
+                actual - BASELINE_MCP_NAMES,
+                V967_LIFECYCLE_MCP_NAMES | {"fetch_email_remote_content"},
+            )
+            self.assertEqual(len(actual), 97)
 
 
 if __name__ == "__main__":

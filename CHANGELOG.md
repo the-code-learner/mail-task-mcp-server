@@ -2,6 +2,27 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.6.9 - 2026-08-24
+
+### Fixed / changed
+- Added one shared passive-content service used by WebGUI and MCP. Safe Email and the first Full HTML intent remain zero-network; only an explicit authorized Full HTML fetch may request genuine passive rendering resources through the Privacy Proxy. Total fetch failure stays in Safe Email, action/navigation URLs are never auto-fetched, and browser/MCP diagnostics expose aggregate counts/state instead of raw proxy/Worker exception detail.
+- Reused the persistent mailbox remote-resource cache for both positive content and negative tombstones, changed newly generated resource keys to opaque privacy-preserving hashes, and added explicit refresh semantics. Cache-only reopen performs no origin fetch.
+- Closed the WebGUI all-failure negative-cache loop: a normal Safe Email reopen remains zero-network, while the failure state now exposes a distinct explicit retry action that sends `refresh_remote=1`, bypasses/replaces the tombstone only for that authorized network cycle, and never introduces automatic retries.
+- Added bounded passive-resource resolution inside successfully fetched remote stylesheets. CSS `url(...)` targets are resolved relative to the stylesheet origin, reclassified through the existing passive-resource security classifier, fetched only through the authenticated Privacy Proxy, persisted in the same stable message cache and rewritten to local resource references. Bounds cover stylesheet/resource counts, bytes, MIME types, concurrency and execution time; recursive CSS crawling is not introduced and `@import` is explicitly sterilized at depth 0 for v9.6.9.
+- Moved High-Noise decoy invocation behind the shared genuine-work boundary: decoys run only when an explicitly authorized request has real passive origin cache misses, remain bounded by the existing privacy controls, and do not repeat on cache-only reopen.
+- Added explicit MCP command `fetch_email_remote_content`; normal `get_email` remains inspection/static and zero-network. The composed MCP command-name surface changes from 96 to 97 (`delta = +1`). The returned `rendered_html` is explicitly a Postmaster-local representation: passive references use local cache resource identifiers rather than arbitrary Base64 expansion.
+- Corrected individualized outbound Sent archiving so a successful logical fanout creates exactly one canonical IMAP Sent APPEND while preserving distinct per-recipient delivery IDs and Message-IDs. Sender-side operation metadata maps To/Cc/Bcc and delivery IDs privately; Bcc remains absent from recipient MIME and is not rediscovered by reply/follow-up flows.
+- Clarified normal group-send identity: one MIME/DATA submission may have multiple SMTP RCPT recipients sharing one Message-ID, but those To/Cc/Bcc rows are sender-private logical recipient mappings, not persisted tracking deliveries and not public `delivery_id` values. The normal send response therefore keeps its historical contract instead of manufacturing `delivery_<hash>` IDs; `deliveries` remains reserved for authoritative individualized/tracking rows.
+- Corrected shared-Message-ID reply correlation. A unique individualized delivery Message-ID still resolves its exact real delivery; a normal group Message-ID identifies the logical `out_*` operation and the inbound `From` address disambiguates the matching To/Cc/Bcc mapping when unique. Unknown or ambiguous senders keep the logical-operation match without inventing an exact delivery/recipient match, and private Bcc role metadata is not exposed through the inbound/public correlation surface.
+- Added canonical-Sent follow-up regression coverage: follow-up preserves threading and historical visible To/Cc semantics, never rediscovers historical Bcc, accepts new Bcc only from explicit follow-up input, creates a new `out_*` operation without overwriting the original one, archives one clean canonical Sent copy, and retains the existing outbound detracking invariant.
+- Enriched Sent WebGUI detail with To/Cc/Bcc from sender-private metadata while preserving the original date. Received detail never exposes sender-side Bcc metadata. The existing successful-detail-only Seen boundary remains unchanged and covered by its v9.6.8 regression test.
+- Replaced the ChatGPT/MCP-native preview-to-execute bearer confirmation-token lifecycle with persistent server-side pending approvals. Pending state uses exact binding digests, opaque preview IDs for correlation only, a hard maximum 300-second TTL, atomic one-shot consumption, replay/expiry/wrong-target/wrong-operation/stale-state rejection and restart-safe SQLite persistence; execute schemas no longer accept `confirmation_token`.
+
+### Storage / compatibility / safety / deployment
+- Added `/data/mcp_pending_approvals_v969.db` for pending approval state and reused the single `/data/outbound_operations_v969.db` for logical outbound operations, authoritative real-delivery mappings, and an additive logical-recipient-mapping table. Existing unreleased v9.6.9 synthetic `delivery_<24-hex>` rows are migrated forward into logical recipient mappings on store initialization; no additional outbound database is introduced. The existing `/data/mailbox_cache.db` remote-resource table is reused for top-level and nested passive positive/negative cache entries; no separate CSS store is introduced and newly generated cache keys are opaque hashes.
+- `requirements.txt` is unchanged; `postmaster-mcp.yml` is unchanged; the canonical Cloudflare Privacy Proxy Worker source is unchanged. No analytics schema change or new dependency is introduced.
+- This tranche prepares source/tests and release metadata only. No stable tag, GitHub release, merge, deployment, production runtime switch, Portainer change, Worker deployment or Cloudflare change is performed.
+
 ## 9.6.8 - 2026-08-23
 
 ### Fixed / changed
@@ -66,7 +87,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 ### Compatibility / safety / deployment
 - Corrective patch release only: the MCP command-name surface remains exactly 90 names (`delta = 0`); schema corrections are additive/compatibility-restoring and add no new MCP command name.
 - `postmaster-mcp.yml` is unchanged; `requirements.txt` is unchanged; no persistent database/storage migration or schema change is introduced.
-- Stable source/release publication remains separate from production activation. Publishing v9.6.5 does not itself deploy, restart, switch, or otherwise alter the live production runtime.
+- Stable source/release state remains separate from production runtime state. Publishing v9.6.5 does not itself deploy, restart, switch, or otherwise alter the live production runtime.
 - The ChatGPT/client MCP discovery-cache mismatch remains classified separately. The release verifies the server-side composed registry/schema contract and does not claim that any stale client discovery cache has been physically invalidated.
 
 ## 9.6.4 - 2026-08-23

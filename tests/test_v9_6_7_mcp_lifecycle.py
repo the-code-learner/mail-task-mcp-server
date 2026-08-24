@@ -485,13 +485,14 @@ class McpLifecycleV967Tests(unittest.IsolatedAsyncioTestCase):
 
 
 class ReleaseBoundaryV967Tests(unittest.TestCase):
-    def test_composed_runtime_has_96_names_and_six_new_lifecycle_commands(self):
+    def test_composed_runtime_has_v967_plus_one_names_and_six_new_lifecycle_commands(self):
         import postmaster.runtime as runtime
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), MCP_COMMAND_COUNT_V967)
+        self.assertEqual(len(by_name), MCP_COMMAND_COUNT_V967 + 1)
         self.assertEqual(EXPECTED_V967_TOOLS - set(by_name), set())
+        self.assertIn("fetch_email_remote_content", by_name)
         self.assertIn("privacy_proxy_action", by_name["set_amp_account_state"].input_schema["properties"])
         self.assertIn("confirm_version_change", by_name["build_status"].input_schema["properties"])
 
