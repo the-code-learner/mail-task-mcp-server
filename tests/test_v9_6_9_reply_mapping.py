@@ -141,5 +141,143 @@ class FanoutReplyMappingV969Tests(unittest.TestCase):
         self.assertEqual(self._operation_count(), before)
 
 
+class SharedMessageIdReplyResolutionV969Tests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.logical = OutboundOperationStore(Path(self.temp.name) / "logical.db")
+        self.operation_id = "out_group"
+        self.message_id = "<shared-group@example.test>"
+        self.logical.record_operation(
+            operation_id=self.operation_id,
+            account_id="acct",
+            canonical_message_id=self.message_id,
+            canonical_sent_archived=True,
+            to=["a@example.com"],
+            cc=["b@example.com"],
+            bcc=["c@example.com"],
+            deliveries=[],
+            recipient_mappings=[
+                {
+                    "message_id": self.message_id,
+                    "recipient": "a@example.com",
+                    "role": "to",
+                },
+                {
+                    "message_id": self.message_id,
+                    "recipient": "b@example.com",
+                    "role": "cc",
+                },
+                {
+                    "message_id": self.message_id,
+                    "recipient": "c@example.com",
+                    "role": "bcc",
+                },
+            ],
+        )
+
+    def _reply(self, sender: str) -> bytes:
+        msg = EmailMessage()
+        msg["Message-ID"] = "<reply-shared@example.test>"
+        msg["From"] = sender
+        msg["To"] = "sender@example.test"
+        msg["Subject"] = "Re: Group"
+        msg["In-Reply-To"] = self.message_id
+        msg.set_content("Reply")
+        return msg.as_bytes()
+
+    def test_shared_message_id_from_to_recipient_resolves_logical_mapping_not_delivery(self):
+        correlation = self.logical.resolve_reply("acct", self._reply("a@example.com"))
+        self.assertEqual(correlation["logical_outbound_operation_id"], self.operation_id)
+        self.assertEqual(correlation["matched_delivery_id"], "")
+        self.assertEqual(correlation["recipient"], "a@example.com")
+        self.assertEqual(correlation["recipient_role"], "to")
+
+    def test_shared_message_id_from_cc_recipient_resolves_logical_mapping_not_delivery(self):
+        correlation = self.logical.resolve_reply("acct", self._reply("b@example.com"))
+        self.assertEqual(correlation["logical_outbound_operation_id"], self.operation_id)
+        self.assertEqual(correlation["matched_delivery_id"], "")
+        self.assertEqual(correlation["recipient"], "b@example.com")
+        self.assertEqual(correlation["recipient_role"], "cc")
+
+    def test_shared_message_id_from_bcc_recipient_is_private_match_and_public_role_is_hidden(self):
+        correlation = self.logical.resolve_reply("acct", self._reply("c@example.com"))
+        self.assertEqual(correlation["logical_outbound_operation_id"], self.operation_id)
+        self.assertEqual(correlation["matched_delivery_id"], "")
+        self.assertEqual(correlation["recipient"], "c@example.com")
+        self.assertEqual(correlation["recipient_role"], "bcc")
+
+        public = archive._public_reply_correlation(correlation)
+        self.assertEqual(public["logical_outbound_operation_id"], self.operation_id)
+        self.assertEqual(public["recipient"], "c@example.com")
+        self.assertEqual(public["recipient_role"], "")
+        self.assertNotIn("bcc", repr(public).casefold())
+
+    def test_shared_message_id_unknown_sender_finds_operation_but_invents_no_exact_match(self):
+        correlation = self.logical.resolve_reply(
+            "acct", self._reply("unknown@example.com")
+        )
+        self.assertEqual(correlation["logical_outbound_operation_id"], self.operation_id)
+        self.assertEqual(correlation["matched_delivery_id"], "")
+        self.assertEqual(correlation["recipient"], "")
+        self.assertEqual(correlation["recipient_role"], "")
+        self.assertEqual(correlation["matched_delivery_message_id"], self.message_id)
+
+    def test_shared_message_id_has_three_mappings_and_zero_persisted_deliveries(self):
+        operation = self.logical.get_operation(self.operation_id)
+        self.assertEqual(operation["deliveries"], [])
+        self.assertEqual(len(operation["recipient_mappings"]), 3)
+        self.assertIsNone(self.logical.delivery_by_message_id("acct", self.message_id))
+        self.assertEqual(
+            len(self.logical.recipient_mappings_by_message_id("acct", self.message_id)),
+            3,
+        )
+
+
+class LegacyPseudoDeliveryMigrationV969Tests(unittest.TestCase):
+    def test_unreleased_pseudo_delivery_rows_migrate_to_recipient_mappings(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "logical.db"
+            store = OutboundOperationStore(path)
+            store.record_operation(
+                operation_id="out_legacy",
+                account_id="acct",
+                canonical_message_id="<legacy@example.test>",
+                canonical_sent_archived=True,
+                to=["a@example.com"],
+                cc=[],
+                bcc=[],
+                deliveries=[],
+            )
+            with sqlite3.connect(path) as conn:
+                conn.execute(
+                    """
+                    INSERT INTO outbound_operation_deliveries_v969(
+                        delivery_id,operation_id,message_id,recipient,recipient_role
+                    ) VALUES(?,?,?,?,?)
+                    """,
+                    (
+                        "delivery_0123456789abcdef01234567",
+                        "out_legacy",
+                        "<legacy@example.test>",
+                        "a@example.com",
+                        "to",
+                    ),
+                )
+            reopened = OutboundOperationStore(path)
+            operation = reopened.get_operation("out_legacy")
+            self.assertEqual(operation["deliveries"], [])
+            self.assertEqual(
+                operation["recipient_mappings"],
+                [
+                    {
+                        "message_id": "<legacy@example.test>",
+                        "recipient": "a@example.com",
+                        "role": "to",
+                    }
+                ],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
