@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from email import policy
+from email.parser import BytesParser
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -12,6 +15,7 @@ from typing import Any
 
 _OUTBOUND_DB_ENV = "POSTMASTER_OUTBOUND_OPERATION_DB_PATH"
 _DEFAULT_OUTBOUND_DB = Path("/data/outbound_operations_v969.db")
+_MESSAGE_ID_RE = re.compile(r"<[^<>\s]+>")
 
 
 def _now() -> str:
@@ -205,6 +209,32 @@ class OutboundOperationStore:
         result["deliveries"] = [dict(item) for item in deliveries]
         return result
 
+    def delivery_by_message_id(
+        self, account_id: str, message_id: str
+    ) -> dict[str, Any] | None:
+        """Return the exact delivery row and its logical operation for a Message-ID."""
+        mid = str(message_id or "").strip()
+        if not mid:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT d.delivery_id,d.message_id,d.recipient,
+                       d.recipient_role AS role,o.operation_id,
+                       o.canonical_message_id,o.canonical_sent_archived
+                FROM outbound_operation_deliveries_v969 d
+                JOIN outbound_operations_v969 o ON o.operation_id=d.operation_id
+                WHERE o.account_id=? AND d.message_id=?
+                ORDER BY d.rowid LIMIT 1
+                """,
+                (str(account_id or ""), mid),
+            ).fetchone()
+        if not row:
+            return None
+        value = dict(row)
+        value["canonical_sent_archived"] = bool(value.get("canonical_sent_archived"))
+        return value
+
     def by_message_id(self, account_id: str, message_id: str) -> dict[str, Any] | None:
         mid = str(message_id or "").strip()
         if not mid:
@@ -233,6 +263,63 @@ class OutboundOperationStore:
             if row:
                 operation_id = str(row["operation_id"] or "")
         return self.get_operation(operation_id) if operation_id else None
+
+    @staticmethod
+    def _reply_reference_ids(raw: bytes) -> list[tuple[str, str]]:
+        try:
+            msg = BytesParser(policy=policy.default).parsebytes(raw)
+        except Exception:
+            return []
+        ordered: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        in_reply_to = str(msg.get("In-Reply-To") or "")
+        references = str(msg.get("References") or "")
+        for source, value in (("in_reply_to", in_reply_to), ("references", references)):
+            ids = _MESSAGE_ID_RE.findall(value)
+            if source == "references":
+                ids = list(reversed(ids))
+            for mid in ids:
+                if mid in seen:
+                    continue
+                seen.add(mid)
+                ordered.append((source, mid))
+        return ordered
+
+    def resolve_reply(self, account_id: str, raw: bytes) -> dict[str, Any] | None:
+        """Resolve an inbound reply to one delivery and the existing logical root.
+
+        This is read-only: it never creates or mutates a logical outbound operation.
+        In-Reply-To wins; References are checked newest-first as a fallback.
+        """
+        account = str(account_id or "")
+        for source, mid in self._reply_reference_ids(raw):
+            delivery = self.delivery_by_message_id(account, mid)
+            if delivery:
+                return {
+                    "logical_outbound_operation_id": str(delivery["operation_id"]),
+                    "matched_delivery_id": str(delivery["delivery_id"]),
+                    "matched_delivery_message_id": str(delivery["message_id"]),
+                    "canonical_sent_message_id": str(delivery["canonical_message_id"]),
+                    "recipient": str(delivery.get("recipient") or ""),
+                    "recipient_role": str(delivery.get("role") or ""),
+                    "matched_via": source,
+                    "logical_outbound_root_created": False,
+                }
+            operation = self.by_message_id(account, mid)
+            if operation:
+                return {
+                    "logical_outbound_operation_id": str(operation["operation_id"]),
+                    "matched_delivery_id": "",
+                    "matched_delivery_message_id": mid,
+                    "canonical_sent_message_id": str(
+                        operation.get("canonical_message_id") or ""
+                    ),
+                    "recipient": "",
+                    "recipient_role": "",
+                    "matched_via": source,
+                    "logical_outbound_root_created": False,
+                }
+        return None
 
 
 @lru_cache(maxsize=1)
