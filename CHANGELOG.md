@@ -2,6 +2,40 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.7.0 - 2026-08-24
+
+### WebGUI visual refresh — enterprise operational redesign
+
+**PRESENTATION / RESPONSIVE / ACCESSIBILITY ONLY.**
+
+### Material changes
+- Complete WebGUI visual redesign.
+- Dense operational + enterprise executive visual hierarchy.
+- Desktop/tablet/mobile responsive redesign.
+- Compact enterprise navigation and contextual shell.
+- Improved Inbox/Sent/Compose presentation.
+- Tasks list/calendar responsive presentation.
+- Knowledge/Memories/Skills responsive drill-down presentation.
+- Mobile full-screen readers/editors/sheets.
+- Accessibility/focus/dialog/reduced-motion improvements.
+- Visual state and table/layout improvements.
+
+### Compatibility / functional freeze
+- No functional behavior changes.
+- MCP command-name delta: 0 (97 -> 97).
+- MCP schema delta: 0.
+- Backend/API semantics delta: 0.
+- Mail behavior delta: 0.
+- Tracking semantics delta: 0.
+- Privacy Proxy / Full HTML / High-Noise semantics delta: 0.
+- Lifecycle delta: 0.
+- Scheduler semantics delta: 0.
+- Knowledge/File Store semantics delta: 0.
+- Persistent DB/schema/migration delta: 0.
+- Cloudflare Worker delta: 0.
+- `postmaster-mcp.yml` delta: 0.
+- `requirements.txt` delta: 0.
+
 ## 9.6.9 - 2026-08-24
 
 ### Fixed / changed
