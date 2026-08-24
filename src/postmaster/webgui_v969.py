@@ -13,6 +13,7 @@ from starlette.responses import RedirectResponse
 from .outbound_operations_v969 import outbound_operation_store
 from .privacy_cache_v969 import PassiveContentService
 
+
 def _sender_metadata(account_id: str, raw: bytes) -> dict[str, Any]:
     try:
         msg = BytesParser(policy=policy.default).parsebytes(raw)
@@ -27,6 +28,26 @@ def _sender_metadata(account_id: str, raw: bytes) -> dict[str, Any]:
         "cc": [str(msg.get("Cc") or "")] if str(msg.get("Cc") or "").strip() else [],
         "bcc": [],
     }
+
+
+def _remote_refresh_form(
+    base_obj: Any,
+    *,
+    account_id: str,
+    mailbox: str,
+    uid: str,
+    label: str,
+) -> str:
+    csrf = escape(str(base_obj._csrf_value()), quote=True)
+    return (
+        '<form method="post" action="/dashboard/inbox/full-html" class="v963-refresh-remote">'
+        f'<input type="hidden" name="csrf" value="{csrf}">'
+        f'<input type="hidden" name="account_id" value="{escape(account_id, quote=True)}">'
+        f'<input type="hidden" name="mailbox" value="{escape(mailbox, quote=True)}">'
+        f'<input type="hidden" name="uid" value="{escape(uid, quote=True)}">'
+        '<input type="hidden" name="refresh_remote" value="1">'
+        f'<button type="submit">{escape(label)}</button></form>'
+    )
 
 
 def _install_webgui_v969(base: Any, v963: Any, service: PassiveContentService) -> None:
@@ -84,6 +105,10 @@ def _install_webgui_v969(base: Any, v963: Any, service: PassiveContentService) -
         }
         if state != "failure":
             params["full_html"] = "1"
+        else:
+            # The negative-cache state is intentionally reopen-safe (zero network), but
+            # the user must retain an explicit way to authorize a fresh network cycle.
+            params["remote_fetch_failed"] = "1"
         return RedirectResponse("/?" + urlencode(params) + "#inbox", status_code=303)
 
     confirm_full_html._postmaster_v969_shared_pipeline = True  # type: ignore[attr-defined]
@@ -121,19 +146,53 @@ def _install_webgui_v969(base: Any, v963: Any, service: PassiveContentService) -
                         count=1,
                         flags=re.DOTALL,
                     )
-        if request.query_params.get("full_html") == "1":
-            csrf = escape(str(base_obj._csrf_value()), quote=True)
-            refresh_form = (
-                '<form method="post" action="/dashboard/inbox/full-html" class="v963-refresh-remote">'
-                f'<input type="hidden" name="csrf" value="{csrf}">'
-                f'<input type="hidden" name="account_id" value="{escape(account_id, quote=True)}">'
-                f'<input type="hidden" name="mailbox" value="{escape(mailbox, quote=True)}">'
-                f'<input type="hidden" name="uid" value="{escape(uid, quote=True)}">'
-                '<input type="hidden" name="refresh_remote" value="1">'
-                '<button type="submit">Refresh remote content</button></form>'
+
+        full_render = request.query_params.get("full_html") == "1"
+        explicit_failure = request.query_params.get("remote_fetch_failed") == "1"
+        cached_failure = False
+        if not full_render:
+            try:
+                cached = service.render_cached_message(
+                    account_id=account_id,
+                    mailbox=mailbox,
+                    uid=uid,
+                )
+                diag = dict(cached.get("diagnostics") or {})
+                cached_failure = bool(
+                    cached.get("render_state") == "failure"
+                    and int(diag.get("negative_cache_hits") or 0) > 0
+                )
+            except Exception:
+                cached_failure = False
+
+        if full_render:
+            refresh_form = _remote_refresh_form(
+                base_obj,
+                account_id=account_id,
+                mailbox=mailbox,
+                uid=uid,
+                label="Refresh remote content",
             )
             marker = '<span class="v963-chip warn">HTML completo · passive resources via local cache</span>'
             rendered = rendered.replace(marker, marker + refresh_form, 1)
+        elif explicit_failure or cached_failure:
+            retry_form = _remote_refresh_form(
+                base_obj,
+                account_id=account_id,
+                mailbox=mailbox,
+                uid=uid,
+                label="Riprova contenuti remoti",
+            )
+            failure_ui = (
+                '<div class="v963-warning v969-remote-failure">'
+                '<strong>I contenuti remoti non sono disponibili dalla cache.</strong>'
+                '<p class="small muted">La riapertura normale non effettua nuove richieste. '
+                'Usa questa azione solo per autorizzare un nuovo tentativo tramite Privacy Proxy.</p>'
+                + retry_form
+                + '</div>'
+            )
+            marker = '<span class="v963-chip ok">Email sicura · default</span>'
+            rendered = rendered.replace(marker, marker + failure_ui, 1)
         return rendered
 
     _detail._postmaster_v969_sent_recipients = True  # type: ignore[attr-defined]
