@@ -5,6 +5,7 @@ from contextvars import ContextVar
 from email.message import EmailMessage
 from typing import Any
 
+from .delivery_reliability import ReliabilityStore
 from .mail_v950 import PostmasterV950MailClient
 from .mail_v960 import PostmasterV960MailClient
 from .mail_v960_unsubscribe import PostmasterV960NewsletterMailClient
@@ -271,6 +272,33 @@ def _install_outbound_archive_boundary() -> None:
 
         _safe_outbound._postmaster_v969_logical_metadata = True  # type: ignore[attr-defined]
         PostmasterV960MailClient._safe_outbound = _safe_outbound  # type: ignore[assignment]
+
+    current_inbound = ReliabilityStore.process_inbound
+    if not getattr(current_inbound, "_postmaster_v969_logical_reply", False):
+
+        def _process_inbound(
+            self: ReliabilityStore,
+            raw: bytes,
+            *,
+            account_id: str = "",
+        ) -> dict[str, Any]:
+            result = current_inbound(self, raw, account_id=account_id)
+            if not isinstance(result, dict):
+                return result
+            try:
+                correlation = outbound_operation_store().resolve_reply(account_id, raw)
+            except Exception:
+                correlation = None
+            if correlation:
+                result["logical_outbound_operation_id"] = correlation[
+                    "logical_outbound_operation_id"
+                ]
+                result["logical_outbound_correlation"] = correlation
+                result["logical_outbound_root_created"] = False
+            return result
+
+        _process_inbound._postmaster_v969_logical_reply = True  # type: ignore[attr-defined]
+        ReliabilityStore.process_inbound = _process_inbound  # type: ignore[assignment]
 
 
 __all__ = [
