@@ -30,6 +30,8 @@ _CSS_IMPORT_RE = re.compile(
 _CSS_DANGEROUS_RE = re.compile(r"(?is)(?:expression\s*\(|-moz-binding\s*:|behavior\s*:)")
 _NESTED_ALLOWED_TYPES = set(_ALLOWED_PROXY_TYPES) - {"text/css"}
 _LOCAL_RESOURCE_PREFIX = "/dashboard/inbox/resource?"
+_LOCAL_KEY_RE = re.compile(r"/dashboard/inbox/resource\?key=(r_[0-9a-f]{64})")
+_NEGATIVE_KEY_RE = re.compile(r"/\*postmaster-negative:(r_[0-9a-f]{64})\*/")
 
 
 def _is_success(row: dict[str, Any] | None) -> bool:
@@ -240,6 +242,35 @@ class BoundedPassiveContentService(PassiveContentService):
             if _CSS_DANGEROUS_RE.search(css):
                 css = _CSS_DANGEROUS_RE.sub("blocked(", css)
 
+            # Reopen of already-rewritten CSS: keep local references local, rebind move-stable
+            # cache rows to the current mailbox/UID, and preserve negative-cache state without
+            # retaining any remote origin URL in browser-consumable CSS.
+            for key in set(_LOCAL_KEY_RE.findall(css)):
+                row = cache.get_resource(key)
+                if row is not None:
+                    self._rebind_resource(
+                        cache,
+                        key,
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                    )
+                    if _is_success(row):
+                        stats["nested_cache_hits"] += 1
+                    else:
+                        stats["nested_negative_cache_hits"] += 1
+            for key in set(_NEGATIVE_KEY_RE.findall(css)):
+                row = cache.get_resource(key)
+                if row is not None:
+                    self._rebind_resource(
+                        cache,
+                        key,
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                    )
+                    stats["nested_negative_cache_hits"] += 1
+
             refs: list[dict[str, Any]] = []
             key_by_url: dict[str, str] = {}
             seen: set[str] = set()
@@ -275,8 +306,22 @@ class BoundedPassiveContentService(PassiveContentService):
                     self._delete_keys(cache, [key])
                 row = cache.get_resource(key)
                 if _is_success(row):
+                    self._rebind_resource(
+                        cache,
+                        key,
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                    )
                     stats["nested_cache_hits"] += 1
                 elif row is not None:
+                    self._rebind_resource(
+                        cache,
+                        key,
+                        account_id=account_id,
+                        mailbox=mailbox,
+                        uid=uid,
+                    )
                     stats["nested_negative_cache_hits"] += 1
                 elif network_allowed:
                     work.append(spec)
@@ -310,7 +355,7 @@ class BoundedPassiveContentService(PassiveContentService):
                 for future in pending:
                     spec = futures[future]
                     future.cancel()
-                    row, cumulative_remaining = self._store_nested(
+                    self._store_nested(
                         spec=spec,
                         fetched={
                             "status": None,
@@ -356,6 +401,8 @@ class BoundedPassiveContentService(PassiveContentService):
                 if _is_success(row):
                     local = _LOCAL_RESOURCE_PREFIX + urlencode({"key": key})
                     return f'url("{local}")'
+                if key:
+                    return f'url("")/*postmaster-negative:{key}*/'
                 return 'url("")'
 
             rewritten = _CSS_URL_RE.sub(rewrite_url, css).encode("utf-8")
@@ -401,15 +448,14 @@ class BoundedPassiveContentService(PassiveContentService):
         nested_attempted = int(nested.get("nested_attempted") or 0)
         nested_succeeded = int(nested.get("nested_succeeded") or 0)
         nested_failed = int(nested.get("nested_failed") or 0)
+        nested_negative = int(nested.get("nested_negative_cache_hits") or 0)
         stylesheet_failures = int(nested.get("stylesheet_failures") or 0)
         diag.update(nested)
         diag["genuine_attempted"] = int(diag.get("genuine_attempted") or 0) + nested_attempted
         diag["genuine_succeeded"] = int(diag.get("genuine_succeeded") or 0) + nested_succeeded
         diag["genuine_failed"] = int(diag.get("genuine_failed") or 0) + nested_failed + stylesheet_failures
         diag["cache_hits"] = int(diag.get("cache_hits") or 0) + int(nested.get("nested_cache_hits") or 0)
-        diag["negative_cache_hits"] = int(diag.get("negative_cache_hits") or 0) + int(
-            nested.get("nested_negative_cache_hits") or 0
-        )
+        diag["negative_cache_hits"] = int(diag.get("negative_cache_hits") or 0) + nested_negative
         diag["css_bounds"] = {
             "max_stylesheet_bytes": MAX_STYLESHEET_BYTES,
             "max_nested_resources_per_stylesheet": MAX_NESTED_RESOURCES_PER_STYLESHEET,
@@ -423,10 +469,10 @@ class BoundedPassiveContentService(PassiveContentService):
         }
 
         prior = str(result.get("render_state") or "success")
-        extra_failures = nested_failed + stylesheet_failures
+        effective_failures = nested_failed + nested_negative + stylesheet_failures
         if prior == "failure":
             state = "failure"
-        elif extra_failures:
+        elif effective_failures:
             state = "partial" if int(nested.get("top_positive_after") or 0) > 0 else "failure"
         else:
             state = prior
