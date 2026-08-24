@@ -227,6 +227,25 @@ ENTERPRISE_SCRIPT = r'''
 (() => {
   const labels = %VIEW_LABELS%;
   let moreReturnFocus = null;
+  let syncQueued = false;
+
+  function setText(node, value) {
+    if (node && node.textContent !== value) node.textContent = value;
+  }
+  function setAttr(node, name, value) {
+    if (!node) return;
+    if (value === null) {
+      if (node.hasAttribute(name)) node.removeAttribute(name);
+    } else if (node.getAttribute(name) !== value) {
+      node.setAttribute(name, value);
+    }
+  }
+  function toggleClass(node, name, enabled) {
+    if (node && node.classList.contains(name) !== enabled) node.classList.toggle(name, enabled);
+  }
+  function setTabIndex(node, value) {
+    if (node && node.tabIndex !== value) node.tabIndex = value;
+  }
 
   function currentView() {
     const active = document.querySelector('.tab-panel.active');
@@ -240,14 +259,14 @@ ENTERPRISE_SCRIPT = r'''
     const view = currentView(), item = labels[view] || labels.overview;
     const title = document.querySelector('[data-v970-context-title]');
     const sub = document.querySelector('[data-v970-context-subtitle]');
-    if (title) title.textContent = item[0];
-    if (sub) sub.textContent = item[1];
+    setText(title, item[0]);
+    setText(sub, item[1]);
     document.querySelectorAll('[data-v970-nav]').forEach(el => {
       const active = el.dataset.v970Nav === view;
-      el.classList.toggle('active', active);
-      if (el.tagName === 'A') active ? el.setAttribute('aria-current','page') : el.removeAttribute('aria-current');
+      toggleClass(el, 'active', active);
+      if (el.tagName === 'A') setAttr(el, 'aria-current', active ? 'page' : null);
     });
-    document.body.dataset.v970View = view;
+    if (document.body.dataset.v970View !== view) document.body.dataset.v970View = view;
   }
 
   function setBackgroundInert(open) {
@@ -257,10 +276,10 @@ ENTERPRISE_SCRIPT = r'''
     ].filter(Boolean);
     nodes.forEach(node => {
       if (open) {
-        node.dataset.v970InertWas = node.hasAttribute('inert') ? '1' : '0';
-        node.setAttribute('inert','');
+        if (node.dataset.v970InertWas === undefined) node.dataset.v970InertWas = node.hasAttribute('inert') ? '1' : '0';
+        if (!node.hasAttribute('inert')) node.setAttribute('inert','');
       } else if (node.dataset.v970InertWas !== undefined) {
-        if (node.dataset.v970InertWas === '0') node.removeAttribute('inert');
+        if (node.dataset.v970InertWas === '0' && node.hasAttribute('inert')) node.removeAttribute('inert');
         delete node.dataset.v970InertWas;
       }
     });
@@ -273,10 +292,10 @@ ENTERPRISE_SCRIPT = r'''
     const sheet=document.querySelector('.v970-more-sheet');
     const back=document.querySelector('.v970-sheet-backdrop');
     const button=document.querySelector('[data-v970-more]');
-    sheet?.classList.remove('v970-open');
-    back?.classList.remove('v970-open');
-    sheet?.setAttribute('aria-hidden','true');
-    button?.setAttribute('aria-expanded','false');
+    toggleClass(sheet,'v970-open',false);
+    toggleClass(back,'v970-open',false);
+    setAttr(sheet,'aria-hidden','true');
+    setAttr(button,'aria-expanded','false');
     setBackgroundInert(false);
     if (restoreFocus) {
       const target = moreReturnFocus && document.contains(moreReturnFocus) ? moreReturnFocus : button;
@@ -286,10 +305,10 @@ ENTERPRISE_SCRIPT = r'''
   }
   function openMore() {
     const sheet=document.querySelector('.v970-more-sheet'), back=document.querySelector('.v970-sheet-backdrop'), button=document.querySelector('[data-v970-more]');
-    if (!sheet || !button) return;
+    if (!sheet || !button || moreIsOpen()) return;
     moreReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : button;
-    sheet.classList.add('v970-open'); back?.classList.add('v970-open');
-    sheet.setAttribute('aria-hidden','false'); button.setAttribute('aria-expanded','true');
+    toggleClass(sheet,'v970-open',true); toggleClass(back,'v970-open',true);
+    setAttr(sheet,'aria-hidden','false'); setAttr(button,'aria-expanded','true');
     setBackgroundInert(true);
     (sheet.querySelector('[data-v970-more-close]') || sheet.querySelector('a,button'))?.focus();
   }
@@ -305,16 +324,33 @@ ENTERPRISE_SCRIPT = r'''
     else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
   }
 
+  function readThemePreference() {
+    try { return localStorage.getItem('postmaster:v970:theme'); } catch (_error) { return null; }
+  }
+  function writeThemePreference(value) {
+    try {
+      if(value==='system') localStorage.removeItem('postmaster:v970:theme');
+      else localStorage.setItem('postmaster:v970:theme',value);
+    } catch (_error) {}
+  }
   function applyTheme(value) {
     const root=document.documentElement;
-    if(value==='dark'||value==='light') root.dataset.v970Theme=value; else delete root.dataset.v970Theme;
+    if(value==='dark'||value==='light') {
+      if(root.dataset.v970Theme !== value) root.dataset.v970Theme=value;
+    } else if(root.dataset.v970Theme !== undefined) {
+      delete root.dataset.v970Theme;
+    }
     const button=document.querySelector('[data-v970-theme-toggle]');
-    if(button){const actual=root.dataset.v970Theme||'system';button.textContent=actual==='dark'?'☾':actual==='light'?'☀':'◐';button.setAttribute('aria-label','Theme: '+actual+'. Activate to change.');}
+    if(button){
+      const actual=root.dataset.v970Theme||'system';
+      setText(button,actual==='dark'?'☾':actual==='light'?'☀':'◐');
+      setAttr(button,'aria-label','Theme: '+actual+'. Activate to change.');
+    }
   }
   function cycleTheme() {
     const current=document.documentElement.dataset.v970Theme||'system';
     const next=current==='system'?'dark':current==='dark'?'light':'system';
-    if(next==='system') localStorage.removeItem('postmaster:v970:theme'); else localStorage.setItem('postmaster:v970:theme',next);
+    writeThemePreference(next);
     applyTheme(next);
   }
 
@@ -323,9 +359,9 @@ ENTERPRISE_SCRIPT = r'''
     const days=taskDays(); if (!day || !days.includes(day)) return;
     days.forEach(candidate => {
       const selected=candidate === day;
-      candidate.classList.toggle('v970-selected', selected);
-      candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
-      candidate.tabIndex = selected ? 0 : -1;
+      toggleClass(candidate,'v970-selected',selected);
+      setAttr(candidate,'aria-selected',selected ? 'true' : 'false');
+      setTabIndex(candidate,selected ? 0 : -1);
     });
     const shell=day.closest('.task-calendar-shell'); if (!shell) return;
     let agenda=shell.nextElementSibling;
@@ -334,22 +370,26 @@ ENTERPRISE_SCRIPT = r'''
     }
     const date=day.querySelector('.task-calendar-date')?.textContent?.trim() || 'Selected day';
     const month=document.querySelector('#panel-scheduler .task-calendar-month')?.textContent?.trim() || '';
+    const events=[...day.querySelectorAll(':scope > .task-calendar-event')];
+    const signature=[date,month,...events.map(event => event.textContent?.trim() || '')].join('\u0000');
+    if (agenda.dataset.v970AgendaSignature === signature) return;
     agenda.replaceChildren();
     const head=document.createElement('div'); head.className='v970-task-day-agenda-head';
     const strong=document.createElement('strong'); strong.textContent=date;
     const span=document.createElement('span'); span.textContent=month;
     head.append(strong,span); agenda.append(head);
-    const events=[...day.querySelectorAll(':scope > .task-calendar-event')];
     if (!events.length) {
       const empty=document.createElement('p'); empty.className='small muted'; empty.textContent='No tasks for this day.'; agenda.append(empty);
     } else {
       events.forEach(event => { const clone=event.cloneNode(true); clone.classList.add('v970-agenda-event'); agenda.append(clone); });
     }
+    agenda.dataset.v970AgendaSignature=signature;
   }
   function initTaskCalendar() {
     const days=taskDays(); if (!days.length) return;
     days.forEach(day => {
-      day.setAttribute('role','button'); day.setAttribute('aria-label','Show task agenda for '+(day.querySelector('.task-calendar-date')?.textContent?.trim() || 'day'));
+      setAttr(day,'role','button');
+      setAttr(day,'aria-label','Show task agenda for '+(day.querySelector('.task-calendar-date')?.textContent?.trim() || 'day'));
       if (!day.hasAttribute('aria-selected')) day.setAttribute('aria-selected','false');
       if (!day.hasAttribute('tabindex')) day.tabIndex=-1;
     });
@@ -370,7 +410,7 @@ ENTERPRISE_SCRIPT = r'''
     const panel=document.querySelector('#panel-knowledge'); if (!panel) return;
     const detail=panel.querySelector('.grid > .card.wide:has(.markdown-viewer)');
     if (detail) {
-      detail.classList.add('v970-knowledge-detail'); ensureKnowledgeBack(detail);
+      toggleClass(detail,'v970-knowledge-detail',true); ensureKnowledgeBack(detail);
       if (!detail.querySelector('.v970-knowledge-meta')) {
         const id=new URL(location.href).searchParams.get('view_knowledge');
         const rows=[...panel.querySelectorAll('.grid > .card.wide:last-child tbody tr')];
@@ -388,12 +428,20 @@ ENTERPRISE_SCRIPT = r'''
     }
     const editor=panel.querySelector('.v962-collapsible[data-v962-state-key="knowledge-editor"]');
     if (editor) {
-      editor.classList.add('v970-knowledge-editor');
+      toggleClass(editor,'v970-knowledge-editor',true);
       if (editor.open) ensureKnowledgeBack(editor.querySelector('.v962-collapsible-body'));
     }
   }
 
   function syncPresentation() { syncContext(); initTaskCalendar(); initKnowledgeDrilldown(); }
+  function schedulePresentationSync() {
+    if (syncQueued) return;
+    syncQueued = true;
+    queueMicrotask(() => {
+      syncQueued = false;
+      syncPresentation();
+    });
+  }
 
   document.addEventListener('click',ev=>{
     if(ev.target.closest('[data-v970-more]')){toggleMore();return}
@@ -402,19 +450,23 @@ ENTERPRISE_SCRIPT = r'''
     if(ev.target.closest('.v970-more-sheet a'))closeMore(false);
     const day=ev.target.closest('.task-calendar-day');
     if(day && !ev.target.closest('a,button,input,form,select,textarea')){selectTaskDay(day);return}
-    queueMicrotask(syncPresentation);
+    schedulePresentationSync();
   });
-  window.addEventListener('popstate',()=>queueMicrotask(syncPresentation));
-  window.addEventListener('hashchange',()=>queueMicrotask(syncPresentation));
+  window.addEventListener('popstate',schedulePresentationSync);
+  window.addEventListener('hashchange',schedulePresentationSync);
   document.addEventListener('keydown',ev=>{
     if(ev.key==='Escape' && moreIsOpen()){ev.preventDefault();closeMore(true);return}
     trapMoreFocus(ev);
     const day=ev.target.closest?.('.task-calendar-day');
     if(day && (ev.key==='Enter'||ev.key===' ')){ev.preventDefault();selectTaskDay(day);}
   });
-  new MutationObserver(()=>queueMicrotask(syncPresentation)).observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','open']});
-  applyTheme(localStorage.getItem('postmaster:v970:theme')||'system');
+
+  applyTheme(readThemePreference()||'system');
   syncPresentation();
+  // Lazy fragments replace panel DOM asynchronously; observe those external changes only.
+  // Because syncPresentation is idempotent, any presentation mutations converge and stop.
+  const presentationObserver = new MutationObserver(schedulePresentationSync);
+  presentationObserver.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['class','open']});
 })();
 </script>
 '''
