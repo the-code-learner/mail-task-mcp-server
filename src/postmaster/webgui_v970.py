@@ -28,6 +28,8 @@ NAV_GROUPS = (
     )),
     ("Control", (
         ("security", "Security", "SC"),
+        ("domains", "Domain controls", "DM"),
+        ("recipients", "Recipient controls", "RC"),
         ("amp", "AMP", "AM"),
         ("system", "System", "SY"),
         ("coverage", "MCP Coverage", "MC"),
@@ -48,6 +50,8 @@ VIEW_LABELS = {
     "files": ("Files", "Persistent File Store"),
     "scheduler": ("Tasks", "Registry list and calendar views"),
     "security": ("Security", "Privacy Proxy and security posture"),
+    "domains": ("Domain controls", "Authorized domain policy"),
+    "recipients": ("Recipient controls", "Exact-address authorization policy"),
     "amp": ("AMP", "AMP-for-Email account capability"),
     "system": ("System", "Runtime and service status"),
     "coverage": ("MCP Coverage", "Current MCP surface coverage"),
