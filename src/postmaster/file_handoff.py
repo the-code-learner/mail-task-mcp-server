@@ -9,7 +9,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from mcp.types import CallToolResult, ResourceLink
+from mcp.types import CallToolResult, ResourceLink, TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 
@@ -214,29 +214,37 @@ def _validate_signed_request(
 
 
 def stored_file_resource_result(store: FileStore, file_id: str, transport: str = "auto") -> CallToolResult:
-    mode = (transport or "auto").strip().lower()
-    if mode not in {"auto", "http", "mcp"}:
-        raise FileHandoffError("transport must be one of: auto, http, mcp")
+    try:
+        mode = (transport or "auto").strip().lower()
+        if mode not in {"auto", "http", "mcp"}:
+            raise FileHandoffError("transport must be one of: auto, http, mcp")
 
-    info = store.get_info(file_id)
-    if mode == "auto":
-        mode = "http" if _public_base_url(required=False) else "mcp"
+        info = store.get_info(file_id)
+        if mode == "auto":
+            mode = "http" if _public_base_url(required=False) else "mcp"
 
-    if mode == "http":
-        uri = build_signed_file_url(store, file_id)
-    else:
-        uri = f"postmaster://files/{quote(file_id, safe='')}"
+        if mode == "http":
+            uri = build_signed_file_url(store, file_id)
+        else:
+            uri = f"postmaster://files/{quote(file_id, safe='')}"
 
-    description = str(info.get("description") or "").strip() or "Postmaster stored file"
-    link = ResourceLink(
-        type="resource_link",
-        uri=uri,
-        name=str(info.get("filename") or file_id),
-        description=description,
-        mime_type=str(info.get("media_type") or "application/octet-stream"),
-        size=int(info.get("size_bytes") or 0),
-    )
-    return CallToolResult(content=[link])
+        description = str(info.get("description") or "").strip() or "Postmaster stored file"
+        link = ResourceLink(
+            type="resource_link",
+            uri=uri,
+            name=str(info.get("filename") or file_id),
+            description=description,
+            mime_type=str(info.get("media_type") or "application/octet-stream"),
+            size=int(info.get("size_bytes") or 0),
+        )
+        return CallToolResult(content=[link])
+    except FileStoreError as exc:
+        # Expected handoff/storage failures should remain useful structured tool errors
+        # rather than being collapsed by the MCP SDK into a generic UnexpectedToolError.
+        return CallToolResult(
+            content=[TextContent(type="text", text=str(exc))],
+            is_error=True,
+        )
 
 
 def read_stored_file_resource(store: FileStore, file_id: str) -> bytes:
