@@ -9,16 +9,21 @@ from collections.abc import Iterator
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
-from mcp.types import CallToolResult, ResourceLink
+from mcp.types import CallToolResult, ResourceLink, TextContent
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response, StreamingResponse
 
 from .file_store import FileStore, FileStoreError
 
 
+# Legacy expiring-link bounds are retained so URLs generated before the durable
+# capability transition keep their original verification semantics. New links use
+# DURABLE_DOWNLOAD_EXPIRY and remain valid for the lifetime of the exact stored-file
+# record instead of depending on this TTL.
 DEFAULT_DOWNLOAD_TTL_SECONDS = 900
 MAX_DOWNLOAD_TTL_SECONDS = 86400
 MIN_DOWNLOAD_TTL_SECONDS = 30
+DURABLE_DOWNLOAD_EXPIRY = 0
 DOWNLOAD_SECRET_PATH = Path("/data/file-store-download.secret")
 STREAM_CHUNK_BYTES = 64 * 1024
 
@@ -61,6 +66,7 @@ def _public_base_url(*, required: bool = False) -> str | None:
 
 
 def download_ttl_seconds() -> int:
+    """Return the configured lifetime for legacy expiring download capabilities."""
     raw = os.getenv("FILE_STORE_DOWNLOAD_URL_TTL_SECONDS", str(DEFAULT_DOWNLOAD_TTL_SECONDS)).strip()
     try:
         value = int(raw)
@@ -118,7 +124,26 @@ def _download_secret() -> bytes:
 
 
 def _download_signature(file_id: str, expires: int) -> str:
+    """Legacy v9.3 expiring capability signature retained for backwards compatibility."""
     canonical = f"{file_id}\n{int(expires)}".encode("utf-8")
+    return hmac.new(_download_secret(), canonical, hashlib.sha256).hexdigest()
+
+
+def _durable_download_signature(info: dict) -> str:
+    """Bind a durable capability to one exact immutable FileStore record incarnation.
+
+    The token binds the opaque file id plus content digest and immutable creation time.
+    Deleting and later re-creating a record with the same id therefore does not resurrect
+    an old capability, even when the replacement happens to contain identical bytes.
+    """
+    canonical = "\n".join(
+        (
+            "postmaster-file-capability-v2",
+            str(info.get("id") or ""),
+            str(info.get("sha256") or ""),
+            str(info.get("created_at") or ""),
+        )
+    ).encode("utf-8")
     return hmac.new(_download_secret(), canonical, hashlib.sha256).hexdigest()
 
 
@@ -129,10 +154,25 @@ def build_signed_file_url(
     now: int | None = None,
     expires: int | None = None,
 ) -> str:
-    store.get_info(file_id)
+    """Build a public file capability.
+
+    New calls without an explicit ``expires`` value produce a durable capability using
+    ``expires=0`` as the versioned no-expiry sentinel. It remains valid while the exact
+    stored-file record exists. Supplying ``expires`` intentionally produces the legacy
+    short-lived capability so older integrations and tests remain interoperable.
+    """
+    info = store.get_info(file_id)
     base = _public_base_url(required=True)
+
+    if expires is None:
+        signature = _durable_download_signature(info)
+        return (
+            f"{base}/files/{quote(file_id, safe='')}?"
+            f"expires={DURABLE_DOWNLOAD_EXPIRY}&sig={signature}"
+        )
+
     current = int(time.time()) if now is None else int(now)
-    expiry = current + download_ttl_seconds() if expires is None else int(expires)
+    expiry = int(expires)
     if expiry <= current:
         raise FileHandoffError("signed file URL expiry must be in the future")
     if expiry - current > MAX_DOWNLOAD_TTL_SECONDS:
@@ -141,13 +181,28 @@ def build_signed_file_url(
     return f"{base}/files/{quote(file_id, safe='')}?expires={expiry}&sig={signature}"
 
 
-def _validate_signed_request(file_id: str, expires_raw: str, signature: str, *, now: int | None = None) -> None:
+def _validate_signed_request(
+    store: FileStore,
+    file_id: str,
+    expires_raw: str,
+    signature: str,
+    *,
+    now: int | None = None,
+) -> None:
     if not expires_raw or not signature:
         raise FileHandoffError("missing signed file URL expiry or signature")
     try:
         expires = int(expires_raw)
     except ValueError as exc:
         raise FileHandoffError("invalid signed file URL expiry") from exc
+
+    if expires == DURABLE_DOWNLOAD_EXPIRY:
+        info = store.get_info(file_id)
+        expected = _durable_download_signature(info)
+        if not hmac.compare_digest(expected, signature):
+            raise FileHandoffError("invalid durable file URL signature")
+        return
+
     current = int(time.time()) if now is None else int(now)
     if expires <= current:
         raise FileHandoffError("signed file URL has expired")
@@ -159,29 +214,37 @@ def _validate_signed_request(file_id: str, expires_raw: str, signature: str, *, 
 
 
 def stored_file_resource_result(store: FileStore, file_id: str, transport: str = "auto") -> CallToolResult:
-    mode = (transport or "auto").strip().lower()
-    if mode not in {"auto", "http", "mcp"}:
-        raise FileHandoffError("transport must be one of: auto, http, mcp")
+    try:
+        mode = (transport or "auto").strip().lower()
+        if mode not in {"auto", "http", "mcp"}:
+            raise FileHandoffError("transport must be one of: auto, http, mcp")
 
-    info = store.get_info(file_id)
-    if mode == "auto":
-        mode = "http" if _public_base_url(required=False) else "mcp"
+        info = store.get_info(file_id)
+        if mode == "auto":
+            mode = "http" if _public_base_url(required=False) else "mcp"
 
-    if mode == "http":
-        uri = build_signed_file_url(store, file_id)
-    else:
-        uri = f"postmaster://files/{quote(file_id, safe='')}"
+        if mode == "http":
+            uri = build_signed_file_url(store, file_id)
+        else:
+            uri = f"postmaster://files/{quote(file_id, safe='')}"
 
-    description = str(info.get("description") or "").strip() or "Postmaster stored file"
-    link = ResourceLink(
-        type="resource_link",
-        uri=uri,
-        name=str(info.get("filename") or file_id),
-        description=description,
-        mime_type=str(info.get("media_type") or "application/octet-stream"),
-        size=int(info.get("size_bytes") or 0),
-    )
-    return CallToolResult(content=[link])
+        description = str(info.get("description") or "").strip() or "Postmaster stored file"
+        link = ResourceLink(
+            type="resource_link",
+            uri=uri,
+            name=str(info.get("filename") or file_id),
+            description=description,
+            mime_type=str(info.get("media_type") or "application/octet-stream"),
+            size=int(info.get("size_bytes") or 0),
+        )
+        return CallToolResult(content=[link])
+    except FileStoreError as exc:
+        # Expected handoff/storage failures should remain useful structured tool errors
+        # rather than being collapsed by the MCP SDK into a generic UnexpectedToolError.
+        return CallToolResult(
+            content=[TextContent(type="text", text=str(exc))],
+            is_error=True,
+        )
 
 
 def read_stored_file_resource(store: FileStore, file_id: str) -> bytes:
@@ -247,11 +310,20 @@ def stored_file_http_response(request: Request, store: FileStore, *, require_sig
     if require_signature:
         try:
             _validate_signed_request(
+                store,
                 file_id,
                 str(request.query_params.get("expires") or ""),
                 str(request.query_params.get("sig") or ""),
             )
-        except FileHandoffError:
+        except FileStoreError as exc:
+            # FileHandoffError is a FileStoreError subclass. A deleted durable record
+            # returns 404; malformed/forged capabilities remain a generic 403.
+            if str(exc) == "stored file not found":
+                return PlainTextResponse(
+                    "stored file not found",
+                    status_code=404,
+                    headers={"Cache-Control": "private, no-store, max-age=0", "X-Content-Type-Options": "nosniff"},
+                )
             return PlainTextResponse(
                 "Forbidden",
                 status_code=403,
