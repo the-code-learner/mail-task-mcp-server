@@ -7,6 +7,7 @@ import uvicorn
 from . import runtime_core as _core
 from . import webgui_v962 as _webgui_v962
 from . import webgui_v963 as _webgui_v963
+from . import webgui_v964 as _webgui_v964
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
@@ -24,6 +25,8 @@ from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
 )
+from .webgui_compose_confirmation_v971 import install_compose_confirmation_v971
+from .webgui_mail_files_v971 import install_mail_files_composer_v971
 from .webgui_regressions_v971 import (
     install_full_html_partial_success_v971,
     install_webgui_interaction_regressions_v971,
@@ -135,12 +138,17 @@ install_webgui_interaction_regressions_v971(_webgui_v962)
 # Tracking is contextualized in Inbox/Sent after the final v9.7.0 cascade. It is read-only UI:
 # sensitive network telemetry stays server-side and a rendering failure never blocks mail access.
 install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
+# Add cache-only attachment viewing and the Inbox-first floating composer only after contextual
+# Tracking is complete. Legacy direct Compose/Tracking views remain routable but leave top-level IA.
+install_mail_files_composer_v971(app, _base, _webgui_v963, _webgui_v962, _webgui_v964)
+# Preserve every selected Stored File across the explicit suppression-warning confirmation POST.
+install_compose_confirmation_v971(_webgui_v964)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
 
 # Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
-# At this point render_inbox_v963 already references the final tracking-enriched renderer.
+# At this point render_inbox_v963 already references the final post-v9.7.0 Inbox renderer.
 _webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
 
 
