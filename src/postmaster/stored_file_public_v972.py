@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import re
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any, Callable
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -29,7 +30,6 @@ from .stored_file_delivery import (
     _stored_file_id_from_href,
     _validated_filename,
     _validated_media_type,
-    stored_file_link_store,
 )
 
 _PUBLIC_FILE_TOKEN_PREFIX = "sfp1_"
@@ -73,8 +73,6 @@ def resolve_public_stored_file_token(store: FileStore, token: str) -> dict[str, 
         for info in items:
             expected = _public_file_token_for_info(info, secret=secret)
             if hmac.compare_digest(expected, candidate):
-                # Re-read after the scan. Delete/recreate between lookup and dispatch
-                # must not silently reuse stale metadata from the first snapshot.
                 current = store.get_info(str(info.get("id") or ""))
                 if not hmac.compare_digest(
                     _public_file_token_for_info(current, secret=secret),
@@ -97,7 +95,8 @@ def _configured_public_path_prefix() -> tuple[str, str, str] | None:
     return parts.scheme.lower(), parts.netloc.lower(), prefix
 
 
-def resolve_public_stored_file_url(store: FileStore, url: str) -> dict[str, Any] | None:
+def _public_stored_file_token_from_url(url: str) -> str | None:
+    """Cheap syntax/origin classifier. It never opens the File Store."""
     configured = _configured_public_path_prefix()
     if configured is None:
         return None
@@ -112,6 +111,15 @@ def resolve_public_stored_file_url(store: FileStore, url: str) -> dict[str, Any]
         return None
     token = parts.path[len(prefix):]
     if "/" in token or not token.startswith(_PUBLIC_FILE_TOKEN_PREFIX):
+        return None
+    if not _PUBLIC_FILE_TOKEN_RE.fullmatch(token):
+        raise FileHandoffError("invalid public stored-file capability")
+    return token
+
+
+def resolve_public_stored_file_url(store: FileStore, url: str) -> dict[str, Any] | None:
+    token = _public_stored_file_token_from_url(url)
+    if token is None:
         return None
     return resolve_public_stored_file_token(store, token)
 
@@ -192,8 +200,6 @@ def _incarnation_matches(link: dict[str, Any], info: dict[str, Any]) -> bool:
             and hmac.compare_digest(expected_created, str(info.get("created_at") or ""))
         )
 
-    # Pre-v9.7.2 stored-file tracking rows did not persist immutable incarnation
-    # fields. A delete+recreate replacement is necessarily newer than the link row.
     link_created = _parse_utc(link.get("created_at"))
     file_created = _parse_utc(info.get("created_at"))
     if link_created is not None and file_created is not None and file_created > link_created:
@@ -251,8 +257,6 @@ async def public_tracking_target_v972(
 ) -> Response:
     token = str(request.path_params.get("token", "")).strip()
 
-    # Standalone MCP ResourceLink capability. There is no delivery/campaign to
-    # attribute yet, so this dispatches directly without manufacturing telemetry.
     if token.startswith(_PUBLIC_FILE_TOKEN_PREFIX):
         try:
             info = resolve_public_stored_file_token(file_store, token)
@@ -331,157 +335,177 @@ async def public_tracking_target_v972(
         return _public_not_found()
 
 
-def install_stored_file_public_v972(base: Any, core: Any) -> None:
-    """Install a forward-only composition patch without changing MCP command schemas."""
+class StoredFileLinkTrackingStoreV972(StoredFileLinkTrackingStore):
+    """Per-runtime v9.7.2 tracking store; no class-global runtime capture."""
 
-    cls = StoredFileLinkTrackingStore
-    if not getattr(cls, "_v972_public_download_patch", False):
-        original_init_schema = cls._init_schema
-        original_insert_stored_file_link = cls._insert_stored_file_link
-        original_resolve_prior_tracking_url = cls._resolve_prior_tracking_url
-        original_instrument_html_with_shares = cls.instrument_html_with_shares
+    def __init__(
+        self,
+        analytics: Any,
+        *,
+        file_store_provider: Callable[[], FileStore],
+    ) -> None:
+        self._v972_file_store_provider = file_store_provider
+        super().__init__(analytics)
 
-        def _init_schema_v972(self) -> None:
-            original_init_schema(self)
-            additions = {
-                "stored_file_sha256": "TEXT NOT NULL DEFAULT ''",
-                "stored_file_created_at": "TEXT NOT NULL DEFAULT ''",
+    def _file_store_v972(self) -> FileStore:
+        return self._v972_file_store_provider()
+
+    def _init_schema(self) -> None:
+        super()._init_schema()
+        additions = {
+            "stored_file_sha256": "TEXT NOT NULL DEFAULT ''",
+            "stored_file_created_at": "TEXT NOT NULL DEFAULT ''",
+        }
+        with self._connect() as conn:
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(tracking_links)").fetchall()
             }
-            with self._connect() as conn:
-                columns = {
-                    str(row["name"])
-                    for row in conn.execute("PRAGMA table_info(tracking_links)").fetchall()
-                }
-                for name, declaration in additions.items():
-                    if name not in columns:
-                        conn.execute(f"ALTER TABLE tracking_links ADD COLUMN {name} {declaration}")
+            for name, declaration in additions.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tracking_links ADD COLUMN {name} {declaration}")
 
-        def _insert_stored_file_link_v972(
-            self,
-            *,
-            delivery: dict[str, Any],
-            file_info: dict[str, Any],
-            position: int,
-            anchor_text: str,
-        ) -> dict[str, Any]:
-            record = original_insert_stored_file_link(
-                self,
-                delivery=delivery,
-                file_info=file_info,
-                position=position,
-                anchor_text=anchor_text,
+    def _insert_stored_file_link(
+        self,
+        *,
+        delivery: dict[str, Any],
+        file_info: dict[str, Any],
+        position: int,
+        anchor_text: str,
+    ) -> dict[str, Any]:
+        record = super()._insert_stored_file_link(
+            delivery=delivery,
+            file_info=file_info,
+            position=position,
+            anchor_text=anchor_text,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE tracking_links
+                SET stored_file_sha256=?, stored_file_created_at=?
+                WHERE id=?
+                """,
+                (
+                    str(file_info.get("sha256") or ""),
+                    str(file_info.get("created_at") or ""),
+                    str(record["occurrence_id"]),
+                ),
             )
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    UPDATE tracking_links
-                    SET stored_file_sha256=?, stored_file_created_at=?
-                    WHERE id=?
-                    """,
-                    (
-                        str(file_info.get("sha256") or ""),
-                        str(file_info.get("created_at") or ""),
-                        str(record["occurrence_id"]),
-                    ),
-                )
-            return record
+        return record
 
-        def _resolve_prior_tracking_url_v972(self, url: str, public_base):
-            try:
-                info = resolve_public_stored_file_url(base.file_store(), url)
-            except FileStoreError as exc:
-                raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
-            if info is not None:
-                return str(url or "").strip(), False
-            return original_resolve_prior_tracking_url(self, url, public_base)
+    def _resolve_prior_tracking_url(self, url: str, public_base: Any):
+        try:
+            token = _public_stored_file_token_from_url(url)
+        except FileHandoffError as exc:
+            raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
+        if token is None:
+            return super()._resolve_prior_tracking_url(url, public_base)
+        try:
+            resolve_public_stored_file_token(self._file_store_v972(), token)
+        except (FileStoreError, FileHandoffError) as exc:
+            raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
+        return str(url or "").strip(), False
 
-        def _instrument_html_with_shares_v972(
-            self,
-            *,
-            body_html: str,
-            delivery: dict[str, Any],
-            track_web_links: bool = True,
-            stored_file_resolver: Callable[[str], dict[str, Any]] | None = None,
-        ) -> tuple[str, list[dict[str, Any]], list[tuple[str, str]]]:
-            html = body_html or ""
-            if stored_file_resolver is not None and html:
-                replacements: list[tuple[str, str]] = []
-                for anchor in collect_anchors(html):
-                    href = str(anchor.get("href") or "")
-                    try:
-                        info = resolve_public_stored_file_url(base.file_store(), href)
-                    except FileStoreError as exc:
-                        raise StoredFileMailError("stored_file_unavailable") from exc
-                    if info is None:
-                        continue
-                    authorized = stored_file_resolver(str(info["id"]))
-                    if (
-                        str(authorized.get("sha256") or "") != str(info.get("sha256") or "")
-                        or str(authorized.get("created_at") or "")
-                        != str(info.get("created_at") or "")
-                    ):
-                        raise StoredFileMailError("stored_file_unavailable")
-                    replacements.append(
-                        (
-                            str(anchor["raw_tag"]),
-                            replace_href(
-                                str(anchor["raw_tag"]),
-                                f"postmaster-file:{info['id']}",
-                            ),
-                        )
-                    )
-                html = rewrite_anchor_tags(html, replacements)
-
-            return original_instrument_html_with_shares(
-                self,
-                body_html=html,
-                delivery=delivery,
-                track_web_links=track_web_links,
-                stored_file_resolver=stored_file_resolver,
-            )
-
-        def _rewrite_stored_file_links_for_sent_copy_v972(
-            body_html: str,
-            share_urls: list[tuple[str, str]],
-        ) -> str:
-            if not share_urls:
-                return body_html
-            queues: dict[str, list[str]] = {}
-            for file_id, public_url in share_urls:
-                queues.setdefault(file_id, []).append(public_url)
-
+    def instrument_html_with_shares(
+        self,
+        *,
+        body_html: str,
+        delivery: dict[str, Any],
+        track_web_links: bool = True,
+        stored_file_resolver: Callable[[str], dict[str, Any]] | None = None,
+    ) -> tuple[str, list[dict[str, Any]], list[tuple[str, str]]]:
+        html = body_html or ""
+        if stored_file_resolver is not None and html:
             replacements: list[tuple[str, str]] = []
-            for anchor in collect_anchors(body_html or ""):
+            for anchor in collect_anchors(html):
                 href = str(anchor.get("href") or "")
-                file_id = _stored_file_id_from_href(href)
-                if file_id is None:
-                    try:
-                        info = resolve_public_stored_file_url(base.file_store(), href)
-                    except FileStoreError:
-                        info = None
-                    file_id = str(info.get("id") or "") if info is not None else None
-                if file_id is None or not queues.get(file_id):
+                try:
+                    token = _public_stored_file_token_from_url(href)
+                except FileHandoffError as exc:
+                    raise StoredFileMailError("stored_file_unavailable") from exc
+                if token is None:
                     continue
+                try:
+                    info = resolve_public_stored_file_token(self._file_store_v972(), token)
+                except (FileStoreError, FileHandoffError) as exc:
+                    raise StoredFileMailError("stored_file_unavailable") from exc
+                authorized = stored_file_resolver(str(info["id"]))
+                if (
+                    str(authorized.get("sha256") or "") != str(info.get("sha256") or "")
+                    or str(authorized.get("created_at") or "")
+                    != str(info.get("created_at") or "")
+                ):
+                    raise StoredFileMailError("stored_file_unavailable")
                 replacements.append(
                     (
                         str(anchor["raw_tag"]),
-                        replace_href(str(anchor["raw_tag"]), queues[file_id].pop(0)),
+                        replace_href(
+                            str(anchor["raw_tag"]),
+                            f"postmaster-file:{info['id']}",
+                        ),
                     )
                 )
-            return rewrite_anchor_tags(body_html or "", replacements)
+            html = rewrite_anchor_tags(html, replacements)
 
-        cls._init_schema = _init_schema_v972
-        cls._insert_stored_file_link = _insert_stored_file_link_v972
-        cls._resolve_prior_tracking_url = _resolve_prior_tracking_url_v972
-        cls.instrument_html_with_shares = _instrument_html_with_shares_v972
-        cls.rewrite_stored_file_links_for_sent_copy = staticmethod(
-            _rewrite_stored_file_links_for_sent_copy_v972
+        return super().instrument_html_with_shares(
+            body_html=html,
+            delivery=delivery,
+            track_web_links=track_web_links,
+            stored_file_resolver=stored_file_resolver,
         )
-        cls._v972_public_download_patch = True
 
-    # Migrate an already-cached tracking store if composition initialized it earlier.
-    stored_file_link_store()._init_schema()
+    def rewrite_stored_file_links_for_sent_copy(
+        self,
+        body_html: str,
+        share_urls: list[tuple[str, str]],
+    ) -> str:
+        if not share_urls:
+            return body_html
+        queues: dict[str, list[str]] = {}
+        for file_id, public_url in share_urls:
+            queues.setdefault(file_id, []).append(public_url)
 
-    # Keep the exact MCP command registration/schema. runtime_core.get_stored_file_resource
-    # resolves this helper global at call time, so only handoff behavior changes.
+        replacements: list[tuple[str, str]] = []
+        for anchor in collect_anchors(body_html or ""):
+            href = str(anchor.get("href") or "")
+            file_id = _stored_file_id_from_href(href)
+            if file_id is None:
+                try:
+                    token = _public_stored_file_token_from_url(href)
+                except FileHandoffError:
+                    token = None
+                if token is not None:
+                    try:
+                        info = resolve_public_stored_file_token(self._file_store_v972(), token)
+                    except (FileStoreError, FileHandoffError):
+                        info = None
+                    file_id = str(info.get("id") or "") if info is not None else None
+            if file_id is None or not queues.get(file_id):
+                continue
+            replacements.append(
+                (
+                    str(anchor["raw_tag"]),
+                    replace_href(str(anchor["raw_tag"]), queues[file_id].pop(0)),
+                )
+            )
+        return rewrite_anchor_tags(body_html or "", replacements)
+
+
+def bind_stored_file_link_store_v972(base: Any) -> Callable[[], StoredFileLinkTrackingStoreV972]:
+    """Create a lazy per-runtime store factory with the existing cache_clear contract."""
+
+    @lru_cache(maxsize=1)
+    def _store() -> StoredFileLinkTrackingStoreV972:
+        return StoredFileLinkTrackingStoreV972(
+            base.analytics_store(),
+            file_store_provider=base.file_store,
+        )
+
+    return _store
+
+
+def install_stored_file_public_v972(base: Any, core: Any) -> None:
+    """Install the resource handoff helper without eager DB or global class mutation."""
+    del base
     core.stored_file_resource_result = stored_file_resource_result_v972
