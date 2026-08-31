@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.7.2 - 2026-08-31
+
+### Fixed / changed
+- Fixed Stored File public downloads at the terminal `/t/c/<opaque-token>` boundary without weakening Cloudflare Access. New direct ResourceLinks use fresh random high-entropy `sfc1_` bearer capabilities whose public value contains no file ID, recipient, delivery ID or SHA and is not derived from Stored File identity.
+- Added DB-first Stored File capability resolution in the existing analytics database. Unknown public tokens fail closed through indexed lookup with zero FileStore scan/enumeration and zero network; valid capabilities bind the exact private `file_id + sha256 + created_at` incarnation before reading canonical local FileStore bytes.
+- Tracked Stored File links remain occurrence-specific per campaign/delivery/recipient, record click telemetry, and terminate by serving exact local bytes directly instead of redirecting to `/files/*`. Normal tracked web links retain their historical click-recording `302` behavior.
+- Fixed forward already-sent v9.7.1 tracking rows whose target is a valid local signed `/files/<id>?expires=...&sig=...` capability: the route validates the historical capability locally, preserves its expiry semantics and serves bytes without an internal HTTP/DNS/reverse-proxy hop.
+- Delete invalidates public and tracked Stored File capabilities; delete followed by recreation of the same file ID does not resurrect an old token because exact-incarnation `created_at` is verified together with SHA-256.
+- Corrected the final composed `runtime_v960` mail-client factory to use the instance-scoped v9.7.2 client and the runtime-bound v9.7.2 tracking store, preserving canonical detracking-before-current-tracking behavior.
+
+### Storage / compatibility / safety / deployment
+- The persistent migration is additive and lazy in the existing analytics DB: private `stored_file_capabilities` plus Stored File capability/incarnation reference columns and supporting indexes on `tracking_links`; no destructive migration or eager installer initialization is introduced.
+- The composed MCP surface remains exactly 97 command names. The complete v9 runtime workflow is green with 467 tests on the final fix PR head, including Stored File random bearer, recipient/delivery differentiation, DB-only unknown-token failure, exact-incarnation/delete-recreate semantics, final runtime composition, v9.7.1 compatibility, normal web `302`, Sent-clean/Bcc/idempotency/privacy and Safe Email zero-network regressions.
+- `postmaster-mcp.yml` is unchanged; `requirements.txt` is unchanged; the canonical Cloudflare Worker source/configuration is unchanged. Cloudflare Access is not weakened and no internal HTTP reverse proxy to `/files` is introduced.
+- The public tree remains provider-neutral and contains no new secret/private-key material. Stored File bytes continue to come from the canonical local File Store.
+- This is a **source release** boundary only. Publishing v9.7.2 does not itself activate production, restart the runtime, mutate Portainer, change Cloudflare, deploy a Worker or authorize `update-latest`; production activation remains a separate preview + explicit owner-approval lifecycle.
+
 ## 9.7.1 - 2026-08-31
 
 ### Fixed / changed
