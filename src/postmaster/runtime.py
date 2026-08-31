@@ -20,6 +20,10 @@ from .runtime_v966 import install_runtime_v966
 from .runtime_v967 import install_runtime_v967
 from .runtime_v968 import install_runtime_v968
 from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_webgui
+from .webgui_regressions_v971 import (
+    install_full_html_partial_success_v971,
+    install_webgui_interaction_regressions_v971,
+)
 from .webgui_release_identity import install_webgui_release_identity, project_release_version
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
@@ -91,7 +95,10 @@ install_runtime_v968(_base, _core, _webgui_v963)
 # v9.6.9 replaces the split WebGUI privacy path with one persistent shared service, installs
 # opaque hash resource keys and fixes the logical-send/Sent archive boundary before routes capture
 # the handlers. Source-only: deployment YAML and production state remain untouched.
-install_runtime_v969_pre_webgui(_base, _core, _webgui_v963)
+_passive_content_service = install_runtime_v969_pre_webgui(_base, _core, _webgui_v963)
+# Post-v9.7.0: preserve the same consent/cache/proxy boundary, but distinguish isolated passive
+# resource failures from an unusable Full HTML document. The shared service feeds WebGUI + MCP.
+install_full_html_partial_success_v971(_passive_content_service)
 install_webgui_v963(app, _base)
 # v9.6.4 keeps the public mail tool names/count stable while changing only outbound policy
 # semantics: canonical detracking, manual WebGUI recipient policy and per-send suppression consent.
@@ -115,6 +122,9 @@ install_webgui_visual_restoration(_webgui_v962)
 # hierarchy, responsive navigation, theme/accessibility tokens and mobile drill-down behavior.
 # It receives no app/backend registry and therefore cannot add or replace routes.
 install_webgui_v970(_webgui_v962)
+# Keep the post-v9.7.0 interaction corrections last in the effective cascade: horizontal table
+# containment remains, while vertical wheel chaining and intrinsic card heights are restored.
+install_webgui_interaction_regressions_v971(_webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
