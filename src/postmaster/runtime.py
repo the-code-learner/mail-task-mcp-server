@@ -25,6 +25,7 @@ from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
 )
+from .webgui_compose_confirmation_v971 import install_compose_confirmation_v971
 from .webgui_mail_files_v971 import install_mail_files_composer_v971
 from .webgui_regressions_v971 import (
     install_full_html_partial_success_v971,
@@ -140,6 +141,8 @@ install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
 # Add cache-only attachment viewing and the Inbox-first floating composer only after contextual
 # Tracking is complete. Legacy direct Compose/Tracking views remain routable but leave top-level IA.
 install_mail_files_composer_v971(app, _base, _webgui_v963, _webgui_v962, _webgui_v964)
+# Preserve every selected Stored File across the explicit suppression-warning confirmation POST.
+install_compose_confirmation_v971(_webgui_v964)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
