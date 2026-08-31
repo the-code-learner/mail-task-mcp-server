@@ -12,7 +12,9 @@ from urllib.parse import parse_qs, urlsplit
 
 from mcp import Client
 from mcp.types import BlobResourceContents, ResourceLink, TextContent
-from starlette.testclient import TestClient
+from starlette.requests import Request
+from starlette.responses import StreamingResponse
+from starlette.routing import Route
 
 from postmaster.file_handoff import build_signed_file_url
 
@@ -60,10 +62,16 @@ class V93FileHandoffTests(unittest.TestCase):
         })
         import postmaster.runtime as runtime
         self.s = runtime
-        for cached in (runtime.scheduler, runtime.context_engine, runtime.file_store,
-                       runtime.account_store, runtime.policy_client):
+        self.s.analytics_store.cache_clear()
+        self.s.link_store.cache_clear()
+        for cached in (
+            runtime.scheduler,
+            runtime.context_engine,
+            runtime.file_store,
+            runtime.account_store,
+            runtime.policy_client,
+        ):
             cached.cache_clear()
-        runtime.link_store.cache_clear()
         self.payload = b"\x00postmaster-v9.3-original-bytes\xff\x10"
         self.saved = runtime.file_store().save_bytes(
             owner_id="owner", project_id="project", filename="original asset.bin",
@@ -72,10 +80,16 @@ class V93FileHandoffTests(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
-        for cached in (self.s.scheduler, self.s.context_engine, self.s.file_store,
-                       self.s.account_store, self.s.policy_client):
-            cached.cache_clear()
+        self.s.analytics_store.cache_clear()
         self.s.link_store.cache_clear()
+        for cached in (
+            self.s.scheduler,
+            self.s.context_engine,
+            self.s.file_store,
+            self.s.account_store,
+            self.s.policy_client,
+        ):
+            cached.cache_clear()
         for key, value in self.old.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -89,9 +103,83 @@ class V93FileHandoffTests(unittest.TestCase):
                 "file_id": self.saved["id"], "transport": transport,
             })
 
+    def _route(self, path_template: str) -> Route:
+        routes = [
+            route
+            for route in self.s.app.router.routes
+            if isinstance(route, Route) and route.path == path_template
+        ]
+        self.assertEqual(len(routes), 1)
+        return routes[0]
+
+    async def _invoke_async(
+        self,
+        path_template: str,
+        path: str,
+        *,
+        method: str = "GET",
+        path_params: dict[str, str] | None = None,
+        query: str = "",
+        headers: dict[str, str] | None = None,
+    ):
+        encoded_headers = [
+            (key.lower().encode("latin-1"), value.encode("latin-1"))
+            for key, value in (headers or {}).items()
+        ]
+        scope = {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "https",
+            "path": path,
+            "raw_path": path.encode("ascii"),
+            "query_string": query.encode("ascii"),
+            "headers": encoded_headers,
+            "client": ("203.0.113.9", 49153),
+            "server": ("files.example.test", 443),
+            "path_params": path_params or {},
+        }
+        response = await self._route(path_template).endpoint(Request(scope))
+        if isinstance(response, StreamingResponse):
+            body = b"".join([chunk async for chunk in response.body_iterator])
+        else:
+            body = response.body
+        return response, body
+
+    def _invoke(self, *args, **kwargs):
+        return asyncio.run(self._invoke_async(*args, **kwargs))
+
+    def _click(self, token: str, *, method: str = "GET"):
+        return self._invoke(
+            "/t/c/{token}",
+            f"/t/c/{token}",
+            method=method,
+            path_params={"token": token},
+        )
+
+    def _legacy_file_request(
+        self,
+        file_id: str,
+        query: str,
+        *,
+        method: str = "GET",
+        headers: dict[str, str] | None = None,
+    ):
+        return self._invoke(
+            "/files/{file_id}",
+            f"/files/{file_id}",
+            method=method,
+            path_params={"file_id": file_id},
+            query=query,
+            headers=headers,
+        )
+
     def test_native_resource_link_and_resources_read(self) -> None:
         store = self.s.file_store()
-        with patch.object(store, "raw_bytes", side_effect=AssertionError("link construction must not read blob")):
+        with patch.object(
+            store, "raw_bytes", side_effect=AssertionError("link construction must not read blob")
+        ):
             result = asyncio.run(self._tool("mcp"))
         self.assertFalse(result.is_error)
         self.assertEqual(len(result.content), 1)
@@ -126,65 +214,73 @@ class V93FileHandoffTests(unittest.TestCase):
     def test_public_resource_is_terminal_t_c_and_legacy_files_capabilities_remain_supported(self) -> None:
         auto = asyncio.run(self._tool("auto")).content[0]
         http = asyncio.run(self._tool("http")).content[0]
+        self.assertNotEqual(str(auto.uri), str(http.uri))
         for link in (auto, http):
             self.assertIsInstance(link, ResourceLink)
             parsed = urlsplit(str(link.uri))
             self.assertEqual((parsed.scheme, parsed.netloc), ("https", "files.example.test"))
-            self.assertTrue(parsed.path.startswith("/t/c/sfp1_"))
+            self.assertTrue(parsed.path.startswith("/t/c/sfc1_"))
             self.assertNotIn(self.saved["id"], parsed.path)
             self.assertNotIn("/files/", parsed.path)
             self.assertEqual(parsed.query, "")
 
         parsed = urlsplit(str(http.uri))
-        with TestClient(self.s.app) as client:
-            full = client.get(parsed.path, follow_redirects=False)
-            self.assertEqual((full.status_code, full.content), (200, self.payload))
-            self.assertNotIn("location", full.headers)
-            self.assertEqual(full.headers["content-type"], "application/x-postmaster-test")
-            self.assertEqual(full.headers["content-length"], str(len(self.payload)))
-            self.assertEqual(full.headers["x-content-type-options"], "nosniff")
-            self.assertIn("attachment", full.headers["content-disposition"])
+        token = parsed.path.rsplit("/", 1)[-1]
+        full, full_body = self._click(token)
+        self.assertEqual((full.status_code, full_body), (200, self.payload))
+        self.assertNotIn("location", full.headers)
+        self.assertEqual(full.headers["content-type"], "application/x-postmaster-test")
+        self.assertEqual(full.headers["content-length"], str(len(self.payload)))
+        self.assertEqual(full.headers["x-content-type-options"], "nosniff")
+        self.assertIn("attachment", full.headers["content-disposition"])
 
-            head = client.head(parsed.path, follow_redirects=False)
-            self.assertEqual((head.status_code, head.content), (200, b""))
-            self.assertEqual(head.headers["content-length"], str(len(self.payload)))
+        head, head_body = self._click(token, method="HEAD")
+        self.assertEqual((head.status_code, head_body), (200, b""))
+        self.assertEqual(head.headers["content-length"], str(len(self.payload)))
 
-            # Keep the historical /files capability endpoint semantics intact for
-            # compatibility, including range and explicit expiry behavior.
-            legacy = urlsplit(build_signed_file_url(self.s.file_store(), self.saved["id"]))
-            signed_path = legacy.path + "?" + legacy.query
-            legacy_full = client.get(signed_path)
-            self.assertEqual((legacy_full.status_code, legacy_full.content), (200, self.payload))
-            self.assertEqual(legacy_full.headers["accept-ranges"], "bytes")
+        # Historical /files capability behavior remains available for compatibility.
+        legacy = urlsplit(build_signed_file_url(self.s.file_store(), self.saved["id"]))
+        legacy_full, legacy_body = self._legacy_file_request(
+            self.saved["id"], legacy.query
+        )
+        self.assertEqual((legacy_full.status_code, legacy_body), (200, self.payload))
+        self.assertEqual(legacy_full.headers["accept-ranges"], "bytes")
 
-            partial = client.get(signed_path, headers={"Range": "bytes=3-11"})
-            self.assertEqual((partial.status_code, partial.content), (206, self.payload[3:12]))
-            self.assertEqual(partial.headers["content-range"], f"bytes 3-11/{len(self.payload)}")
+        partial, partial_body = self._legacy_file_request(
+            self.saved["id"], legacy.query, headers={"Range": "bytes=3-11"}
+        )
+        self.assertEqual((partial.status_code, partial_body), (206, self.payload[3:12]))
+        self.assertEqual(partial.headers["content-range"], f"bytes 3-11/{len(self.payload)}")
 
-            invalid = client.get(signed_path, headers={"Range": "bytes=9999-10000"})
-            self.assertEqual(invalid.status_code, 416)
-            self.assertEqual(invalid.headers["content-range"], f"bytes */{len(self.payload)}")
+        invalid, _ = self._legacy_file_request(
+            self.saved["id"], legacy.query, headers={"Range": "bytes=9999-10000"}
+        )
+        self.assertEqual(invalid.status_code, 416)
+        self.assertEqual(invalid.headers["content-range"], f"bytes */{len(self.payload)}")
 
-            query = parse_qs(legacy.query)
-            sig = query["sig"][0]
-            bad_sig = sig[:-1] + ("0" if sig[-1] != "0" else "1")
-            self.assertEqual(client.get(
-                f"{legacy.path}?expires={query['expires'][0]}&sig={bad_sig}"
-            ).status_code, 403)
+        query = parse_qs(legacy.query)
+        sig = query["sig"][0]
+        bad_sig = sig[:-1] + ("0" if sig[-1] != "0" else "1")
+        bad, _ = self._legacy_file_request(
+            self.saved["id"], f"expires={query['expires'][0]}&sig={bad_sig}"
+        )
+        self.assertEqual(bad.status_code, 403)
 
-            from postmaster.file_handoff import _download_signature
-            expired = int(time.time()) - 10
-            expired_sig = _download_signature(self.saved["id"], expired)
-            self.assertEqual(client.get(
-                f"/files/{self.saved['id']}?expires={expired}&sig={expired_sig}"
-            ).status_code, 403)
+        from postmaster.file_handoff import _download_signature
+        expired = int(time.time()) - 10
+        expired_sig = _download_signature(self.saved["id"], expired)
+        expired_response, _ = self._legacy_file_request(
+            self.saved["id"], f"expires={expired}&sig={expired_sig}"
+        )
+        self.assertEqual(expired_response.status_code, 403)
 
-            missing_id = "00000000-0000-0000-0000-000000000000"
-            future = int(time.time()) + 60
-            missing_sig = _download_signature(missing_id, future)
-            self.assertEqual(client.get(
-                f"/files/{missing_id}?expires={future}&sig={missing_sig}"
-            ).status_code, 404)
+        missing_id = "00000000-0000-0000-0000-000000000000"
+        future = int(time.time()) + 60
+        missing_sig = _download_signature(missing_id, future)
+        missing, _ = self._legacy_file_request(
+            missing_id, f"expires={future}&sig={missing_sig}"
+        )
+        self.assertEqual(missing.status_code, 404)
 
     def test_transport_configuration_fallbacks(self) -> None:
         os.environ["FILE_STORE_PUBLIC_BASE_URL"] = ""
@@ -192,7 +288,7 @@ class V93FileHandoffTests(unittest.TestCase):
         via_existing_host = asyncio.run(self._tool("auto"))
         self.assertFalse(via_existing_host.is_error)
         uri = str(via_existing_host.content[0].uri)
-        self.assertTrue(uri.startswith("https://mcp.example.test/t/c/sfp1_"))
+        self.assertTrue(uri.startswith("https://mcp.example.test/t/c/sfc1_"))
         self.assertNotIn(self.saved["id"], uri)
 
         os.environ["PUBLIC_MCP_HOST"] = ""
