@@ -7,10 +7,10 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
-from .stored_file_delivery import (
-    PostmasterV946MailClient,
-    public_tracking_target,
-    stored_file_link_store,
+from .stored_file_delivery import PostmasterV946MailClient, stored_file_link_store
+from .stored_file_public_v972 import (
+    install_stored_file_public_v972,
+    public_tracking_target_v972,
 )
 from .update_status import latest_version_status
 
@@ -53,7 +53,9 @@ def decorate_update_footer(body: str, status: dict[str, Any]) -> str:
 
 
 def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
-    """Compose v9.4.6 behavior without expanding the public MCP command set."""
+    """Compose v9.4.6 behavior plus the v9.7.2 Stored File public-handoff correction."""
+
+    install_stored_file_public_v972(base, core)
 
     def authorize_stored_file(info: dict[str, Any]) -> bool:
         # Reuse the same owner/project registry validation used by FileStore writes.
@@ -68,6 +70,7 @@ def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
             base.account_store().settings(account_id),
             file_store=base.file_store(),
             file_authorizer=authorize_stored_file,
+            tracking_store=stored_file_link_store(),
         )
 
     # Existing server and runtime tools resolve these module globals at call time.
@@ -116,7 +119,7 @@ def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
             return response
 
     async def tracking_target(request: Request):
-        return await public_tracking_target(
+        return await public_tracking_target_v972(
             request,
             tracking_store=stored_file_link_store(),
             file_store=base.file_store(),
