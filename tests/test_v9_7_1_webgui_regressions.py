@@ -75,6 +75,8 @@ class WebGuiInteractionRegressionTests(unittest.TestCase):
             css.rfind("overscroll-behavior:contain"),
         )
         self.assertGreater(css.rfind("align-items:start"), css.rfind("display:grid"))
+        self.assertNotIn("overscroll-behavior-y:contain", REGRESSION_STYLE)
+        self.assertNotIn("overflow-y:hidden", REGRESSION_STYLE)
         self.assertNotIn("preventDefault", REGRESSION_STYLE)
         self.assertNotIn("touch-action:none", REGRESSION_STYLE)
 
