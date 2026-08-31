@@ -30,6 +30,7 @@ from .tracking_telemetry_v971 import (
 )
 from .webgui_compose_confirmation_v971 import install_compose_confirmation_v971
 from .webgui_mail_files_v971 import install_mail_files_composer_v971
+from .webgui_mail_safety_v971 import install_mail_safety_ia_v971
 from .webgui_projects_ux_v971 import install_projects_ux_v971
 from .webgui_regressions_v971 import (
     install_full_html_partial_success_v971,
@@ -150,6 +151,9 @@ install_compose_confirmation_v971(_webgui_v964)
 # Project-scoped UX is presentation-only: reuse existing Memories/Skills/Files/Tasks stores and
 # CRUD/auth routes, while keeping editors contextual and project selection explicit.
 install_projects_ux_v971(_webgui_v960, _webgui_projects, _webgui_v962_views, _webgui_v962)
+# Consolidate mail health, suppressions, domain/recipient policy and security only at the
+# presentation/IA layer. Compatibility views and every existing backend action remain routable.
+install_mail_safety_ia_v971(_webgui_v962, _webgui_v962_views)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
