@@ -7,8 +7,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse
 from starlette.routing import Route
 
-from .stored_file_delivery import PostmasterV946MailClient, stored_file_link_store
+from .stored_file_delivery import PostmasterV946MailClient
 from .stored_file_public_v972 import (
+    bind_stored_file_link_store_v972,
     install_stored_file_public_v972,
     public_tracking_target_v972,
 )
@@ -56,6 +57,7 @@ def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
     """Compose v9.4.6 behavior plus the v9.7.2 Stored File public-handoff correction."""
 
     install_stored_file_public_v972(base, core)
+    link_store_v972 = bind_stored_file_link_store_v972(base)
 
     def authorize_stored_file(info: dict[str, Any]) -> bool:
         # Reuse the same owner/project registry validation used by FileStore writes.
@@ -70,13 +72,13 @@ def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
             base.account_store().settings(account_id),
             file_store=base.file_store(),
             file_authorizer=authorize_stored_file,
-            tracking_store=stored_file_link_store(),
+            tracking_store=link_store_v972(),
         )
 
     # Existing server and runtime tools resolve these module globals at call time.
     core.mail_client = mail_client
     base.mail_client = mail_client
-    core.link_store = stored_file_link_store
+    core.link_store = link_store_v972
 
     legacy_build_status = core.build_status
 
@@ -121,7 +123,7 @@ def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
     async def tracking_target(request: Request):
         return await public_tracking_target_v972(
             request,
-            tracking_store=stored_file_link_store(),
+            tracking_store=link_store_v972(),
             file_store=base.file_store(),
             logger=base.logger,
         )
