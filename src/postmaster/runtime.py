@@ -20,6 +20,10 @@ from .runtime_v966 import install_runtime_v966
 from .runtime_v967 import install_runtime_v967
 from .runtime_v968 import install_runtime_v968
 from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_webgui
+from .tracking_telemetry_v971 import (
+    install_tracking_telemetry_v971,
+    install_tracking_webgui_v971,
+)
 from .webgui_regressions_v971 import (
     install_full_html_partial_success_v971,
     install_webgui_interaction_regressions_v971,
@@ -82,6 +86,9 @@ install_webgui_v960_scopes(app, _base)
 install_webgui_v961()
 install_webgui_v962_collapsible_system()
 dashboard_home = install_webgui_v962(app, _base, _core, dashboard_home)
+# Post-v9.7.0 sensitive tracking telemetry uses the existing analytics DB through a private
+# account-scoped sidecar. Existing MCP tracking responses remain free of raw source IP data.
+install_tracking_telemetry_v971(_base, _core)
 # v9.6.3 is additive: runtime/cache first, then privacy hooks and the presentation/Inbox
 # renderer layer over the already-installed v9.6.2 lazy shell. It does not replace that shell's
 # JS lifecycle and it does not add MCP command names.
@@ -125,13 +132,33 @@ install_webgui_v970(_webgui_v962)
 # Keep the post-v9.7.0 interaction corrections last in the effective cascade: horizontal table
 # containment remains, while vertical wheel chaining and intrinsic card heights are restored.
 install_webgui_interaction_regressions_v971(_webgui_v962)
+# Tracking is contextualized in Inbox/Sent after the final v9.7.0 cascade. It is read-only UI:
+# sensitive network telemetry stays server-side and a rendering failure never blocks mail access.
+install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
-# Keep the public v9.6.0/v9.6.3 renderer symbols on the explicit compatibility wrapper rather
-# than the transient lambda used during route installation. The wrapper remains cache-first.
+
+# Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
+# At this point render_inbox_v963 already references the final tracking-enriched renderer.
 _webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
-_webgui_v963.v951.render_inbox = _webgui_v963.render_inbox_v963
+
+
+def _render_inbox_compat(proxied_base, request):
+    """Stable compatibility entry point for the composed Safe Reader.
+
+    The delegated v9.6.3+ renderer continues to request inspection="full" with
+    content_mode="safe" by default; later overlays may enrich the returned HTML but
+    cannot weaken that zero-network Safe Email boundary.
+    """
+    return _webgui_v963.render_inbox_v963(proxied_base, request)
+
+
+# Keep the public v9.6.0/v9.6.3 renderer symbols on an explicit compatibility wrapper rather
+# than a transient lambda or a feature-specific renderer. The wrapper remains cache-first and
+# preserves the historical Safe Reader source contract while delegating to the final composition.
+_webgui_v963.v960.render_inbox = _render_inbox_compat
+_webgui_v963.v951.render_inbox = _render_inbox_compat
 link_store = _core.link_store
 
 
