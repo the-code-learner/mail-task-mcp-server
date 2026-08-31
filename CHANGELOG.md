@@ -2,6 +2,26 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.7.1 - 2026-08-31
+
+### Fixed / changed
+- Shipped the complete post-v9.7.0 source backlog through PRs #36, #37, #38, #39, #40 and #41: durable stored-file share links; WebGUI interaction and Full HTML partial-success regressions; privacy-scoped tracking telemetry and contextual Inbox/Sent tracking; attachment metadata/download/cache-only previews plus the Inbox floating composer; project/resource UX improvements; and a consolidated Mail Safety / Reputation information architecture.
+- Stored-file public share links now remain durable without weakening canonical File Store authorization or introducing a parallel public file identifier path.
+- Full HTML rendering now isolates individual passive-resource failures from an otherwise usable document while preserving the existing explicit two-step consent boundary, Safe Email zero-network default, cache-first reopen behavior and prohibition on navigation/action/form/CTA auto-fetches.
+- Added private account-scoped tracking enrichment for WebGUI telemetry while keeping public MCP tracking schemas unchanged. Source IP is validated/canonicalized and kept private; country-level geography uses only the already-supplied edge country signal with no external geolocation lookup; Sent correlation is exact Message-ID; human-vs-machine classification and geography remain estimates, never proof of a human read; WebGUI enrichment is read-only and fail-open.
+- Inbox message detail now surfaces attachments with explicit download and best-effort cache-only preview for suitable PDF, text, image, video and audio types. Preview failure never blocks attachment metadata/download and performs no IMAP/HTTP/DNS fetch. The floating Inbox composer preserves To/Cc/Bcc, drafts, Stored File attachments, suppression confirmation and existing outbound safety semantics.
+- Memories/Skills and Files now open directly from their rows/titles, editors remain contextual, active project scope is explicit, and project aggregates distinguish Memories, Skills, Tasks and Files while preserving existing CRUD/auth and project filtering.
+- Consolidated Mail Health, Suppressions, Domain controls, Recipient controls and Security into one primary Mail Safety destination with clear safety, reputation/deliverability, authorization/policy and security sections. Existing compatibility views/routes and backend capabilities remain routable.
+
+### Storage / compatibility / safety / deployment
+- The composed MCP surface remains exactly 97 command names (`delta = 0` from v9.7.0) with no public MCP schema delta.
+- Added one private, additive SQLite sidecar table, `tracking_sensitive_telemetry`, in the existing analytics database. Sensitive telemetry retention is 30 days; base tracking rows remain intact when sidecar retention expires. No destructive migration or separate analytics database is introduced.
+- `requirements.txt` is unchanged. `postmaster-mcp.yml` remains byte-for-byte unchanged at Git blob `f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9`. The canonical Cloudflare Privacy Proxy Worker source and example configuration are unchanged.
+- The public tree remains provider-neutral and contains no new secret material. HMAC secrets, Ed25519 private signing material and other Privacy Proxy secrets remain server-side/private.
+- Existing outbound safety invariants remain in force: historical Postmaster tracking is normalized before current tracking; persistent idempotency is not bypassed by `force_send`; a successful send is not repeated because of later read-only failures; recipient and Sent MIME retain clean-MIME semantics; Bcc stays absent from recipient/received views while sender-side Bcc metadata remains private; reply/follow-up never rediscovers historical Bcc; one logical outbound operation creates one canonical Sent archive; synchronizer/cache paths remain read-oriented only.
+- The composed acceptance suite contains 459 tests and the v9 runtime workflow is green at the pre-release composed-main boundary.
+- This is a **source release** boundary only. Runtime activation, production deployment, Portainer mutation and Cloudflare Worker deployment are not performed or authorized by publishing v9.7.1 and remain separate owner-controlled actions.
+
 ## 9.7.0 - 2026-08-24
 
 ### WebGUI visual refresh — enterprise operational redesign
