@@ -8,10 +8,9 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, PlainTextResponse
 from starlette.routing import Route
 
-from .mail_v960_unsubscribe import PostmasterV960NewsletterMailClient
 from .outbound_safety import OutboundSafetyStore
 from .runtime_v950 import reliability_store
-from .stored_file_delivery import stored_file_link_store
+from .stored_file_public_v972 import PostmasterV972MailClient
 from .unsubscribe import UnsubscribeError, UnsubscribeManager
 
 
@@ -41,13 +40,13 @@ def install_runtime_v960(
         )
         return True
 
-    def mail_client(account_id: str | None = None) -> PostmasterV960NewsletterMailClient:
-        return PostmasterV960NewsletterMailClient(
+    def mail_client(account_id: str | None = None) -> PostmasterV972MailClient:
+        return PostmasterV972MailClient(
             base.account_store().settings(account_id),
             file_store=base.file_store(),
             file_authorizer=authorize_stored_file,
             analytics=base.analytics_store(),
-            tracking_store=stored_file_link_store(),
+            tracking_store=core.link_store(),
             reliability=reliability_store(),
             outbound_safety=outbound_safety_store(),
             unsubscribe_manager=unsubscribe_manager(),
