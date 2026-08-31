@@ -139,6 +139,10 @@ install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
 
+# Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
+# At this point render_inbox_v963 already references the final tracking-enriched renderer.
+_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
+
 
 def _render_inbox_compat(proxied_base, request):
     """Stable compatibility entry point for the composed Safe Reader.
