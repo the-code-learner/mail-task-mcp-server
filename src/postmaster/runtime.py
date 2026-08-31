@@ -138,10 +138,23 @@ install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
-# Keep the public v9.6.0/v9.6.3 renderer symbols on the explicit compatibility wrapper rather
-# than the transient lambda used during route installation. The wrapper remains cache-first.
-_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
-_webgui_v963.v951.render_inbox = _webgui_v963.render_inbox_v963
+
+
+def _render_inbox_compat(proxied_base, request):
+    """Stable compatibility entry point for the composed Safe Reader.
+
+    The delegated v9.6.3+ renderer continues to request inspection="full" with
+    content_mode="safe" by default; later overlays may enrich the returned HTML but
+    cannot weaken that zero-network Safe Email boundary.
+    """
+    return _webgui_v963.render_inbox_v963(proxied_base, request)
+
+
+# Keep the public v9.6.0/v9.6.3 renderer symbols on an explicit compatibility wrapper rather
+# than a transient lambda or a feature-specific renderer. The wrapper remains cache-first and
+# preserves the historical Safe Reader source contract while delegating to the final composition.
+_webgui_v963.v960.render_inbox = _render_inbox_compat
+_webgui_v963.v951.render_inbox = _render_inbox_compat
 link_store = _core.link_store
 
 
