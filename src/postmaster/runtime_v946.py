@@ -56,8 +56,10 @@ def decorate_update_footer(body: str, status: dict[str, Any]) -> str:
 def install_runtime_v946(app: Any, base: Any, core: Any, legacy_dashboard: Any):
     """Compose v9.4.6 behavior plus the v9.7.2 Stored File public-handoff correction."""
 
-    install_stored_file_public_v972(base, core)
+    # The factory itself is side-effect free. The analytics schema is initialized lazily only
+    # when a real tracking/resource operation first asks for the store.
     link_store_v972 = bind_stored_file_link_store_v972(base)
+    install_stored_file_public_v972(core, link_store_v972)
 
     def authorize_stored_file(info: dict[str, Any]) -> bool:
         # Reuse the same owner/project registry validation used by FileStore writes.
