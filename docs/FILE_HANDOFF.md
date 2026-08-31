@@ -5,7 +5,7 @@ Postmaster keeps `file_id` as the canonical identifier for every FileStore recor
 ## Preferred file handoff hierarchy
 
 1. native ResourceLink/file reference
-2. HTTPS streaming
+2. HTTPS terminal capability on the public tracking path
 3. MCP `resources/read`
 4. chunked/Base64 fallback
 5. inline Base64 only as last resort
@@ -20,50 +20,86 @@ The ChatGPT-to-Postmaster input path is unchanged: `save_uploaded_file`, `save_u
 
 ```text
 postmaster://files/{file_id}
-https://configured-public-host/files/{file_id}?expires=0&sig=<durable-capability>
+https://configured-public-host/t/c/sfp1_<opaque-capability>
 ```
 
 Transport behavior:
 
-- `auto`: use durable HTTPS when a public file base can be resolved from `FILE_STORE_PUBLIC_BASE_URL` or the existing `PUBLIC_MCP_HOST`; otherwise use the MCP resource URI.
-- `http`: require one of those HTTPS public-base settings and return a durable capability URL.
+- `auto`: use the opaque public HTTPS capability when a public file base can be resolved from `FILE_STORE_PUBLIC_BASE_URL` or the existing `PUBLIC_MCP_HOST`; otherwise use the MCP resource URI.
+- `http`: require one of those HTTPS public-base settings and return the opaque public capability URL.
 - `mcp`: always return `postmaster://files/{file_id}`.
 
-Constructing the link reads metadata only. It does not read the stored blob.
+Constructing the link reads metadata only. It does not read the stored blob. The HTTPS public URL does not contain the Stored File ID, `/files/<uuid>`, expiry parameters or a client-visible file signature.
 
-## Durable HTTPS capability
+## Terminal public Stored File capability
 
-Newly generated public links use `expires=0` as the versioned no-expiry sentinel. This does **not** mean that a UUID/file ID alone authorizes access. The `sig` parameter is still an HMAC capability derived from Postmaster's persistent file-download secret.
-
-The durable signature is bound to the exact stored-file record incarnation:
+New public Stored File ResourceLinks use `/t/c/sfp1_<opaque-capability>`. The opaque capability is an HMAC derived from Postmaster's existing persistent file-download secret and is bound to the exact immutable FileStore record incarnation:
 
 - `file_id`;
 - immutable file SHA-256;
 - immutable `created_at` value;
-- a version/domain-separation string for the durable capability format.
+- a version/domain-separation string for the public capability format.
+
+The public route is terminal:
+
+```text
+GET /t/c/<stored-file-token>
+  -> validate capability locally
+  -> resolve the exact FileStore incarnation locally
+  -> read the canonical persistent FileStore blob
+  -> return the file bytes directly
+```
+
+It does **not** redirect to `/files/<uuid>` and it does not issue an HTTP, DNS or reverse-proxy request back into Postmaster. The FileStore remains the single persistence source.
+
+Responses use the stored MIME type, sanitized attachment disposition, `X-Content-Type-Options: nosniff` and private/no-store cache policy. `HEAD` returns metadata without a response body.
 
 As a result:
 
-- a newly generated share/download URL remains valid for more than 30 days and, by design, for as long as that exact stored-file record continues to exist;
-- deleting the FileStore record makes the durable URL stop resolving;
+- a public capability remains valid for as long as that exact stored-file record continues to exist;
+- deleting the FileStore record makes the capability stop resolving immediately;
 - deleting and later re-creating the same `file_id` does not resurrect the old capability, even if the replacement has identical bytes, because its immutable creation identity is different;
 - metadata edits such as filename/description/tag changes do not invalidate the capability because they do not change the immutable record identity;
-- rotating/replacing the persistent file-download HMAC secret is an emergency global revocation mechanism for previously issued capabilities.
+- rotating/replacing the persistent file-download HMAC secret is an emergency global revocation mechanism for previously issued public capabilities.
 
-Possession of a valid durable URL is the authorization capability. Treat it as sensitive and distribute it only to the intended recipient. The URL is unguessable without the server-side HMAC secret; the underlying File Store remains non-discoverable through this route.
+Possession of a valid public capability is authorization for that exact Stored File incarnation. Treat the URL as sensitive and distribute it only to the intended recipient.
 
-## Legacy expiring URLs
+## Mail click tracking and Stored Files
 
-Postmaster continues to verify the v9.3 expiring URL format so previously generated links remain usable until their original expiry:
+When a Stored File ResourceLink is inserted into tracked outbound HTML, Postmaster resolves the public capability locally and creates the existing per-delivery opaque `/t/c/<tracking-token>` occurrence with `target_type=stored_file`. The recipient never receives a Stored File ID.
+
+Opening that tracked Stored File URL:
+
+1. validates the tracking target and Stored File incarnation;
+2. records the click through the normal tracking telemetry pipeline;
+3. reads the bytes directly from the persistent FileStore;
+4. returns the file directly with safe download headers.
+
+Normal tracked HTTP/HTTPS destinations keep their historical behavior: `/t/c/<tracking-token>` records the click and then returns an HTTP redirect to the external destination.
+
+The additive tracking-store migration records immutable Stored File SHA-256 and creation identity for newly issued Stored File tracking occurrences. Existing pre-v9.7.2 rows remain readable and fail closed when a replacement record is detectably newer than the original link.
+
+## v9.7.1 and legacy `/files` capability compatibility
+
+Postmaster retains the historical signed `/files/{file_id}` endpoint for compatibility. Existing durable v9.7.1 URLs have this form:
+
+```text
+GET  /files/{file_id}?expires=0&sig=<durable-capability>
+HEAD /files/{file_id}?expires=0&sig=<durable-capability>
+```
+
+The v9.7.1 durable signature remains bound to the exact record incarnation (`file_id`, SHA-256 and `created_at`). Direct requests keep their existing validation and streaming/range semantics.
+
+A v9.7.1 `/t/c/<tracking-token>` whose stored destination is a valid local `/files/...` capability is fixed forward after upgrade: Postmaster records the click, validates that legacy capability locally and serves the FileStore bytes directly. It no longer redirects the recipient to `/files/*`.
+
+Postmaster also continues to verify the v9.3 expiring URL format so previously generated links remain usable until their original expiry:
 
 ```text
 GET  /files/{file_id}?expires=<future-unix>&sig=<legacy-hmac>
 HEAD /files/{file_id}?expires=<future-unix>&sig=<legacy-hmac>
 ```
 
-Legacy HMAC validation still binds `file_id` and `expires`, uses constant-time comparison, rejects expired/tampered capabilities and preserves the historical hard maximum of 24 hours for deliberately generated legacy URLs.
-
-New `get_stored_file_resource(..., transport="http"|"auto")` links no longer use the short-lived legacy lifetime. `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS` is retained only for backwards-compatible legacy code paths and should not be used as the normal asynchronous sharing mechanism.
+Legacy HMAC validation still binds `file_id` and `expires`, uses constant-time comparison, rejects expired/tampered capabilities and preserves the historical hard maximum of 24 hours for deliberately generated legacy URLs. `FILE_STORE_DOWNLOAD_URL_TTL_SECONDS` remains a compatibility setting for those explicit legacy helpers only.
 
 ## MCP resources/read
 
@@ -75,15 +111,15 @@ postmaster://files/{file_id}
 
 Reading it returns the original verified FileStore bytes. For binary content the MCP Python SDK serializes the byte return value as protocol `BlobResourceContents`; any Base64 required by the wire protocol is therefore produced by the SDK rather than generated and reinserted manually by the model.
 
-## HTTPS streaming behavior
+## Historical `/files` streaming behavior
 
 The `/files/{file_id}` path opens the canonical content-addressed FileStore blob directly. It does not Base64-encode, resize, recompress, transcode or create a temporary transfer copy.
 
 Responses include the stored MIME type, sanitized attachment disposition, `X-Content-Type-Options: nosniff`, private/no-store cache policy and byte-range support. `HEAD` returns metadata without a body. A valid single `Range: bytes=...` request returns `206 Partial Content`; an invalid/unsatisfiable range returns `416` with `Content-Range: bytes */<size>`.
 
-Malformed or forged capabilities return `403`. A durable capability whose stored-file record has been deleted no longer resolves and returns `404`. The same FileStore deletion therefore controls both persistence and durable public availability without introducing a second share database.
+Malformed or forged capabilities return `403`. A durable capability whose stored-file record has been deleted no longer resolves. The same FileStore deletion therefore controls both persistence and capability availability without introducing a second share database.
 
-## Configuration
+## Configuration and Cloudflare Access
 
 The normal single-YAML deployment needs no new required environment variables. Postmaster reuses the existing public MCP hostname when available:
 
@@ -91,7 +127,7 @@ The normal single-YAML deployment needs no new required environment variables. P
 PUBLIC_MCP_HOST
 ```
 
-Because `/files/*` is served by the same application, `PUBLIC_MCP_HOST=postmaster.example.com` resolves to the HTTPS base `https://postmaster.example.com`. This avoids coupling file delivery to `PUBLIC_EMAIL_BASE_URL`, which remains dedicated to mail/AMP callbacks.
+`FILE_STORE_PUBLIC_BASE_URL` may optionally override the public base used to construct file ResourceLinks. The public capability itself is still served at `/t/c/*` on that configured origin.
 
 Advanced deployments may optionally override the file base or signing secret with process environment variables:
 
@@ -108,11 +144,11 @@ FILE_STORE_DOWNLOAD_URL_TTL_SECONDS
 
 `FILE_STORE_PUBLIC_BASE_URL` must be an externally reachable HTTPS base URL and takes precedence over `PUBLIC_MCP_HOST`. If neither is configured, `transport=auto` falls back to the MCP resource path and `transport=http` returns a clear configuration error.
 
-`FILE_STORE_DOWNLOAD_SECRET` may be supplied by a private deployment. When it is absent, Postmaster creates a random persistent secret at `/data/file-store-download.secret` with restrictive permissions and reuses it across restarts. Keeping that secret persistent is required for already-issued durable capability URLs to survive application restarts/upgrades.
+`FILE_STORE_DOWNLOAD_SECRET` may be supplied by a private deployment. When it is absent, Postmaster creates a random persistent secret at `/data/file-store-download.secret` with restrictive permissions and reuses it across restarts. Keeping that secret persistent is required for already-issued durable capabilities to survive application restarts/upgrades.
 
-No `postmaster-mcp.yml`, Cloudflare Worker, dependency or new database schema change is required for durable links. The capability is derived from existing FileStore metadata and the existing persistent file-download secret.
+No `postmaster-mcp.yml`, Cloudflare Worker or dependency change is required for the terminal public Stored File fix. The tracking store receives only an additive internal migration for immutable Stored File incarnation binding.
 
-The signed `/files/*` path must be reachable by the client that will consume the URL. If an external access layer protects the whole application, expose this route only according to the deployment's security policy; possession of a valid capability is the file authorization. Do not broadly bypass authentication for `/mcp`, the dashboard, or unrelated routes merely to enable file download.
+Cloudflare Access does not need to be weakened. `/t/c/*` remains the intentionally public mail/click/download capability path. `/files/*`, `/mcp`, the dashboard and other protected application surfaces may remain behind Access according to the deployment policy. The new public flow never relies on an anonymous recipient reaching `/files/*`.
 
 ## Compatibility fallbacks
 
