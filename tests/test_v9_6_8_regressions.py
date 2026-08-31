@@ -282,11 +282,11 @@ class FinalRuntimeOutboundDetrackingV968Tests(unittest.TestCase):
                 )
         self.assertEqual(len(self.client.outbound_messages) + len(self.client.group_messages), before)
 
-    def test_final_client_is_the_runtime_v960_factory_class(self):
+    def test_final_client_is_the_runtime_v972_factory_class(self):
         from postmaster import runtime_v960
 
         source = inspect.getsource(runtime_v960.install_runtime_v960)
-        self.assertIn("PostmasterV960NewsletterMailClient", source)
+        self.assertIn("PostmasterV972MailClient", source)
         self.assertIsInstance(self.client, PostmasterV960NewsletterMailClient)
 
 
