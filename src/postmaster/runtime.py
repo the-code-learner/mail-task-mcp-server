@@ -5,7 +5,10 @@ import os
 import uvicorn
 
 from . import runtime_core as _core
+from . import webgui_projects as _webgui_projects
+from . import webgui_v960 as _webgui_v960
 from . import webgui_v962 as _webgui_v962
+from . import webgui_v962_views as _webgui_v962_views
 from . import webgui_v963 as _webgui_v963
 from . import webgui_v964 as _webgui_v964
 from .project_scope_semantics import install_project_scope_semantics
@@ -27,6 +30,7 @@ from .tracking_telemetry_v971 import (
 )
 from .webgui_compose_confirmation_v971 import install_compose_confirmation_v971
 from .webgui_mail_files_v971 import install_mail_files_composer_v971
+from .webgui_projects_ux_v971 import install_projects_ux_v971
 from .webgui_regressions_v971 import (
     install_full_html_partial_success_v971,
     install_webgui_interaction_regressions_v971,
@@ -143,6 +147,9 @@ install_tracking_webgui_v971(_base, _core, _webgui_v963, _webgui_v962)
 install_mail_files_composer_v971(app, _base, _webgui_v963, _webgui_v962, _webgui_v964)
 # Preserve every selected Stored File across the explicit suppression-warning confirmation POST.
 install_compose_confirmation_v971(_webgui_v964)
+# Project-scoped UX is presentation-only: reuse existing Memories/Skills/Files/Tasks stores and
+# CRUD/auth routes, while keeping editors contextual and project selection explicit.
+install_projects_ux_v971(_webgui_v960, _webgui_projects, _webgui_v962_views, _webgui_v962)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
