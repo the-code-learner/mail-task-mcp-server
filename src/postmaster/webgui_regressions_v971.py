@@ -124,7 +124,14 @@ def _normalize_full_html_result(
     nested_failed = int(diagnostics.get("nested_failed") or 0)
     nested_negative = int(diagnostics.get("nested_negative_cache_hits") or 0)
     stylesheet_failed = int(diagnostics.get("stylesheet_failures") or 0)
-    isolated_failures = max(cached_failed, genuine_failed) + nested_failed + nested_negative + stylesheet_failed
+    # The bounded CSS layer folds attempted nested/stylesheet failures into genuine_failed.
+    # Negative nested cache hits are separate, so add only those after taking the largest
+    # aggregate failure view. This keeps diagnostics useful without double counting.
+    isolated_failures = max(
+        cached_failed,
+        genuine_failed,
+        nested_failed + stylesheet_failed,
+    ) + nested_negative
     if resource_map_failed:
         isolated_failures += 1
 
