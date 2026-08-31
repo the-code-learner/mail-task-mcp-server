@@ -307,11 +307,9 @@ def stored_file_http_response(request: Request, store: FileStore, *, require_sig
                 str(request.query_params.get("expires") or ""),
                 str(request.query_params.get("sig") or ""),
             )
-        except FileHandoffError as exc:
-            # A deleted durable capability should stop resolving, while malformed or
-            # forged capabilities remain indistinguishable from other authorization
-            # failures. FileStoreError is the parent type, so inspect the canonical
-            # not-found condition before returning the generic 403 below.
+        except FileStoreError as exc:
+            # FileHandoffError is a FileStoreError subclass. A deleted durable record
+            # returns 404; malformed/forged capabilities remain a generic 403.
             if str(exc) == "stored file not found":
                 return PlainTextResponse(
                     "stored file not found",
