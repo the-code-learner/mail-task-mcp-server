@@ -5,22 +5,22 @@ import hmac
 import re
 from datetime import datetime, timezone
 from functools import lru_cache
+from html import unescape
 from typing import Any, Callable
-from urllib.parse import parse_qs, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from mcp.types import CallToolResult, ResourceLink, TextContent
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from .email_analytics import AnalyticsError
+from .email_analytics import AnalyticsError, _now, _safe_base_url, _token
 from .file_handoff import (
     FileHandoffError,
-    _download_secret,
     _public_base_url,
     _validate_signed_request,
 )
 from .file_store import FileStore, FileStoreError
-from .link_tracking_html import collect_anchors, eligible_web_url, replace_href, rewrite_anchor_tags
+from .link_tracking_html import already_tracked_url, collect_anchors, eligible_web_url, replace_href, rewrite_anchor_tags
 from .stored_file_delivery import (
     StoredFileLinkTrackingStore,
     StoredFileMailError,
@@ -32,58 +32,16 @@ from .stored_file_delivery import (
     _validated_media_type,
 )
 
-_PUBLIC_FILE_TOKEN_PREFIX = "sfp1_"
-_PUBLIC_FILE_TOKEN_RE = re.compile(r"^sfp1_[0-9a-f]{64}$")
-_PUBLIC_FILE_TOKEN_DOMAIN = "postmaster-public-stored-file-v1"
-_SCAN_PAGE_SIZE = 1000
+_PUBLIC_FILE_TOKEN_PREFIX = "sfc1_"
+_PUBLIC_FILE_TOKEN_RE = re.compile(r"^sfc1_[A-Za-z0-9_-]{40,80}$")
+_PUBLIC_FILE_TOKEN_HASH_DOMAIN = "postmaster-stored-file-capability-token-v1"
+_MAX_TRACKING_CHAIN_DEPTH = 8
+_INTERNAL_CAPABILITY_KEY = "__stored_file_capability_id"
 
 
-def _public_file_token_for_info(
-    info: dict[str, Any],
-    *,
-    secret: bytes | None = None,
-) -> str:
-    canonical = "\n".join(
-        (
-            _PUBLIC_FILE_TOKEN_DOMAIN,
-            str(info.get("id") or ""),
-            str(info.get("sha256") or ""),
-            str(info.get("created_at") or ""),
-        )
-    ).encode("utf-8")
-    digest = hmac.new(secret or _download_secret(), canonical, hashlib.sha256).hexdigest()
-    return f"{_PUBLIC_FILE_TOKEN_PREFIX}{digest}"
-
-
-def build_public_stored_file_url(store: FileStore, file_id: str) -> str:
-    info = store.get_info(file_id)
-    base = _public_base_url(required=True)
-    return f"{base}/t/c/{_public_file_token_for_info(info)}"
-
-
-def resolve_public_stored_file_token(store: FileStore, token: str) -> dict[str, Any]:
-    candidate = str(token or "").strip()
-    if not _PUBLIC_FILE_TOKEN_RE.fullmatch(candidate):
-        raise FileHandoffError("invalid public stored-file capability")
-
-    max_files = min(int(store.max_files), int(store.HARD_MAX_FILES))
-    secret = _download_secret()
-    for offset in range(0, max_files, _SCAN_PAGE_SIZE):
-        items = store.list_files(limit=_SCAN_PAGE_SIZE, offset=offset)
-        for info in items:
-            expected = _public_file_token_for_info(info, secret=secret)
-            if hmac.compare_digest(expected, candidate):
-                current = store.get_info(str(info.get("id") or ""))
-                if not hmac.compare_digest(
-                    _public_file_token_for_info(current, secret=secret),
-                    candidate,
-                ):
-                    raise FileHandoffError("public stored-file capability no longer matches")
-                return current
-        if len(items) < _SCAN_PAGE_SIZE:
-            break
-
-    raise FileHandoffError("invalid public stored-file capability")
+def _public_token_hash(token: str) -> str:
+    canonical = f"{_PUBLIC_FILE_TOKEN_HASH_DOMAIN}\0{str(token or '').strip()}".encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def _configured_public_path_prefix() -> tuple[str, str, str] | None:
@@ -101,7 +59,7 @@ def _public_stored_file_token_from_url(url: str) -> str | None:
     if configured is None:
         return None
     try:
-        parts = urlsplit(str(url or "").strip())
+        parts = urlsplit(unescape(str(url or "").strip()))
     except ValueError:
         return None
     scheme, netloc, prefix = configured
@@ -115,13 +73,6 @@ def _public_stored_file_token_from_url(url: str) -> str | None:
     if not _PUBLIC_FILE_TOKEN_RE.fullmatch(token):
         raise FileHandoffError("invalid public stored-file capability")
     return token
-
-
-def resolve_public_stored_file_url(store: FileStore, url: str) -> dict[str, Any] | None:
-    token = _public_stored_file_token_from_url(url)
-    if token is None:
-        return None
-    return resolve_public_stored_file_token(store, token)
 
 
 def _local_signed_file_capability(url: str) -> tuple[str, str, str] | None:
@@ -157,15 +108,61 @@ def _local_signed_file_capability(url: str) -> tuple[str, str, str] | None:
     return file_id, expires, signature
 
 
+def _capability_active(capability: dict[str, Any]) -> bool:
+    if str(capability.get("status") or "active") != "active" or capability.get("revoked_at"):
+        return False
+    expires_at = _parse_utc(capability.get("expires_at"))
+    return expires_at is None or expires_at > datetime.now(timezone.utc)
+
+
+def _same_incarnation(capability: dict[str, Any], info: dict[str, Any]) -> bool:
+    expected_sha = str(capability.get("file_sha256") or "")
+    expected_created = str(capability.get("file_created_at") or "")
+    return (
+        bool(expected_sha)
+        and bool(expected_created)
+        and hmac.compare_digest(expected_sha, str(info.get("sha256") or ""))
+        and hmac.compare_digest(expected_created, str(info.get("created_at") or ""))
+    )
+
+
+def _legacy_incarnation_matches(link: dict[str, Any], info: dict[str, Any]) -> bool:
+    expected_sha = str(link.get("stored_file_sha256") or "")
+    expected_created = str(link.get("stored_file_created_at") or "")
+    if expected_sha or expected_created:
+        return (
+            bool(expected_sha)
+            and bool(expected_created)
+            and hmac.compare_digest(expected_sha, str(info.get("sha256") or ""))
+            and hmac.compare_digest(expected_created, str(info.get("created_at") or ""))
+        )
+
+    link_created = _parse_utc(link.get("created_at"))
+    file_created = _parse_utc(info.get("created_at"))
+    if link_created is not None and file_created is not None and file_created > link_created:
+        return False
+    return True
+
+
 def _terminal_file_response(
     request: Request,
     store: FileStore,
     file_id: str,
     *,
+    expected_sha256: str = "",
+    expected_created_at: str = "",
     download_filename: str | None = None,
     download_media_type: str | None = None,
 ) -> Response:
     info, blob = store.raw_bytes(file_id)
+    if expected_sha256 or expected_created_at:
+        if not (
+            expected_sha256
+            and expected_created_at
+            and hmac.compare_digest(expected_sha256, str(info.get("sha256") or ""))
+            and hmac.compare_digest(expected_created_at, str(info.get("created_at") or ""))
+        ):
+            raise FileHandoffError("stored-file capability no longer matches")
     filename = _validated_filename(
         str(download_filename or info.get("filename") or ""),
         code="invalid_download_filename",
@@ -189,26 +186,438 @@ def _terminal_file_response(
     return Response(content=blob, media_type=media_type, headers=headers)
 
 
-def _incarnation_matches(link: dict[str, Any], info: dict[str, Any]) -> bool:
-    expected_sha = str(link.get("stored_file_sha256") or "")
-    expected_created = str(link.get("stored_file_created_at") or "")
-    if expected_sha or expected_created:
+class StoredFileLinkTrackingStoreV972(StoredFileLinkTrackingStore):
+    """Per-runtime DB-first Stored File capability and tracking store."""
+
+    def __init__(
+        self,
+        analytics: Any,
+        *,
+        file_store_provider: Callable[[], FileStore],
+    ) -> None:
+        self._v972_file_store_provider = file_store_provider
+        super().__init__(analytics)
+
+    def _file_store_v972(self) -> FileStore:
+        return self._v972_file_store_provider()
+
+    def _init_schema(self) -> None:
+        super()._init_schema()
+        additions = {
+            "stored_file_sha256": "TEXT NOT NULL DEFAULT ''",
+            "stored_file_created_at": "TEXT NOT NULL DEFAULT ''",
+            "stored_file_capability_id": "TEXT",
+        }
+        with self._connect() as conn:
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(tracking_links)").fetchall()
+            }
+            for name, declaration in additions.items():
+                if name not in columns:
+                    conn.execute(f"ALTER TABLE tracking_links ADD COLUMN {name} {declaration}")
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS stored_file_capabilities (
+                    id TEXT PRIMARY KEY,
+                    token_hash TEXT,
+                    file_id TEXT NOT NULL,
+                    file_sha256 TEXT NOT NULL,
+                    file_created_at TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT,
+                    revoked_at TEXT
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS ix_stored_file_capabilities_token_hash
+                    ON stored_file_capabilities(token_hash)
+                    WHERE token_hash IS NOT NULL;
+                CREATE INDEX IF NOT EXISTS ix_stored_file_capabilities_file
+                    ON stored_file_capabilities(file_id, created_at);
+                CREATE INDEX IF NOT EXISTS ix_tracking_links_stored_file_capability
+                    ON tracking_links(stored_file_capability_id);
+                """
+            )
+
+    def create_stored_file_capability(
+        self,
+        file_info: dict[str, Any],
+        *,
+        public_token: bool,
+        expires_at: str | None = None,
+    ) -> tuple[dict[str, Any], str | None]:
+        file_id = str(file_info.get("id") or "").strip()
+        file_sha256 = str(file_info.get("sha256") or "").strip()
+        file_created_at = str(file_info.get("created_at") or "").strip()
+        if not file_id or not file_sha256 or not file_created_at:
+            raise AnalyticsError("Stored File capability requires exact file incarnation metadata")
+
+        capability_id = f"sfcap_{_token(12)}"
+        raw_token = f"{_PUBLIC_FILE_TOKEN_PREFIX}{_token(32)}" if public_token else None
+        token_hash = _public_token_hash(raw_token) if raw_token else None
+        now = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO stored_file_capabilities(
+                    id,token_hash,file_id,file_sha256,file_created_at,status,created_at,expires_at,revoked_at
+                ) VALUES(?,?,?,?,?,'active',?,?,NULL)
+                """,
+                (
+                    capability_id,
+                    token_hash,
+                    file_id,
+                    file_sha256,
+                    file_created_at,
+                    now,
+                    expires_at,
+                ),
+            )
         return (
-            bool(expected_sha)
-            and bool(expected_created)
-            and hmac.compare_digest(expected_sha, str(info.get("sha256") or ""))
-            and hmac.compare_digest(expected_created, str(info.get("created_at") or ""))
+            {
+                "id": capability_id,
+                "file_id": file_id,
+                "file_sha256": file_sha256,
+                "file_created_at": file_created_at,
+                "status": "active",
+                "created_at": now,
+                "expires_at": expires_at,
+                "revoked_at": None,
+            },
+            raw_token,
         )
 
-    link_created = _parse_utc(link.get("created_at"))
-    file_created = _parse_utc(info.get("created_at"))
-    if link_created is not None and file_created is not None and file_created > link_created:
-        return False
-    return True
+    def get_public_capability_by_token(self, token: str) -> dict[str, Any]:
+        candidate = str(token or "").strip()
+        if not _PUBLIC_FILE_TOKEN_RE.fullmatch(candidate):
+            raise AnalyticsError("Unknown Stored File capability")
+        token_hash = _public_token_hash(candidate)
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM stored_file_capabilities WHERE token_hash=?",
+                (token_hash,),
+            ).fetchone()
+        if not row:
+            raise AnalyticsError("Unknown Stored File capability")
+        return dict(row)
+
+    def get_stored_file_capability(self, capability_id: str) -> dict[str, Any]:
+        capability_id = str(capability_id or "").strip()
+        if not capability_id:
+            raise AnalyticsError("Stored File capability reference is missing")
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM stored_file_capabilities WHERE id=?",
+                (capability_id,),
+            ).fetchone()
+        if not row:
+            raise AnalyticsError("Stored File capability does not exist")
+        return dict(row)
+
+    def _resolve_capability_file(
+        self,
+        capability: dict[str, Any],
+        *,
+        require_active: bool = True,
+    ) -> dict[str, Any]:
+        if require_active and not _capability_active(capability):
+            raise AnalyticsError("Stored File capability is inactive")
+        file_id = str(capability.get("file_id") or "")
+        try:
+            info = self._file_store_v972().get_info(file_id)
+        except FileStoreError as exc:
+            raise AnalyticsError("Stored File capability target is unavailable") from exc
+        if not _same_incarnation(capability, info):
+            raise AnalyticsError("Stored File capability target no longer matches")
+        return info
+
+    def _insert_stored_file_link(
+        self,
+        *,
+        delivery: dict[str, Any],
+        file_info: dict[str, Any],
+        position: int,
+        anchor_text: str,
+    ) -> dict[str, Any]:
+        capability_id = str(file_info.get(_INTERNAL_CAPABILITY_KEY) or "").strip()
+        if capability_id:
+            capability = self.get_stored_file_capability(capability_id)
+            if not _capability_active(capability):
+                raise StoredFileMailError("stored_file_unavailable")
+            if (
+                str(capability.get("file_id") or "") != str(file_info.get("id") or "")
+                or not _same_incarnation(capability, file_info)
+            ):
+                raise StoredFileMailError("stored_file_unavailable")
+        else:
+            capability, _ = self.create_stored_file_capability(
+                file_info,
+                public_token=False,
+            )
+            capability_id = str(capability["id"])
+
+        record = super()._insert_stored_file_link(
+            delivery=delivery,
+            file_info=file_info,
+            position=position,
+            anchor_text=anchor_text,
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE tracking_links
+                SET stored_file_sha256=?, stored_file_created_at=?, stored_file_capability_id=?
+                WHERE id=?
+                """,
+                (
+                    str(file_info.get("sha256") or ""),
+                    str(file_info.get("created_at") or ""),
+                    capability_id,
+                    str(record["occurrence_id"]),
+                ),
+            )
+        record["stored_file_sha256"] = str(file_info.get("sha256") or "")
+        record["stored_file_created_at"] = str(file_info.get("created_at") or "")
+        record["stored_file_capability_id"] = capability_id
+        return record
+
+    @staticmethod
+    def _safe_link_metadata(record: dict[str, Any], public_url: str) -> dict[str, Any]:
+        safe = StoredFileLinkTrackingStore._safe_link_metadata(record, public_url)
+        for key in (
+            "stored_file_capability_id",
+            "stored_file_sha256",
+            "stored_file_created_at",
+        ):
+            safe.pop(key, None)
+        return safe
+
+    def _tracked_path_token(self, url: str) -> tuple[str, Any | None]:
+        try:
+            parts = urlsplit(unescape(str(url or "").strip()))
+        except ValueError:
+            return "", None
+        if parts.scheme.lower() not in {"http", "https"} or not parts.netloc:
+            return "", parts
+        path = parts.path or ""
+        prefix = "/t/c/"
+        if not path.startswith(prefix):
+            return "", parts
+        token = path[len(prefix):]
+        if not token or "/" in token or parts.query or parts.fragment:
+            return "", parts
+        return token, parts
+
+    def _same_public_origin(self, parts: Any | None, public_base: Any | None) -> bool:
+        if parts is None or public_base is None:
+            return False
+        return (
+            parts.scheme.lower() == public_base.scheme.lower()
+            and parts.netloc.lower() == public_base.netloc.lower()
+        )
+
+    def _resolve_prior_tracking_url(self, url: str, public_base: Any):
+        current = unescape(str(url or "")).strip()
+        changed = False
+        seen_tokens: set[str] = set()
+
+        for _ in range(_MAX_TRACKING_CHAIN_DEPTH):
+            try:
+                direct_token = _public_stored_file_token_from_url(current)
+            except FileHandoffError as exc:
+                raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
+            if direct_token is not None:
+                capability = self.get_public_capability_by_token(direct_token)
+                if not _capability_active(capability):
+                    raise AnalyticsError("Inactive Postmaster stored-file capability")
+                return f"postmaster-file:{capability['file_id']}", True
+
+            token, parts = self._tracked_path_token(current)
+            if not token:
+                return current, changed
+            if token in seen_tokens:
+                raise AnalyticsError("Cyclic Postmaster tracking-link chain")
+            seen_tokens.add(token)
+            try:
+                record = self.get_by_token(token)
+            except AnalyticsError:
+                if self._same_public_origin(parts, public_base):
+                    raise AnalyticsError("Unknown Postmaster tracking-link token")
+                return current, changed
+
+            target_type = str(record.get("target_type") or "url")
+            if target_type == "stored_file":
+                capability_id = str(record.get("stored_file_capability_id") or "")
+                if capability_id:
+                    capability = self.get_stored_file_capability(capability_id)
+                    if not _capability_active(capability):
+                        raise AnalyticsError("Inactive Postmaster stored-file capability")
+                    return f"postmaster-file:{capability['file_id']}", True
+                file_id = str(record.get("stored_file_id") or "")
+                if not file_id:
+                    raise AnalyticsError("Stored Postmaster tracking-link target is invalid")
+                return f"postmaster-file:{file_id}", True
+
+            original = str(record.get("original_url") or "").strip()
+            if not eligible_web_url(original):
+                raise AnalyticsError("Stored Postmaster tracking-link destination is invalid")
+            current = original
+            changed = True
+
+        token, _ = self._tracked_path_token(current)
+        if token:
+            raise AnalyticsError("Postmaster tracking-link chain is too deep")
+        return current, changed
+
+    def instrument_html_with_shares(
+        self,
+        *,
+        body_html: str,
+        delivery: dict[str, Any],
+        track_web_links: bool = True,
+        stored_file_resolver: Callable[[str], dict[str, Any]] | None = None,
+    ) -> tuple[str, list[dict[str, Any]], list[tuple[str, str]]]:
+        html = body_html or ""
+        anchors = collect_anchors(html)
+        if not anchors:
+            return html, [], []
+
+        replacements: list[tuple[str, str]] = []
+        tracked: list[dict[str, Any]] = []
+        share_urls: list[tuple[str, str]] = []
+        public_base = _safe_base_url()
+
+        for anchor_index, anchor in enumerate(anchors):
+            href = str(anchor.get("href") or "")
+            anchor_text = str(anchor.get("anchor_text") or "")[:500]
+            stored_file_id = _stored_file_id_from_href(href)
+            record: dict[str, Any] | None = None
+
+            if stored_file_id is not None:
+                if stored_file_resolver is None:
+                    raise StoredFileMailError("stored_file_resolver_unavailable")
+                file_info = stored_file_resolver(stored_file_id)
+                record = self._insert_stored_file_link(
+                    delivery=delivery,
+                    file_info=file_info,
+                    position=anchor_index,
+                    anchor_text=anchor_text,
+                )
+            else:
+                try:
+                    capability_token = _public_stored_file_token_from_url(href)
+                except FileHandoffError as exc:
+                    raise StoredFileMailError("stored_file_unavailable") from exc
+
+                if capability_token is not None:
+                    if stored_file_resolver is None:
+                        raise StoredFileMailError("stored_file_resolver_unavailable")
+                    try:
+                        capability = self.get_public_capability_by_token(capability_token)
+                        info = self._resolve_capability_file(capability)
+                    except (AnalyticsError, FileStoreError) as exc:
+                        raise StoredFileMailError("stored_file_unavailable") from exc
+                    authorized = stored_file_resolver(str(capability["file_id"]))
+                    if (
+                        str(authorized.get("sha256") or "") != str(info.get("sha256") or "")
+                        or str(authorized.get("created_at") or "") != str(info.get("created_at") or "")
+                    ):
+                        raise StoredFileMailError("stored_file_unavailable")
+                    file_info = dict(authorized)
+                    file_info[_INTERNAL_CAPABILITY_KEY] = str(capability["id"])
+                    stored_file_id = str(capability["file_id"])
+                    record = self._insert_stored_file_link(
+                        delivery=delivery,
+                        file_info=file_info,
+                        position=anchor_index,
+                        anchor_text=anchor_text,
+                    )
+                elif (
+                    track_web_links
+                    and eligible_web_url(href)
+                    and not already_tracked_url(href, public_base)
+                ):
+                    record = self._insert_link(
+                        delivery=delivery,
+                        original_url=href,
+                        position=anchor_index,
+                        anchor_text=anchor_text,
+                    )
+                    record["target_type"] = "url"
+
+            if record is None:
+                continue
+
+            tracked_url = f"{public_base}/t/c/{record['tracking_token']}"
+            replacements.append(
+                (str(anchor["raw_tag"]), replace_href(str(anchor["raw_tag"]), tracked_url))
+            )
+            tracked.append(self._safe_link_metadata(record, tracked_url))
+            if stored_file_id is not None:
+                share_urls.append((stored_file_id, tracked_url))
+
+        return rewrite_anchor_tags(html, replacements), tracked, share_urls
+
+    def rewrite_stored_file_links_for_sent_copy(
+        self,
+        body_html: str,
+        share_urls: list[tuple[str, str]],
+    ) -> str:
+        if not share_urls:
+            return body_html
+        queues: dict[str, list[str]] = {}
+        for file_id, public_url in share_urls:
+            queues.setdefault(file_id, []).append(public_url)
+
+        replacements: list[tuple[str, str]] = []
+        for anchor in collect_anchors(body_html or ""):
+            href = str(anchor.get("href") or "")
+            file_id = _stored_file_id_from_href(href)
+            if file_id is None:
+                try:
+                    token = _public_stored_file_token_from_url(href)
+                except FileHandoffError:
+                    token = None
+                if token is not None:
+                    try:
+                        capability = self.get_public_capability_by_token(token)
+                    except AnalyticsError:
+                        capability = None
+                    file_id = (
+                        str(capability.get("file_id") or "")
+                        if capability is not None
+                        else None
+                    )
+            if file_id is None or not queues.get(file_id):
+                continue
+            replacements.append(
+                (
+                    str(anchor["raw_tag"]),
+                    replace_href(str(anchor["raw_tag"]), queues[file_id].pop(0)),
+                )
+            )
+        return rewrite_anchor_tags(body_html or "", replacements)
+
+
+def build_public_stored_file_url(
+    store: FileStore,
+    capability_store: StoredFileLinkTrackingStoreV972,
+    file_id: str,
+) -> str:
+    info = store.get_info(file_id)
+    _, raw_token = capability_store.create_stored_file_capability(
+        info,
+        public_token=True,
+    )
+    if not raw_token:
+        raise AnalyticsError("Stored File public capability token was not created")
+    base = _public_base_url(required=True)
+    return f"{base}/t/c/{raw_token}"
 
 
 def stored_file_resource_result_v972(
     store: FileStore,
+    capability_store: StoredFileLinkTrackingStoreV972,
     file_id: str,
     transport: str = "auto",
 ) -> CallToolResult:
@@ -222,10 +631,8 @@ def stored_file_resource_result_v972(
             mode = "http" if _public_base_url(required=False) else "mcp"
 
         if mode == "http":
-            uri = build_public_stored_file_url(store, file_id)
+            uri = build_public_stored_file_url(store, capability_store, file_id)
         else:
-            from urllib.parse import quote
-
             uri = f"postmaster://files/{quote(file_id, safe='')}"
 
         description = str(info.get("description") or "").strip() or "Postmaster stored file"
@@ -241,7 +648,7 @@ def stored_file_resource_result_v972(
                 )
             ]
         )
-    except FileStoreError as exc:
+    except (FileStoreError, AnalyticsError) as exc:
         return CallToolResult(
             content=[TextContent(type="text", text=str(exc))],
             is_error=True,
@@ -251,7 +658,7 @@ def stored_file_resource_result_v972(
 async def public_tracking_target_v972(
     request: Request,
     *,
-    tracking_store: StoredFileLinkTrackingStore,
+    tracking_store: StoredFileLinkTrackingStoreV972,
     file_store: FileStore,
     logger: Any,
 ) -> Response:
@@ -259,27 +666,39 @@ async def public_tracking_target_v972(
 
     if token.startswith(_PUBLIC_FILE_TOKEN_PREFIX):
         try:
-            info = resolve_public_stored_file_token(file_store, token)
-            return _terminal_file_response(request, file_store, str(info["id"]))
+            capability = tracking_store.get_public_capability_by_token(token)
+            if not _capability_active(capability):
+                return _public_not_found()
+            file_id = str(capability.get("file_id") or "")
+            current = file_store.get_info(file_id)
+            if not _same_incarnation(capability, current):
+                return _public_not_found()
+            return _terminal_file_response(
+                request,
+                file_store,
+                file_id,
+                expected_sha256=str(capability.get("file_sha256") or ""),
+                expected_created_at=str(capability.get("file_created_at") or ""),
+            )
         except Exception:
             return _public_not_found()
 
     try:
         link = tracking_store.get_by_token(token)
         target_type = str(link.get("target_type") or "url")
-        stored_file_id = ""
         signed_local: tuple[str, str, str] | None = None
         destination = ""
+        capability: dict[str, Any] | None = None
+        legacy_stored_file_id = ""
 
         if target_type == "stored_file":
-            if str(link.get("status") or "active") != "active" or link.get("revoked_at"):
-                return _public_not_found()
-            expires_at = _parse_utc(link.get("expires_at"))
-            if expires_at is not None and expires_at <= datetime.now(timezone.utc):
-                return _public_not_found()
-            stored_file_id = str(link.get("stored_file_id") or "")
-            if not stored_file_id:
-                return _public_not_found()
+            capability_id = str(link.get("stored_file_capability_id") or "")
+            if capability_id:
+                capability = tracking_store.get_stored_file_capability(capability_id)
+            else:
+                legacy_stored_file_id = str(link.get("stored_file_id") or "")
+                if not legacy_stored_file_id:
+                    return _public_not_found()
         elif target_type == "url":
             destination = str(link.get("original_url") or "")
             if not eligible_web_url(destination):
@@ -321,175 +740,37 @@ async def public_tracking_target_v972(
             )
             return _terminal_file_response(request, file_store, stored_file_id)
 
-        current = file_store.get_info(stored_file_id)
-        if not _incarnation_matches(link, current):
+        if capability is not None:
+            if not _capability_active(capability):
+                return _public_not_found()
+            file_id = str(capability.get("file_id") or "")
+            current = file_store.get_info(file_id)
+            if not _same_incarnation(capability, current):
+                return _public_not_found()
+            return _terminal_file_response(
+                request,
+                file_store,
+                file_id,
+                expected_sha256=str(capability.get("file_sha256") or ""),
+                expected_created_at=str(capability.get("file_created_at") or ""),
+                download_filename=str(link.get("download_filename") or ""),
+                download_media_type=str(link.get("download_media_type") or ""),
+            )
+
+        current = file_store.get_info(legacy_stored_file_id)
+        if not _legacy_incarnation_matches(link, current):
             return _public_not_found()
         return _terminal_file_response(
             request,
             file_store,
-            stored_file_id,
+            legacy_stored_file_id,
+            expected_sha256=str(link.get("stored_file_sha256") or ""),
+            expected_created_at=str(link.get("stored_file_created_at") or ""),
             download_filename=str(link.get("download_filename") or ""),
             download_media_type=str(link.get("download_media_type") or ""),
         )
     except Exception:
         return _public_not_found()
-
-
-class StoredFileLinkTrackingStoreV972(StoredFileLinkTrackingStore):
-    """Per-runtime v9.7.2 tracking store; no class-global runtime capture."""
-
-    def __init__(
-        self,
-        analytics: Any,
-        *,
-        file_store_provider: Callable[[], FileStore],
-    ) -> None:
-        self._v972_file_store_provider = file_store_provider
-        super().__init__(analytics)
-
-    def _file_store_v972(self) -> FileStore:
-        return self._v972_file_store_provider()
-
-    def _init_schema(self) -> None:
-        super()._init_schema()
-        additions = {
-            "stored_file_sha256": "TEXT NOT NULL DEFAULT ''",
-            "stored_file_created_at": "TEXT NOT NULL DEFAULT ''",
-        }
-        with self._connect() as conn:
-            columns = {
-                str(row["name"])
-                for row in conn.execute("PRAGMA table_info(tracking_links)").fetchall()
-            }
-            for name, declaration in additions.items():
-                if name not in columns:
-                    conn.execute(f"ALTER TABLE tracking_links ADD COLUMN {name} {declaration}")
-
-    def _insert_stored_file_link(
-        self,
-        *,
-        delivery: dict[str, Any],
-        file_info: dict[str, Any],
-        position: int,
-        anchor_text: str,
-    ) -> dict[str, Any]:
-        record = super()._insert_stored_file_link(
-            delivery=delivery,
-            file_info=file_info,
-            position=position,
-            anchor_text=anchor_text,
-        )
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE tracking_links
-                SET stored_file_sha256=?, stored_file_created_at=?
-                WHERE id=?
-                """,
-                (
-                    str(file_info.get("sha256") or ""),
-                    str(file_info.get("created_at") or ""),
-                    str(record["occurrence_id"]),
-                ),
-            )
-        return record
-
-    def _resolve_prior_tracking_url(self, url: str, public_base: Any):
-        try:
-            token = _public_stored_file_token_from_url(url)
-        except FileHandoffError as exc:
-            raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
-        if token is None:
-            return super()._resolve_prior_tracking_url(url, public_base)
-        try:
-            resolve_public_stored_file_token(self._file_store_v972(), token)
-        except (FileStoreError, FileHandoffError) as exc:
-            raise AnalyticsError("Invalid Postmaster stored-file capability") from exc
-        return str(url or "").strip(), False
-
-    def instrument_html_with_shares(
-        self,
-        *,
-        body_html: str,
-        delivery: dict[str, Any],
-        track_web_links: bool = True,
-        stored_file_resolver: Callable[[str], dict[str, Any]] | None = None,
-    ) -> tuple[str, list[dict[str, Any]], list[tuple[str, str]]]:
-        html = body_html or ""
-        if stored_file_resolver is not None and html:
-            replacements: list[tuple[str, str]] = []
-            for anchor in collect_anchors(html):
-                href = str(anchor.get("href") or "")
-                try:
-                    token = _public_stored_file_token_from_url(href)
-                except FileHandoffError as exc:
-                    raise StoredFileMailError("stored_file_unavailable") from exc
-                if token is None:
-                    continue
-                try:
-                    info = resolve_public_stored_file_token(self._file_store_v972(), token)
-                except (FileStoreError, FileHandoffError) as exc:
-                    raise StoredFileMailError("stored_file_unavailable") from exc
-                authorized = stored_file_resolver(str(info["id"]))
-                if (
-                    str(authorized.get("sha256") or "") != str(info.get("sha256") or "")
-                    or str(authorized.get("created_at") or "")
-                    != str(info.get("created_at") or "")
-                ):
-                    raise StoredFileMailError("stored_file_unavailable")
-                replacements.append(
-                    (
-                        str(anchor["raw_tag"]),
-                        replace_href(
-                            str(anchor["raw_tag"]),
-                            f"postmaster-file:{info['id']}",
-                        ),
-                    )
-                )
-            html = rewrite_anchor_tags(html, replacements)
-
-        return super().instrument_html_with_shares(
-            body_html=html,
-            delivery=delivery,
-            track_web_links=track_web_links,
-            stored_file_resolver=stored_file_resolver,
-        )
-
-    def rewrite_stored_file_links_for_sent_copy(
-        self,
-        body_html: str,
-        share_urls: list[tuple[str, str]],
-    ) -> str:
-        if not share_urls:
-            return body_html
-        queues: dict[str, list[str]] = {}
-        for file_id, public_url in share_urls:
-            queues.setdefault(file_id, []).append(public_url)
-
-        replacements: list[tuple[str, str]] = []
-        for anchor in collect_anchors(body_html or ""):
-            href = str(anchor.get("href") or "")
-            file_id = _stored_file_id_from_href(href)
-            if file_id is None:
-                try:
-                    token = _public_stored_file_token_from_url(href)
-                except FileHandoffError:
-                    token = None
-                if token is not None:
-                    try:
-                        info = resolve_public_stored_file_token(self._file_store_v972(), token)
-                    except (FileStoreError, FileHandoffError):
-                        info = None
-                    file_id = str(info.get("id") or "") if info is not None else None
-            if file_id is None or not queues.get(file_id):
-                continue
-            replacements.append(
-                (
-                    str(anchor["raw_tag"]),
-                    replace_href(str(anchor["raw_tag"]), queues[file_id].pop(0)),
-                )
-            )
-        return rewrite_anchor_tags(body_html or "", replacements)
 
 
 def bind_stored_file_link_store_v972(base: Any) -> Callable[[], StoredFileLinkTrackingStoreV972]:
@@ -505,7 +786,18 @@ def bind_stored_file_link_store_v972(base: Any) -> Callable[[], StoredFileLinkTr
     return _store
 
 
-def install_stored_file_public_v972(base: Any, core: Any) -> None:
-    """Install the resource handoff helper without eager DB or global class mutation."""
-    del base
-    core.stored_file_resource_result = stored_file_resource_result_v972
+def install_stored_file_public_v972(
+    core: Any,
+    link_store_factory: Callable[[], StoredFileLinkTrackingStoreV972],
+) -> None:
+    """Install DB-backed resource handoff without eager DB initialization or global patching."""
+
+    def _resource_result(store: FileStore, file_id: str, transport: str = "auto") -> CallToolResult:
+        return stored_file_resource_result_v972(
+            store,
+            link_store_factory(),
+            file_id,
+            transport,
+        )
+
+    core.stored_file_resource_result = _resource_result
