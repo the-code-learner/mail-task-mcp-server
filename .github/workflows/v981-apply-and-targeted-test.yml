@@ -24,15 +24,468 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify exact prepared patch
+      - name: Verify exact prepared patch and baseline
         run: |
           echo '28412f8196db8bba59800b17c49451aaff9f9078de0214e56c6422f33969bdd4  postmaster-v9.8.1.patch' | sha256sum -c -
           test "$(git rev-parse origin/main)" = '0d42796cdccd45fa991d4e256ba8b2df9cd72ebd'
+          if git apply --check postmaster-v9.8.1.patch; then
+            echo 'Prepared patch unexpectedly applies directly; adaptation should not be needed.' >&2
+            exit 1
+          fi
+          echo 'Prepared patch verified; direct hunk context is stale against released v9.8.0 main, adapting only intended hunks.'
 
-      - name: Check and apply rebased patch
+      - name: Build rebased patch from exact prepared intents
         run: |
-          git apply --3way --check postmaster-v9.8.1.patch
-          git apply --3way postmaster-v9.8.1.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one anchor, found {count}')
+              return text.replace(old, new, 1)
+
+          # VERSION
+          p = Path('VERSION')
+          if p.read_text() != '9.8.0\n':
+              raise SystemExit('VERSION baseline mismatch')
+          p.write_text('9.8.1\n')
+
+          # CHANGELOG metadata only.
+          p = Path('CHANGELOG.md')
+          text = p.read_text()
+          anchor = '## 9.8.0 - 2026-09-05\n'
+          entry = '''## 9.8.1 - 2026-09-06
+
+### Fixed / changed
+* Fixed the Structured Data WebGUI `#data` loading regression by removing the
+  global body `MutationObserver` loop introduced in v9.8.0. Structured Data
+  context synchronization is now event-driven and performs idempotent writes.
+* Made the initial Structured Data workspace count-free: the WebGUI now reads
+  only project table metadata and no longer calls `describe_project`,
+  `status`, migration history, audit history, or per-table `COUNT(*)` queries
+  on the critical rendering path.
+* Added count-free table pagination with 10 rows by default, selectable
+  10/20/50/100 rows per page, stable `_row_id` ordering, and previous/next
+  navigation using `LIMIT page_size + 1` rather than a total-row count.
+* Removed the eager 10,000-row JSON export from table Browse rendering.
+* Preserved the public v9.8 structured-data MCP contract, including
+  `db_describe_project` row counts and the exact 118-command surface.
+* `postmaster-mcp.yml`, `requirements.txt`, Cloudflare Worker/configuration,
+  mail semantics, persistent data schema, and secret/private-key handling are
+  unchanged.
+
+'''
+          text = replace_once(text, anchor, entry + anchor, 'CHANGELOG')
+          p.write_text(text)
+
+          # Lightweight internal WebGUI discovery method; public describe_project remains untouched.
+          p = Path('src/postmaster/structured_data_v980.py')
+          text = p.read_text()
+          if 'def list_project_tables(' in text:
+              raise SystemExit('list_project_tables already exists unexpectedly')
+          anchor = '    def describe_project(self, owner_id: str, project_id: str) -> dict[str, Any]:\n'
+          method = '''    def list_project_tables(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Return lightweight table metadata for UI discovery without row/column counts.
+
+        This intentionally does not replace ``describe_project``: the public MCP
+        contract keeps its historical count fields. WebGUI discovery needs only
+        logical metadata and must stay cheap even while data writes are active.
+        """
+        owner, project = self._scope(owner_id, project_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT logical_name,description,source_of_truth,primary_key,updated_at
+                FROM sd_tables
+                WHERE owner_id=? AND project_id=?
+                ORDER BY logical_name
+                """,
+                (owner, project),
+            ).fetchall()
+        return {
+            "ok": True,
+            "owner_id": owner,
+            "project_id": project,
+            "tables": [
+                {
+                    "name": row["logical_name"],
+                    "description": row["description"],
+                    "source_of_truth": row["source_of_truth"],
+                    "primary_key": row["primary_key"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ],
+        }
+
+'''
+          text = replace_once(text, anchor, method + anchor, 'structured_data method insertion')
+          p.write_text(text)
+
+          # Structured Data WebGUI: adapt prepared hunk intents to release formatting.
+          p = Path('src/postmaster/webgui_structured_data_v980.py')
+          text = p.read_text()
+
+          old = '''def _url(*, project: str = "", table: str = "", flash: str = "") -> str:
+    query: dict[str, str] = {"ui_view": VIEW}
+    if project:
+        query["project"] = project
+    if table:
+        query["data_table"] = table
+    if flash:
+        query["flash"] = flash
+    return "/?" + urlencode(query) + "#data"
+'''
+          new = '''def _url(
+    *,
+    project: str = "",
+    table: str = "",
+    flash: str = "",
+    page_size: int | None = None,
+    offset: int = 0,
+) -> str:
+    query: dict[str, str] = {"ui_view": VIEW}
+    if project:
+        query["project"] = project
+    if table:
+        query["data_table"] = table
+    if page_size is not None:
+        query["data_limit"] = str(page_size)
+    if offset:
+        query["data_offset"] = str(max(0, offset))
+    if flash:
+        query["flash"] = flash
+    return "/?" + urlencode(query) + "#data"
+'''
+          text = replace_once(text, old, new, 'webgui _url')
+
+          counts = '''            f'<div class="small"><strong>{int(table.get("column_count") or 0)}</strong> columns · '
+            f'<strong>{int(table.get("row_count") or 0)}</strong> rows</div>'
+'''
+          text = replace_once(text, counts, '', 'table-card counts')
+
+          start = text.index('def _browser(')
+          end = text.index('\n\ndef _post_form(', start)
+          browser = '''def _browser(
+    service: Any,
+    owner: str,
+    project: str,
+    table: str,
+    *,
+    page_size: int = 10,
+    offset: int = 0,
+) -> str:
+    if not table:
+        return ""
+    described = service.describe_table(owner, project, table)
+    queried = service.query(
+        owner,
+        project,
+        table,
+        limit=page_size + 1,
+        offset=offset,
+        sort=["_row_id"],
+        effective=True,
+    )
+    columns = [dict(row) for row in described.get("columns", [])]
+    fetched_rows = [dict(row) for row in queried.get("rows", [])]
+    has_next = len(fetched_rows) > page_size
+    rows = fetched_rows[:page_size]
+    names = [str(row.get("name") or "") for row in columns]
+    header = "".join(f'<th>{escape(name)}</th>' for name in ["_row_id", *names])
+    body: list[str] = []
+    for row in rows:
+        cells = "".join(
+            f'<td><code>{escape(_json_text(row.get(name)))}</code></td>'
+            for name in ["_row_id", *names]
+        )
+        body.append(f"<tr>{cells}</tr>")
+    if not body:
+        body.append(
+            f'<tr><td colspan="{max(1, len(names) + 1)}" class="muted">No rows</td></tr>'
+        )
+    schema_rows: list[str] = []
+    for column in columns:
+        schema_rows.append(
+            '<tr>'
+            f'<td><code>{escape(str(column.get("name") or ""))}</code></td>'
+            f'<td>{escape(str(column.get("data_type") or ""))}</td>'
+            f'<td>{"yes" if column.get("required") else "no"}</td>'
+            f'<td>{"yes" if column.get("unique") else "no"}</td>'
+            f'<td>{"yes" if column.get("primary_key") else "no"}</td>'
+            f'<td>{escape(str(column.get("description") or ""))}</td>'
+            '</tr>'
+        )
+    sizes = "".join(
+        f'<option value="{size}"{" selected" if size == page_size else ""}>{size}</option>'
+        for size in (10, 20, 50, 100)
+    )
+    previous_offset = max(0, offset - page_size)
+    previous = (
+        f'<a href="{escape(_url(project=project, table=table, page_size=page_size, offset=previous_offset), quote=True)}" '
+        'data-v960-fragment="data"><button type="button" aria-label="Previous page">←</button></a>'
+        if offset > 0
+        else '<button type="button" aria-label="Previous page" disabled>←</button>'
+    )
+    next_link = (
+        f'<a href="{escape(_url(project=project, table=table, page_size=page_size, offset=offset + page_size), quote=True)}" '
+        'data-v960-fragment="data"><button type="button" aria-label="Next page">→</button></a>'
+        if has_next
+        else '<button type="button" aria-label="Next page" disabled>→</button>'
+    )
+    if rows:
+        range_label = f"Rows {offset + 1}–{offset + len(rows)}"
+    else:
+        range_label = "No rows"
+    return f\'\'\'
+<section class="card wide">
+  <div class="panel-title"><div><h2>{escape(table)}</h2>
+  <p class="small muted">Effective rows · raw values remain auditable under overrides.</p></div>
+  <span class="badge">{escape(range_label)}</span></div>
+  <div class="v951-toolbar">
+    <form method="get" action="/" class="row">
+      <input type="hidden" name="ui_view" value="data">
+      <input type="hidden" name="project" value="{escape(project, quote=True)}">
+      <input type="hidden" name="data_table" value="{escape(table, quote=True)}">
+      <input type="hidden" name="data_offset" value="0">
+      <label>Rows per page
+        <select name="data_limit" onchange="this.form.submit()">{sizes}</select>
+      </label>
+      <noscript><button type="submit">Apply</button></noscript>
+    </form>
+    <div class="row" aria-label="Table pagination">
+      {previous}
+      {next_link}
+    </div>
+  </div>
+  <div class="scroll"><table><thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table></div>
+</section>
+<section class="card wide"><div class="panel-title"><h2>Schema explorer</h2>
+<span class="badge">{len(columns)} columns</span></div>
+<div class="scroll"><table><thead><tr><th>Column</th><th>Type</th><th>Required</th><th>Unique</th><th>PK</th><th>Description</th></tr></thead>
+<tbody>{''.join(schema_rows)}</tbody></table></div></section>
+\'\'\'
+'''
+          text = text[:start] + browser + text[end:]
+
+          start = text.index('    service = base.structured_data_service()\n', text.index('def render_data('))
+          end = text.index('    create_table_form = _post_form(', start)
+          discovery = '''    service = base.structured_data_service()
+    listed = service.list_project_tables(owner, project)
+    tables = [dict(row) for row in listed.get("tables", [])]
+    selected_table = str(request.query_params.get("data_table") or "").strip()
+    if selected_table and selected_table not in {str(row.get("name") or "") for row in tables}:
+        selected_table = ""
+    try:
+        requested_page_size = int(request.query_params.get("data_limit") or 10)
+    except (TypeError, ValueError):
+        requested_page_size = 10
+    page_size = requested_page_size if requested_page_size in {10, 20, 50, 100} else 10
+    try:
+        offset = max(0, int(request.query_params.get("data_offset") or 0))
+    except (TypeError, ValueError):
+        offset = 0
+
+'''
+          text = text[:start] + discovery + text[end:]
+
+          text = replace_once(
+              text,
+              '    browser = _browser(service, owner, project, selected_table)\n',
+              '''    browser = _browser(
+        service,
+        owner,
+        project,
+        selected_table,
+        page_size=page_size,
+        offset=offset,
+    )
+''',
+              'browser invocation',
+          )
+
+          old = '''<span class="badge">v9.8.0</span></div>
+{selector}
+<div class="notice"><strong>Server-enforced scope:</strong> {escape(owner)} / {escape(project)} ·
+ backend {escape(str(status.get("backend") or "sqlite"))}. Logical names resolve to hidden physical
+ namespaces. Raw SQL is read-only and validated; destructive DDL is review-only.</div>
+<div class="v951-metrics">
+<div class="v951-metric"><span>Tables</span><strong>{len(tables)}</strong><small>project only</small></div>
+<div class="v951-metric"><span>Audit events</span><strong>{len(audit)}</strong><small>latest 100</small></div>
+<div class="v951-metric"><span>Migrations</span><strong>{len(migrations)}</strong><small>latest 50</small></div>
+<div class="v951-metric"><span>Pending destructive</span><strong>{len(approvals)}</strong><small>review queue</small></div>
+</div>
+<section class="card wide"><div class="panel-title"><h2>Tables</h2>
+<span class="small muted">AI-created schema is visible here like every other schema.</span></div>
+'''
+          new = '''<span class="badge">v9.8.1</span></div>
+{selector}
+<div class="notice"><strong>Server-enforced scope:</strong> {escape(owner)} / {escape(project)} ·
+ backend {escape(str(getattr(service, "backend_name", "sqlite")))}. Logical names resolve to hidden physical
+ namespaces. Raw SQL is read-only and validated; destructive DDL is review-only.</div>
+<section class="card wide"><div class="panel-title"><h2>Tables</h2>
+<span class="small muted">Open a table to load rows. No table row counts are calculated here.</span></div>
+'''
+          text = replace_once(text, old, new, 'critical-path metrics')
+
+          old = '''<section class="card wide"><div class="panel-title"><h2>Approval inbox</h2><span class="badge">{len(approvals)}</span></div>
+{('<ul>' + ''.join(approvals) + '</ul>') if approvals else '<p class="muted">No destructive schema plans awaiting review.</p>'}
+</section>
+<section class="card wide"><div class="panel-title"><h2>Migrations</h2>
+<span class="small muted">Safe additive operations may apply autonomously; destructive operations never do.</span></div>
+<div class="scroll"><table><thead><tr><th>Seq</th><th>Title</th><th>Status</th><th>Destructive</th><th>ID</th></tr></thead>
+<tbody>{''.join(migration_rows) or '<tr><td colspan="5" class="muted">No migrations yet</td></tr>'}</tbody></table></div></section>
+<section class="card wide"><div class="panel-title"><h2>Activity &amp; provenance</h2>
+<span class="small muted">What happened, who/what changed it, and why.</span></div>
+<div class="scroll"><table><thead><tr><th>UTC</th><th>Operation</th><th>Actor</th><th>Table</th><th>Row</th><th>Reason</th></tr></thead>
+<tbody>{''.join(audit_rows) or '<tr><td colspan="6" class="muted">No structured-data events yet</td></tr>'}</tbody></table></div></section>
+'''
+          text = replace_once(text, old, '', 'deferred migrations/audit sections')
+
+          text = replace_once(
+              text,
+              '    """Add the v9.8.0 Structured Data control plane to the existing lazy shell."""\n',
+              '    """Install the v9.8 Structured Data control plane with v9.8.1 loading fixes."""\n',
+              'installer docstring',
+          )
+
+          old = '''  const sync=()=>{
+    if((location.hash||'').slice(1)!=='data' && new URL(location.href).searchParams.get('ui_view')!=='data')return;
+    const t=document.querySelector('[data-v970-context-title]');
+    const s=document.querySelector('[data-v970-context-subtitle]');
+    if(t)t.textContent='Structured Data';
+    if(s)s.textContent='Project-scoped relational facts, schemas and provenance';
+  };
+  addEventListener('hashchange',sync); addEventListener('popstate',sync);
+  new MutationObserver(sync).observe(document.body,{subtree:true,childList:true}); sync();
+'''
+          new = '''  const isDataUrl=(value)=>{
+    const u=new URL(value || location.href, location.href);
+    return (u.hash||'').slice(1)==='data' || u.searchParams.get('ui_view')==='data';
+  };
+  const sync=(value)=>{
+    if(!isDataUrl(value))return;
+    const t=document.querySelector('[data-v970-context-title]');
+    const s=document.querySelector('[data-v970-context-subtitle]');
+    if(t && t.textContent!=='Structured Data')t.textContent='Structured Data';
+    if(s && s.textContent!=='Project-scoped relational facts, schemas and provenance'){
+      s.textContent='Project-scoped relational facts, schemas and provenance';
+    }
+  };
+  addEventListener('hashchange',()=>sync(location.href));
+  addEventListener('popstate',()=>sync(location.href));
+  document.addEventListener('click',(event)=>{
+    const node=event.target instanceof Element ? event.target.closest('a[href]') : null;
+    if(node && isDataUrl(node.href))sync(node.href);
+  },true);
+  sync(location.href);
+'''
+          text = replace_once(text, old, new, 'MutationObserver replacement')
+          p.write_text(text)
+
+          # Tests: preserve existing public row-count assertion and adapt WebGUI regressions.
+          p = Path('tests/test_v9_8_0_structured_data.py')
+          text = p.read_text()
+          old = '''            self.assertIn("Structured Data", html)
+            self.assertIn("Schema explorer", html)
+            self.assertIn("Approval inbox", html)
+            self.assertIn("Activity &amp; provenance", html)
+            self.assertIn("people", html)
+
+            app = Starlette()
+'''
+          new = '''            self.assertIn("Structured Data", html)
+            self.assertIn("Schema explorer", html)
+            self.assertIn("people", html)
+            self.assertIn("Rows per page", html)
+            self.assertIn('value="10" selected', html)
+            self.assertNotIn("Export preview (JSON)", html)
+
+            listed = service.list_project_tables(OWNER, PROJECT)
+            self.assertEqual([row["name"] for row in listed["tables"]], ["people"])
+            self.assertNotIn("row_count", listed["tables"][0])
+            self.assertNotIn("column_count", listed["tables"][0])
+
+            app = Starlette()
+'''
+          text = replace_once(text, old, new, 'webgui existing assertions')
+
+          anchor = '''            self.assertEqual(VIEW, "data")
+
+
+if __name__ == "__main__":
+'''
+          added = '''            self.assertEqual(VIEW, "data")
+
+    def test_browser_uses_count_free_limit_plus_one_paging(self):
+        calls = []
+
+        class Service:
+            backend_name = "sqlite"
+
+            @staticmethod
+            def list_project_tables(owner, project):
+                return {"tables": [{"name": "people", "description": "", "source_of_truth": "operational"}]}
+
+            @staticmethod
+            def describe_table(owner, project, table):
+                return {"columns": [{"name": "name", "data_type": "text"}]}
+
+            @staticmethod
+            def query(*args, **kwargs):
+                calls.append((args, kwargs))
+                return {
+                    "rows": [
+                        {"_row_id": f"r{i:02d}", "name": f"Name {i}"}
+                        for i in range(kwargs["limit"])
+                    ]
+                }
+
+            def __getattr__(self, name):
+                if name in {"describe_project", "status", "list_migrations", "audit_log", "export"}:
+                    raise AssertionError(f"{name} must not run on WebGUI Browse")
+                raise AttributeError(name)
+
+        class Scheduler:
+            @staticmethod
+            def list_projects(owner_id=None):
+                return [{"id": PROJECT, "owner_id": OWNER, "name": "Project A", "active": True}]
+
+        base = SimpleNamespace(
+            scheduler=lambda: Scheduler(),
+            structured_data_service=lambda: Service(),
+            _safe_call=lambda fn: fn(),
+            _csrf_value=lambda: "csrf-test",
+        )
+        request = Request({
+            "type": "http", "method": "GET", "path": "/", "headers": [],
+            "query_string": f"project={PROJECT}&data_table=people&data_limit=20&data_offset=20".encode(),
+            "server": ("testserver", 80), "scheme": "http",
+        })
+        html = render_data(base, request)
+        self.assertEqual(calls[-1][1]["limit"], 21)
+        self.assertEqual(calls[-1][1]["offset"], 20)
+        self.assertEqual(calls[-1][1]["sort"], ["_row_id"])
+        self.assertIn("Name 19", html)
+        self.assertNotIn("Name 20", html)
+        self.assertIn("Rows 21–40", html)
+        self.assertIn('aria-label="Previous page"', html)
+        self.assertIn('aria-label="Next page"', html)
+
+
+if __name__ == "__main__":
+'''
+          text = replace_once(text, anchor, added, 'new paging regression')
+          p.write_text(text)
+          PY
+
+          git diff --check
+          git diff -- VERSION CHANGELOG.md src/postmaster/structured_data_v980.py src/postmaster/webgui_structured_data_v980.py tests/test_v9_8_0_structured_data.py > /tmp/postmaster-v9.8.1-rebased.patch
+          test -s /tmp/postmaster-v9.8.1-rebased.patch
+          git checkout -- VERSION CHANGELOG.md src/postmaster/structured_data_v980.py src/postmaster/webgui_structured_data_v980.py tests/test_v9_8_0_structured_data.py
+          git apply --check /tmp/postmaster-v9.8.1-rebased.patch
+          git apply /tmp/postmaster-v9.8.1-rebased.patch
           git diff --check
           test "$(cat VERSION)" = '9.8.1'
 
@@ -55,6 +508,7 @@ jobs:
           grep -q 'sort=\["_row_id"\]' src/postmaster/webgui_structured_data_v980.py
           grep -q 'for size in (10, 20, 50, 100)' src/postmaster/webgui_structured_data_v980.py
           ! grep -q 'limit=10000' src/postmaster/webgui_structured_data_v980.py
+          grep -q 'self.assertEqual(described\["tables"\]\[0\]\["row_count"\], 2)' tests/test_v9_8_0_structured_data.py
           git diff --quiet origin/main -- postmaster-mcp.yml
           git diff --quiet origin/main -- requirements.txt
           changed=$(git diff --name-only origin/main -- VERSION CHANGELOG.md src/postmaster/structured_data_v980.py src/postmaster/webgui_structured_data_v980.py tests/test_v9_8_0_structured_data.py)
