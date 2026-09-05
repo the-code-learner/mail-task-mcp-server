@@ -29,10 +29,10 @@ jobs:
           echo '28412f8196db8bba59800b17c49451aaff9f9078de0214e56c6422f33969bdd4  postmaster-v9.8.1.patch' | sha256sum -c -
           test "$(git rev-parse origin/main)" = '0d42796cdccd45fa991d4e256ba8b2df9cd72ebd'
 
-      - name: Check and apply patch
+      - name: Check and apply rebased patch
         run: |
-          git apply --check postmaster-v9.8.1.patch
-          git apply postmaster-v9.8.1.patch
+          git apply --3way --check postmaster-v9.8.1.patch
+          git apply --3way postmaster-v9.8.1.patch
           git diff --check
           test "$(cat VERSION)" = '9.8.1'
 
