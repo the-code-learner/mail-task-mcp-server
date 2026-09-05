@@ -2,6 +2,26 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.1 - 2026-09-06
+
+### Fixed / changed
+* Fixed the Structured Data WebGUI `#data` loading regression by removing the
+  global body `MutationObserver` loop introduced in v9.8.0. Structured Data
+  context synchronization is now event-driven and performs idempotent writes.
+* Made the initial Structured Data workspace count-free: the WebGUI now reads
+  only project table metadata and no longer calls `describe_project`,
+  `status`, migration history, audit history, or per-table `COUNT(*)` queries
+  on the critical rendering path.
+* Added count-free table pagination with 10 rows by default, selectable
+  10/20/50/100 rows per page, stable `_row_id` ordering, and previous/next
+  navigation using `LIMIT page_size + 1` rather than a total-row count.
+* Removed the eager 10,000-row JSON export from table Browse rendering.
+* Preserved the public v9.8 structured-data MCP contract, including
+  `db_describe_project` row counts and the exact 118-command surface.
+* `postmaster-mcp.yml`, `requirements.txt`, Cloudflare Worker/configuration,
+  mail semantics, persistent data schema, and secret/private-key handling are
+  unchanged.
+
 ## 9.8.0 - 2026-09-05
 
 ### Added / changed

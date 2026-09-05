@@ -366,9 +366,15 @@ class WebGuiV980Tests(unittest.TestCase):
             html = render_data(base, request)
             self.assertIn("Structured Data", html)
             self.assertIn("Schema explorer", html)
-            self.assertIn("Approval inbox", html)
-            self.assertIn("Activity &amp; provenance", html)
             self.assertIn("people", html)
+            self.assertIn("Rows per page", html)
+            self.assertIn('value="10" selected', html)
+            self.assertNotIn("Export preview (JSON)", html)
+
+            listed = service.list_project_tables(OWNER, PROJECT)
+            self.assertEqual([row["name"] for row in listed["tables"]], ["people"])
+            self.assertNotIn("row_count", listed["tables"][0])
+            self.assertNotIn("column_count", listed["tables"][0])
 
             app = Starlette()
             install_webgui_structured_data_v980(app, base)
@@ -376,6 +382,61 @@ class WebGuiV980Tests(unittest.TestCase):
             self.assertIn("/dashboard/data/import", paths)
             self.assertIn("/dashboard/data/migration/create", paths)
             self.assertEqual(VIEW, "data")
+
+    def test_browser_uses_count_free_limit_plus_one_paging(self):
+        calls = []
+
+        class Service:
+            backend_name = "sqlite"
+
+            @staticmethod
+            def list_project_tables(owner, project):
+                return {"tables": [{"name": "people", "description": "", "source_of_truth": "operational"}]}
+
+            @staticmethod
+            def describe_table(owner, project, table):
+                return {"columns": [{"name": "name", "data_type": "text"}]}
+
+            @staticmethod
+            def query(*args, **kwargs):
+                calls.append((args, kwargs))
+                return {
+                    "rows": [
+                        {"_row_id": f"r{i:02d}", "name": f"Name {i}"}
+                        for i in range(kwargs["limit"])
+                    ]
+                }
+
+            def __getattr__(self, name):
+                if name in {"describe_project", "status", "list_migrations", "audit_log", "export"}:
+                    raise AssertionError(f"{name} must not run on WebGUI Browse")
+                raise AttributeError(name)
+
+        class Scheduler:
+            @staticmethod
+            def list_projects(owner_id=None):
+                return [{"id": PROJECT, "owner_id": OWNER, "name": "Project A", "active": True}]
+
+        base = SimpleNamespace(
+            scheduler=lambda: Scheduler(),
+            structured_data_service=lambda: Service(),
+            _safe_call=lambda fn: fn(),
+            _csrf_value=lambda: "csrf-test",
+        )
+        request = Request({
+            "type": "http", "method": "GET", "path": "/", "headers": [],
+            "query_string": f"project={PROJECT}&data_table=people&data_limit=20&data_offset=20".encode(),
+            "server": ("testserver", 80), "scheme": "http",
+        })
+        html = render_data(base, request)
+        self.assertEqual(calls[-1][1]["limit"], 21)
+        self.assertEqual(calls[-1][1]["offset"], 20)
+        self.assertEqual(calls[-1][1]["sort"], ["_row_id"])
+        self.assertIn("Name 19", html)
+        self.assertNotIn("Name 20", html)
+        self.assertIn("Rows 21–40", html)
+        self.assertIn('aria-label="Previous page"', html)
+        self.assertIn('aria-label="Next page"', html)
 
 
 if __name__ == "__main__":
