@@ -89,6 +89,16 @@ def _q(identifier: str) -> str:
     return '"' + identifier.replace('"', '""') + '"'
 
 
+class _ClosingConnection(sqlite3.Connection):
+    """sqlite3 context manager that also closes the connection on scope exit."""
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            return super().__exit__(exc_type, exc_value, traceback)
+        finally:
+            self.close()
+
+
 class StructuredDataService:
     """Project-scoped operational facts behind one server-enforced domain contract.
 
@@ -118,7 +128,7 @@ class StructuredDataService:
         self._init_db()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), timeout=30)
+        conn = sqlite3.connect(str(self.path), timeout=30, factory=_ClosingConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=30000")
