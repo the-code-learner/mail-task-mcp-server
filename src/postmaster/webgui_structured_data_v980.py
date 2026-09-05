@@ -479,7 +479,7 @@ async def import_rows(base: Any, request: Request):
             actor="human:webgui",
             reason="WebGUI import",
         )
-        message = f"Imported {result.get('imported', result.get('processed', 0))} rows"
+        message = f"Imported {result['imported']} rows"
     except Exception as exc:
         message = f"{type(exc).__name__}: {exc}"
     return _redirect(project, table, message)
@@ -555,11 +555,6 @@ def _insert_route(app: Any, route: Route) -> None:
 
 
 def _extend_enterprise_nav() -> None:
-    if VIEW not in v970.VIEW_LABELS:
-        v970.VIEW_LABELS[VIEW] = (
-            LABEL,
-            "Project-scoped relational facts, schemas and provenance",
-        )
     groups = []
     found = False
     for heading, links in v970.NAV_GROUPS:
