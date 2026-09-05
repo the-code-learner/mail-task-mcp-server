@@ -24,6 +24,7 @@ from .runtime_v966 import install_runtime_v966
 from .runtime_v967 import install_runtime_v967
 from .runtime_v968 import install_runtime_v968
 from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_webgui
+from .runtime_v980 import install_runtime_v980
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
@@ -37,6 +38,7 @@ from .webgui_regressions_v971 import (
     install_webgui_interaction_regressions_v971,
 )
 from .webgui_release_identity import install_webgui_release_identity, project_release_version
+from .webgui_structured_data_v980 import install_webgui_structured_data_v980
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -154,6 +156,11 @@ install_projects_ux_v971(_webgui_v960, _webgui_projects, _webgui_v962_views, _we
 # Consolidate mail health, suppressions, domain/recipient policy and security only at the
 # presentation/IA layer. Compatibility views and every existing backend action remain routable.
 install_mail_safety_ia_v971(_webgui_v962, _webgui_v962_views)
+# v9.8.0 adds one project-scoped Structured Data Service shared by MCP and WebGUI. The default
+# backend stays inside the existing /data volume, so deployment YAML and all mail semantics remain
+# unchanged. Destructive DDL is review-only and row deletes require explicit confirmation.
+runtime_status = install_runtime_v980(_base, _core, runtime_status)
+install_webgui_structured_data_v980(app, _base)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
