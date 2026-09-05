@@ -60,6 +60,10 @@ class V93FileHandoffTests(unittest.TestCase):
             "POSTMASTER_REF": f"v{version}-test",
             "POSTMASTER_VERSION": "latest",
         })
+        # Keep this historical handoff test deterministic: its contract is resource
+        # handoff, not analytics-key generation. A random 32-byte key can begin or
+        # end with whitespace bytes, while the legacy loader strips existing keys.
+        (root / "analytics.key").write_bytes(b"A" * 32)
         import postmaster.runtime as runtime
         self.s = runtime
         self.s.analytics_store.cache_clear()
