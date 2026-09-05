@@ -5,15 +5,17 @@ import json
 import unittest
 
 
-class RegistryReportV969Tests(unittest.TestCase):
+class RegistryReportV980Tests(unittest.TestCase):
     def test_final_composed_registry_count_names_and_fetch_schema(self):
         import postmaster.runtime as runtime
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
         names = sorted(by_name)
-        self.assertEqual(len(names), 97)
+        self.assertEqual(len(names), 118)
         self.assertIn("fetch_email_remote_content", by_name)
+        self.assertIn("db_status", by_name)
+        self.assertIn("db_link_memory", by_name)
 
         fetch_schema = by_name["fetch_email_remote_content"].input_schema
         properties = fetch_schema["properties"]
@@ -41,10 +43,10 @@ class RegistryReportV969Tests(unittest.TestCase):
         self.assertNotIn("confirmation_token", runtime_execute)
         self.assertNotIn("confirmation_token", proxy_execute)
 
-        print("MCP_COMMAND_COUNT_V969_ACTUAL=" + str(len(names)))
-        print("MCP_COMMAND_NAMES_V969_ACTUAL=" + json.dumps(names, separators=(",", ":")))
+        print("MCP_COMMAND_COUNT_V980_ACTUAL=" + str(len(names)))
+        print("MCP_COMMAND_NAMES_V980_ACTUAL=" + json.dumps(names, separators=(",", ":")))
         print(
-            "MCP_FETCH_REMOTE_SCHEMA_V969_ACTUAL="
+            "MCP_FETCH_REMOTE_SCHEMA_V980_ACTUAL="
             + json.dumps(fetch_schema, sort_keys=True, separators=(",", ":"))
         )
 
