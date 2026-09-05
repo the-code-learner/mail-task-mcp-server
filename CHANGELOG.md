@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.0 - 2026-09-05
+
+### Added / changed
+- Added the Project-Scoped Structured Data Layer as an authoritative operational-data complement to semantic Memory and Files, with every structured operation enforced inside an exact `owner_id + project_id` scope and physical storage namespaces kept internal.
+- Added exactly 21 MCP tools for structured-data status/inspection, schema management, validated queries, CRUD/upsert/import/export, indexes/views, migrations, audit, authoritative overrides and structured-record-to-memory links, taking the composed MCP surface from 97 to 118 commands.
+- Added a shared `StructuredDataService` used by both the MCP surface and the Structured Data WebGUI control plane so project isolation, validation, provenance/audit, idempotency, override/effective-value semantics, migrations and destructive-operation policy remain consistent across agent and human workflows.
+- Added the WebGUI structured-data control plane for project overview, table/schema browsing, row operations, import/export, raw versus effective override state, memory links, migration history/planning, approval review and audit/provenance visibility.
+- Added project-scoped read-only SQL supporting validated `SELECT`/read-only `WITH` access while rejecting mutating/destructive statements, system/admin escapes and dangerous SQLite operations.
+- Added additive migration support and review-only destructive schema planning, plus real delete preview with matching-row counts/sample row IDs and explicit confirmation before mutation.
+- Added CSV/JSON/JSONL import/export, idempotent write replay protection, auditable provenance, authoritative overrides with raw/effective values, and deterministic SQLite connection lifecycle handling.
+
+### Storage / compatibility / safety / deployment
+- The v9.8.0 V1 backend is self-contained SQLite on the existing durable data volume and introduces no new Python dependency. `requirements.txt` remains unchanged.
+- `postmaster-mcp.yml` remains unchanged. The only workflow-specific environment delta is the CI-only writable `POSTMASTER_STRUCTURED_DATA_DB=/tmp/postmaster-ci-structured-data.db`; the production default under `/data` is unchanged.
+- Existing outbound invariants remain preserved: persistent idempotency and no resend after `sent=true`, Sent-clean, private BCC with no historical BCC rediscovery, one logical Sent archive, historical detracking before current tracking, Safe Email zero-network defaults, and no secret/private-key exposure.
+- This is a **source release only**. Production activation, runtime switching, Portainer activation/configuration and Cloudflare Worker/configuration changes are **not performed** by publishing v9.8.0 and remain separate owner-controlled operations.
+
 ## 9.7.2 - 2026-08-31
 
 ### Fixed / changed
