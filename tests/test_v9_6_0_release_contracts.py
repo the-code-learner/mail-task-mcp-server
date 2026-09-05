@@ -230,6 +230,7 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
                     "FILE_STORE_DB_PATH": str(root / "files.db"),
                     "FILE_STORE_ROOT": str(root / "files"),
                     "UNSUBSCRIBE_KEY_PATH": str(root / "unsubscribe.key"),
+                    "POSTMASTER_STRUCTURED_DATA_DB": str(root / "structured.db"),
                 }
             )
             script = (
@@ -251,12 +252,13 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
             )
             self.assertTrue(line, completed.stdout)
             actual = set(json.loads(line.split("=", 1)[1]))
+            legacy_extensions = V967_LIFECYCLE_MCP_NAMES | {"fetch_email_remote_content"}
             self.assertTrue(BASELINE_MCP_NAMES <= actual)
-            self.assertEqual(
-                actual - BASELINE_MCP_NAMES,
-                V967_LIFECYCLE_MCP_NAMES | {"fetch_email_remote_content"},
-            )
-            self.assertEqual(len(actual), 97)
+            self.assertTrue(legacy_extensions <= actual)
+            structured_extensions = actual - BASELINE_MCP_NAMES - legacy_extensions
+            self.assertEqual(len(structured_extensions), 21)
+            self.assertTrue(all(name.startswith("db_") for name in structured_extensions))
+            self.assertEqual(len(actual), 118)
 
 
 if __name__ == "__main__":

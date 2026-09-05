@@ -467,7 +467,7 @@ class V972StoredFilePublicDownloadTests(unittest.TestCase):
         self._route("/t/c/{token}")
 
         tools = self.runtime.mcp._tool_manager.list_tools()
-        self.assertEqual(len(tools), 97)
+        self.assertEqual(len(tools), 118)
         names = {tool.name for tool in tools}
         self.assertIn("get_stored_file_resource", names)
 
