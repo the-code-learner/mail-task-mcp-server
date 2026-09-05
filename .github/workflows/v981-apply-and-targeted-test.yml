@@ -1,0 +1,69 @@
+name: v9.8.1 apply prepared patch and targeted test
+
+on:
+  push:
+    branches:
+      - fix/v9.8.1-structured-data-webgui
+    paths:
+      - 'postmaster-v9.8.1.patch'
+      - '.github/workflows/v981-apply-and-targeted-test.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify exact prepared patch
+        run: |
+          echo '28412f8196db8bba59800b17c49451aaff9f9078de0214e56c6422f33969bdd4  postmaster-v9.8.1.patch' | sha256sum -c -
+          test "$(git rev-parse origin/main)" = '0d42796cdccd45fa991d4e256ba8b2df9cd72ebd'
+
+      - name: Check and apply patch
+        run: |
+          git apply --check postmaster-v9.8.1.patch
+          git apply postmaster-v9.8.1.patch
+          git diff --check
+          test "$(cat VERSION)" = '9.8.1'
+
+      - name: Install runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt PyYAML
+
+      - name: Run targeted Structured Data/WebGUI tests
+        env:
+          PYTHONPATH: src
+          POSTMASTER_STRUCTURED_DATA_DB: /tmp/postmaster-v981-targeted.db
+        run: python -m unittest tests.test_v9_8_0_structured_data -v
+
+      - name: Verify fix-forward invariants
+        run: |
+          ! grep -q 'MutationObserver' src/postmaster/webgui_structured_data_v980.py
+          grep -q 'def list_project_tables' src/postmaster/structured_data_v980.py
+          grep -q 'limit=page_size + 1' src/postmaster/webgui_structured_data_v980.py
+          grep -q 'sort=\["_row_id"\]' src/postmaster/webgui_structured_data_v980.py
+          grep -q 'for size in (10, 20, 50, 100)' src/postmaster/webgui_structured_data_v980.py
+          ! grep -q 'limit=10000' src/postmaster/webgui_structured_data_v980.py
+          git diff --quiet origin/main -- postmaster-mcp.yml
+          git diff --quiet origin/main -- requirements.txt
+          changed=$(git diff --name-only origin/main -- VERSION CHANGELOG.md src/postmaster/structured_data_v980.py src/postmaster/webgui_structured_data_v980.py tests/test_v9_8_0_structured_data.py)
+          test "$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l)" -eq 5
+
+      - name: Commit applied source patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add VERSION CHANGELOG.md src/postmaster/structured_data_v980.py src/postmaster/webgui_structured_data_v980.py tests/test_v9_8_0_structured_data.py
+          git commit -m 'Fix Structured Data WebGUI loading regression for v9.8.1'
+          git push origin HEAD:fix/v9.8.1-structured-data-webgui
