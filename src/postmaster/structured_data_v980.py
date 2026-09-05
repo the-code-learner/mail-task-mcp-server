@@ -438,6 +438,40 @@ class StructuredDataService:
             "audit_events": audits,
         }
 
+    def list_project_tables(self, owner_id: str, project_id: str) -> dict[str, Any]:
+        """Return lightweight table metadata for UI discovery without row/column counts.
+
+        This intentionally does not replace ``describe_project``: the public MCP
+        contract keeps its historical count fields. WebGUI discovery needs only
+        logical metadata and must stay cheap even while data writes are active.
+        """
+        owner, project = self._scope(owner_id, project_id)
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT logical_name,description,source_of_truth,primary_key,updated_at
+                FROM sd_tables
+                WHERE owner_id=? AND project_id=?
+                ORDER BY logical_name
+                """,
+                (owner, project),
+            ).fetchall()
+        return {
+            "ok": True,
+            "owner_id": owner,
+            "project_id": project,
+            "tables": [
+                {
+                    "name": row["logical_name"],
+                    "description": row["description"],
+                    "source_of_truth": row["source_of_truth"],
+                    "primary_key": row["primary_key"],
+                    "updated_at": row["updated_at"],
+                }
+                for row in rows
+            ],
+        }
+
     def describe_project(self, owner_id: str, project_id: str) -> dict[str, Any]:
         owner, project = self._scope(owner_id, project_id)
         tables: list[dict[str, Any]] = []
