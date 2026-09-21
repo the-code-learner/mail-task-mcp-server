@@ -26,8 +26,9 @@ def install_whatsapp_runtime_v990(
     """Install the v9.9 WhatsApp MCP boundary.
 
     The service defaults to the clean-room current-protocol adapter, which is explicit-action
-    only: construction/status never opens the network. Pairing and reconnect require their dedicated
-    actions, while text/media/groups remain fail-closed until Signal multi-device acceptance.
+    only: construction/status never opens the network. Pairing and reconnect require dedicated
+    actions. Direct/group text, media and Stored File handoff are implemented, while stable
+    readiness remains controlled-account gated.
     """
     wa_obj = service
 
@@ -116,6 +117,8 @@ def install_whatsapp_runtime_v990(
             "local_read_emits_receipt": False,
             "auth_encrypted_at_rest": True,
             "private_material_exposed": False,
+            "implementation_complete": True,
+            "controlled_acceptance_required": True,
             "protocol_interop_verified": False,
             "signal_multidevice_verified": False,
             "controlled_account_interop_verified": False,
