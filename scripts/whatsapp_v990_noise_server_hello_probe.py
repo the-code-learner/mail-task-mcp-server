@@ -10,67 +10,17 @@ is sent. Passing this probe is evidence for the initial Noise XX server-hello pa
 import asyncio
 import time
 
+from postmaster.whatsapp_v990.cert import verify_noise_certificate_chain
 from postmaster.whatsapp_v990.crypto import (
     NOISE_WA_HEADER,
-    WA_CERT_PUBLIC_KEY,
     WhatsAppNoiseXX,
     generate_curve_keypair,
     split_noise_frames,
     frame_noise_payload,
-    xeddsa_verify,
 )
 from postmaster.whatsapp_v990.handshake import decode_handshake, encode_client_hello
 from postmaster.whatsapp_v990.proto import ProtoField, decode_fields
 from postmaster.whatsapp_v990.websocket_driver import open_whatsapp_websocket
-
-
-def _bytes_field(raw: bytes, number: int) -> bytes:
-    matches = [f for f in decode_fields(raw) if f.number == number and isinstance(f.value, bytes)]
-    if not matches:
-        raise RuntimeError(f"required protobuf bytes field {number} missing")
-    return bytes(matches[-1].value)
-
-
-def _int_field(raw: bytes, number: int) -> int | None:
-    matches = [f for f in decode_fields(raw) if f.number == number and isinstance(f.value, int)]
-    return int(matches[-1].value) if matches else None
-
-
-def verify_server_cert_chain(raw: bytes) -> dict[str, object]:
-    leaf_raw = _bytes_field(raw, 1)
-    intermediate_raw = _bytes_field(raw, 2)
-
-    leaf_details = _bytes_field(leaf_raw, 1)
-    leaf_signature = _bytes_field(leaf_raw, 2)
-    intermediate_details = _bytes_field(intermediate_raw, 1)
-    intermediate_signature = _bytes_field(intermediate_raw, 2)
-
-    issuer_serial = _int_field(intermediate_details, 2)
-    intermediate_key = _bytes_field(intermediate_details, 3)
-    not_before = _int_field(intermediate_details, 4)
-    not_after = _int_field(intermediate_details, 5)
-
-    if issuer_serial != 0:
-        raise RuntimeError(f"unexpected WhatsApp certificate issuer serial: {issuer_serial}")
-    if len(intermediate_key) != 32:
-        raise RuntimeError(f"unexpected intermediate key length: {len(intermediate_key)}")
-    if not xeddsa_verify(WA_CERT_PUBLIC_KEY, intermediate_details, intermediate_signature):
-        raise RuntimeError("WhatsApp intermediate Noise certificate signature verification failed")
-    if not xeddsa_verify(intermediate_key, leaf_details, leaf_signature):
-        raise RuntimeError("WhatsApp leaf Noise certificate signature verification failed")
-
-    now = int(time.time())
-    if not_before is not None and now < not_before:
-        raise RuntimeError("WhatsApp intermediate Noise certificate is not valid yet")
-    if not_after is not None and now > not_after:
-        raise RuntimeError("WhatsApp intermediate Noise certificate is expired")
-
-    return {
-        "issuer_serial": issuer_serial,
-        "intermediate_key_bytes": len(intermediate_key),
-        "validity_present": not_before is not None and not_after is not None,
-        "chain_signatures_verified": True,
-    }
 
 
 async def main() -> int:
@@ -108,8 +58,8 @@ async def main() -> int:
         print("WhatsApp live Noise ServerHello decrypted successfully")
         print(f"Server ephemeral bytes: {len(server.ephemeral)}")
         print(f"Server certificate chain bytes: {len(cert_chain)}")
-        print(f"Certificate signatures verified: {cert['chain_signatures_verified']}")
-        print(f"Issuer serial: {cert['issuer_serial']}")
+        print(f"Certificate signatures verified: {cert.chain_signatures_verified}")
+        print(f"Issuer serial: {cert.intermediate.issuer_serial}")
         print("ClientFinish/account authentication: NOT SENT / NOT TESTED")
         return 0
     finally:
