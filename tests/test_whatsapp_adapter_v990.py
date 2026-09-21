@@ -9,6 +9,7 @@ import unittest
 from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter, ProtocolCredentials
 from postmaster.whatsapp_v990.binary import BinaryNode
 from postmaster.whatsapp_v990.crypto import generate_curve_keypair
+from postmaster.whatsapp_v990.messages import encode_text_message, pad_random_max16
 from postmaster.whatsapp_v990.signal_keys import SignalPreKeyBundle, generate_signed_pre_key
 from postmaster.whatsapp_v990.signal_session import EncryptedSignalSessionStore, initialize_outgoing_session
 from postmaster.whatsapp_v990.store import EncryptedAuthStore
@@ -35,6 +36,13 @@ class FakeSession:
         if not self.query_responses:
             raise AssertionError("unexpected query without prepared response")
         return self.query_responses.pop(0)
+
+    async def send_and_wait(self, node, *, response_tag=None, timeout=30.0):
+        await self.send_node(node)
+        response=await self.recv_node(timeout=timeout)
+        if response_tag is not None and response.tag != response_tag:
+            raise AssertionError(f"unexpected correlated response tag {response.tag}")
+        return response
 
     async def close(self):
         self.closed=True
@@ -232,6 +240,80 @@ class WhatsAppAdapterV990Tests(unittest.IsolatedAsyncioTestCase):
             receipt=session.sent[-1]
             self.assertEqual(receipt.attrs["id"],"incoming-1")
             self.assertEqual(receipt.attrs["type"],"read")
+
+
+    async def test_incoming_pkmsg_decrypts_persists_and_transport_acks_without_read_receipt(self):
+        with TemporaryDirectory() as td:
+            adapter,session=self._connected_direct_adapter(td)
+            creds=adapter._load()
+            self.assertIsNotNone(creds)
+            messages=[]
+            receipts=[]
+            adapter.on_message=lambda **kwargs: messages.append(kwargs)
+            adapter.on_receipt=lambda **kwargs: receipts.append(kwargs)
+
+            one_time=generate_curve_keypair()
+            adapter._store_pre_key(7,one_time)
+            remote_identity=generate_curve_keypair()
+            bundle=SignalPreKeyBundle(
+                registration_id=creds.registration_id,
+                identity_key=creds.identity.public,
+                signed_pre_key_id=creds.signed_pre_key.key_id,
+                signed_pre_key=creds.signed_pre_key.key_pair.public,
+                signed_pre_key_signature=creds.signed_pre_key.signature,
+                pre_key_id=7,
+                pre_key=one_time.public,
+            )
+            sender=initialize_outgoing_session(
+                our_identity=remote_identity,
+                our_registration_id=222,
+                bundle=bundle,
+            )
+            kind,ciphertext=sender.encrypt(
+                pad_random_max16(encode_text_message("incoming hello"),random1=b"\x00")
+            )
+            self.assertEqual(kind,"pkmsg")
+            session.sent.clear()
+            incoming=BinaryNode(
+                "message",
+                {"id":"incoming-1","from":"222:3@lid","type":"text","t":"1790000000"},
+                [BinaryNode("enc",{"v":"2","type":"pkmsg"},ciphertext)],
+            )
+            await adapter._handle_unsolicited(incoming)
+
+            self.assertEqual(len(messages),1)
+            self.assertEqual(messages[0]["message_id"],"incoming-1")
+            self.assertEqual(messages[0]["jid"],"222@lid")
+            self.assertEqual(messages[0]["direction"],"in")
+            self.assertEqual(messages[0]["kind"],"text")
+            self.assertEqual(messages[0]["text"],"incoming hello")
+            self.assertEqual(receipts,[])
+            self.assertIsNone(adapter._load_pre_key(7))
+            self.assertEqual(len(session.sent),1)
+            ack=session.sent[0]
+            self.assertEqual(ack.tag,"ack")
+            self.assertEqual(ack.attrs["id"],"incoming-1")
+            self.assertEqual(ack.attrs["class"],"message")
+            self.assertEqual(ack.attrs["from"],creds.jid)
+            self.assertNotEqual(ack.attrs.get("type"),"read")
+
+    async def test_remote_receipt_is_recorded_and_transport_acked(self):
+        with TemporaryDirectory() as td:
+            adapter,session=self._connected_direct_adapter(td)
+            receipts=[]
+            adapter.on_receipt=lambda **kwargs: receipts.append(kwargs)
+            session.sent.clear()
+            node=BinaryNode("receipt",{"id":"sent-1","from":"222@s.whatsapp.net","type":"read"})
+            await adapter._handle_unsolicited(node)
+            self.assertEqual(receipts,[{
+                "message_id":"sent-1",
+                "jid":"222@s.whatsapp.net",
+                "receipt_type":"read",
+                "source":"remote",
+            }])
+            self.assertEqual(len(session.sent),1)
+            self.assertEqual(session.sent[0].tag,"ack")
+            self.assertEqual(session.sent[0].attrs["class"],"receipt")
 
 
 if __name__ == "__main__":
