@@ -7,14 +7,18 @@ import base64
 import sys
 import types
 
-# Local candidate tests run without installing the production MCP SDK.
-mcp_mod = types.ModuleType("mcp")
-mcp_types = types.ModuleType("mcp.types")
-class ToolAnnotations:
-    def __init__(self, **kwargs): self.__dict__.update(kwargs)
-mcp_types.ToolAnnotations = ToolAnnotations
-sys.modules.setdefault("mcp", mcp_mod)
-sys.modules.setdefault("mcp.types", mcp_types)
+# Local candidate tests may run without the production MCP SDK. Never shadow a real SDK:
+# the full repository suite imports mcp.server/Client/CallToolResult in the same process.
+try:
+    from mcp.types import ToolAnnotations  # noqa: F401
+except (ImportError, ModuleNotFoundError):
+    mcp_mod = types.ModuleType("mcp")
+    mcp_types = types.ModuleType("mcp.types")
+    class ToolAnnotations:
+        def __init__(self, **kwargs): self.__dict__.update(kwargs)
+    mcp_types.ToolAnnotations = ToolAnnotations
+    sys.modules.setdefault("mcp", mcp_mod)
+    sys.modules.setdefault("mcp.types", mcp_types)
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
