@@ -17,6 +17,26 @@ class WhatsAppMessageError(ValueError):
     pass
 
 
+def pad_random_max16(message: bytes, *, random1: bytes | None = None) -> bytes:
+    """Apply WhatsApp's 1..16 byte message padding before Signal encryption."""
+    entropy = bytes(random1 if random1 is not None else os.urandom(1))
+    if len(entropy) != 1:
+        raise WhatsAppMessageError("WhatsApp message padding entropy must be exactly one byte")
+    pad_length = (entropy[0] & 0x0F) + 1
+    return bytes(message) + bytes((pad_length,)) * pad_length
+
+
+def unpad_random_max16(message: bytes) -> bytes:
+    """Remove WhatsApp message padding after Signal decryption."""
+    raw = bytes(message)
+    if not raw:
+        raise WhatsAppMessageError("Cannot unpad an empty WhatsApp message")
+    pad_length = raw[-1]
+    if pad_length < 1 or pad_length > 16 or pad_length > len(raw):
+        raise WhatsAppMessageError("Invalid WhatsApp message padding")
+    return raw[:-pad_length]
+
+
 def generate_message_id_v2(
     user_jid: str | None = None,
     *,
@@ -136,7 +156,7 @@ def build_direct_message_stanza(
 
 
 __all__ = [
-    "WhatsAppMessageError", "generate_message_id_v2", "participant_hash_v2",
+    "WhatsAppMessageError", "pad_random_max16", "unpad_random_max16", "generate_message_id_v2", "participant_hash_v2",
     "encode_text_message", "encode_reply_text_message", "build_read_receipt",
     "encode_device_sent_message", "encrypted_participant_node", "build_direct_message_stanza",
 ]
