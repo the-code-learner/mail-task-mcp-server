@@ -21,7 +21,12 @@ from .cert import verify_noise_certificate_chain
 from .client_payload import RegistrationKeys, build_login_payload, build_registration_payload
 from .crypto import CurveKeyPair, WhatsAppNoiseXX, frame_noise_payload, generate_curve_keypair, split_noise_frames
 from .handshake import decode_handshake, encode_client_finish, encode_client_hello
-from .groups import build_participating_groups_query, parse_participating_groups
+from .groups import (
+    build_group_metadata_query,
+    build_participating_groups_query,
+    parse_group_metadata_response,
+    parse_participating_groups,
+)
 from .jid import parse_jid, same_user, transfer_device
 from .media import (
     build_media_conn_query,
@@ -33,6 +38,7 @@ from .media import (
 from .messages import (
     build_ack_stanza,
     build_direct_message_stanza,
+    build_group_message_stanza,
     build_read_receipt,
     decode_text_message,
     encode_device_sent_message,
@@ -54,6 +60,7 @@ from .signal_server import (
     parse_session_bundles,
 )
 from .signal_session import EncryptedSignalSessionStore, decrypt_prekey_message, initialize_outgoing_session
+from .sender_key import EncryptedSenderKeyStore, encode_sender_key_distribution_message
 from .signal_wire import PreKeyWhisperMessageV3
 from .store import EncryptedAuthStore
 from .usync import build_device_query, parse_device_result
@@ -838,6 +845,163 @@ class CurrentProtocolAdapter:
             if deferred:
                 wire.nodes = deferred + wire.nodes
 
+    async def _send_group_text(
+        self,
+        *,
+        wire: WhatsAppWireSession,
+        creds: ProtocolCredentials,
+        destination: Any,
+        text: str,
+        reply_to_message_id: str | None,
+        emit_read_receipt: bool,
+    ) -> Mapping[str, Any]:
+        if reply_to_message_id or emit_read_receipt:
+            raise CurrentProtocolAdapterError(
+                "WhatsApp group reply/read-receipt flow is not acceptance-complete; send a non-reply group message"
+            )
+
+        metadata_response = await wire.query(build_group_metadata_query(str(destination)), timeout=30)
+        metadata = parse_group_metadata_response(metadata_response)
+        addressing_mode = str(metadata.get("addressing_mode") or "pn")
+        prefer_lid = addressing_mode == "lid"
+
+        participant_ids: list[str] = []
+        for participant in metadata.get("participants") or []:
+            if not isinstance(participant, Mapping):
+                continue
+            selected = (
+                participant.get("lid")
+                if prefer_lid and participant.get("lid")
+                else participant.get("id")
+            )
+            if selected:
+                participant_ids.append(str(selected))
+
+        own_pn = parse_jid(creds.jid)
+        own_lid = parse_jid(creds.lid) if creds.lid else None
+        sender_identity = (
+            own_lid.normalized_user()
+            if prefer_lid and own_lid is not None
+            else own_pn.normalized_user()
+        )
+        participant_ids.append(str(sender_identity))
+        participant_ids = list(dict.fromkeys(participant_ids))
+        if not participant_ids:
+            raise CurrentProtocolAdapterError("WhatsApp group metadata contained no participants")
+
+        usync = await wire.query(
+            build_device_query(participant_ids, context="message"),
+            timeout=30,
+        )
+        discovered = parse_device_result(
+            usync,
+            own_jid=creds.lid if prefer_lid and creds.lid else creds.jid,
+            prefer_lid=prefer_lid,
+        )
+
+        own_users = {own_pn.user}
+        if own_lid is not None:
+            own_users.add(own_lid.user)
+        own_device = int(own_pn.device or 0)
+        targets = []
+        for target in discovered:
+            parsed = parse_jid(target.jid)
+            if target.hosted or int(target.device or 0) == 99:
+                continue
+            if parsed.user in own_users and int(parsed.device or 0) == own_device:
+                continue
+            targets.append(target)
+        if not targets:
+            raise CurrentProtocolAdapterError("WhatsApp USync returned no devices for group sender-key distribution")
+
+        group_id = str(destination)
+        sender_keys = EncryptedSenderKeyStore(self.auth)
+        distribution = sender_keys.distribution(group_id, str(sender_identity))
+        memory = self.auth.get_json("group-sender-key-memory", group_id) or {}
+        remembered = {str(value) for value in (memory.get("devices") or []) if str(value)}
+        recipients = [target for target in targets if target.jid not in remembered]
+
+        participant_nodes: list[BinaryNode] = []
+        include_device_identity = False
+        if recipients:
+            sessions = await self._ensure_signal_sessions(
+                wire,
+                creds,
+                [target.jid for target in recipients],
+            )
+            distribution_proto = pad_random_max16(
+                encode_sender_key_distribution_message(group_id, distribution)
+            )
+            for target in recipients:
+                signal = sessions.load(target.jid)
+                if signal is None:
+                    raise CurrentProtocolAdapterError(
+                        f"Signal session disappeared for group sender-key recipient {target.jid}"
+                    )
+                ciphertext_type, ciphertext = signal.encrypt(distribution_proto)
+                sessions.save(target.jid, signal)
+                participant_nodes.append(
+                    encrypted_participant_node(
+                        target.jid,
+                        ciphertext_type=ciphertext_type,
+                        ciphertext=ciphertext,
+                    )
+                )
+                include_device_identity = include_device_identity or ciphertext_type == "pkmsg"
+
+        device_identity: bytes | None = None
+        if include_device_identity:
+            if not creds.account_identity_b64:
+                raise CurrentProtocolAdapterError(
+                    "Paired WhatsApp credentials have no signed device identity"
+                )
+            try:
+                device_identity = base64.b64decode(creds.account_identity_b64, validate=True)
+            except Exception as exc:
+                raise CurrentProtocolAdapterError(
+                    "Stored WhatsApp signed device identity is corrupt"
+                ) from exc
+
+        plaintext = pad_random_max16(encode_text_message(text))
+        group_ciphertext = sender_keys.encrypt(group_id, str(sender_identity), plaintext)
+        message_id = generate_message_id_v2(creds.jid)
+        stanza = build_group_message_stanza(
+            destination_jid=group_id,
+            message_id=message_id,
+            sender_key_ciphertext=group_ciphertext,
+            sender_key_recipients=participant_nodes,
+            device_identity=device_identity,
+            message_type="text",
+            addressing_mode=addressing_mode,
+        )
+        ack = await wire.send_and_wait(stanza, response_tag="ack", timeout=30)
+        if ack.attrs.get("error") not in (None, "", "0"):
+            raise CurrentProtocolAdapterError(
+                f"WhatsApp rejected group message {message_id} with error {ack.attrs.get('error')}"
+            )
+
+        if recipients:
+            remembered.update(target.jid for target in recipients)
+            self.auth.put_json(
+                "group-sender-key-memory",
+                group_id,
+                {"devices": sorted(remembered)},
+            )
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "to": group_id,
+            "server_ack": True,
+            "ack_class": ack.attrs.get("class"),
+            "group": True,
+            "addressing_mode": addressing_mode,
+            "group_participant_count": len(metadata.get("participants") or []),
+            "device_fanout": len(targets),
+            "sender_key_recipients": len(recipients),
+            "used_prekey_message": include_device_identity,
+            "read_receipt_emitted": False,
+        }
+
     async def send_text(
         self,
         *,
@@ -846,14 +1010,25 @@ class CurrentProtocolAdapter:
         reply_to_message_id: str | None = None,
         emit_read_receipt: bool = False,
     ) -> Mapping[str, Any]:
-        """Send a direct 1:1 text through current USync + Signal multi-device fan-out.
+        """Send a direct or group text using the current Signal multi-device protocol.
 
-        Group sender-key distribution is deliberately separate and remains fail-closed.
+        Group messages use SenderKey v3 and distribute the sender key pairwise only to devices
+        that have not already received it. Group reply/read-receipt behavior remains fail-closed.
         """
         wire, creds = self._require_live_session()
         destination = parse_jid(jid).normalized_user()
         if destination.is_group:
-            raise CurrentProtocolAdapterError("WhatsApp group send is not acceptance-complete")
+            value = str(text)
+            if not value:
+                raise CurrentProtocolAdapterError("WhatsApp text cannot be empty")
+            return await self._send_group_text(
+                wire=wire,
+                creds=creds,
+                destination=destination,
+                text=value,
+                reply_to_message_id=reply_to_message_id,
+                emit_read_receipt=emit_read_receipt,
+            )
         if destination.is_broadcast or destination.is_newsletter:
             raise CurrentProtocolAdapterError("WhatsApp broadcast/newsletter send is not supported by this v9.9 direct-send path")
         value = str(text)
@@ -1154,6 +1329,7 @@ class CurrentProtocolAdapter:
             "media_implemented": True,
             "media_ready": False,
             "group_listing_implemented": True,
+            "group_text_send_implemented": True,
             "groups_ready": False,
             "last_error": self._last_error,
         }
