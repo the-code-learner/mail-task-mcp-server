@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import unittest
 
+from postmaster.whatsapp_v990.binary import BinaryNode
 from postmaster.whatsapp_v990.messages import (
     build_ack_stanza,
     build_direct_message_stanza,
     decode_text_message,
     encode_device_sent_message,
+    encode_reply_text_message,
     encode_text_message,
     encrypted_participant_node,
     generate_message_id_v2,
