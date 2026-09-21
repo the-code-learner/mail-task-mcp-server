@@ -11,6 +11,7 @@ on:
       - 'tests/test_whatsapp_*_v990.py'
       - 'scripts/whatsapp_v990_network_smoke.py'
       - 'scripts/whatsapp_v990_noise_server_hello_probe.py'
+      - 'scripts/whatsapp_v990_pair_device_probe.py'
       - '.github/workflows/whatsapp-v990-offline-validation.yml'
   workflow_dispatch:
 
@@ -109,3 +110,30 @@ jobs:
           echo "No QR/account/device credentials or authenticated WhatsApp actions are exercised."
           echo "Passing does not set protocol_interop_verified, signal_multidevice_verified, or controlled_account_interop_verified."
 
+  live-registration-pair-device:
+    name: WhatsApp live ClientFinish and pair-device probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository crypto runtime and CI-only WebSocket driver
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install 'websockets>=15,<16'
+
+      - name: Complete throw-away registration and receive encrypted pair-device
+        env:
+          PYTHONPATH: src
+        run: python scripts/whatsapp_v990_pair_device_probe.py
+
+      - name: State acceptance boundary
+        if: always()
+        run: |
+          echo "This job validates ClientFinish, current ClientPayload, encrypted transport and WABinary pair-device refs."
+          echo "QR refs are never printed or persisted and no account is paired."
+          echo "Passing still does not set signal_multidevice_verified or controlled_account_interop_verified."
