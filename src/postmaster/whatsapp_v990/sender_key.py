@@ -385,12 +385,19 @@ def encode_sender_key_distribution_message(group_id: str, distribution: bytes) -
 
 
 def decode_sender_key_distribution_message(message: bytes) -> tuple[str, bytes] | None:
+    """Decode WAProto.Message.senderKeyDistributionMessage, including DeviceSentMessage wrappers."""
     try:
         fields = decode_fields(bytes(message))
     except ProtoError as exc:
         raise SenderKeyError("Invalid WhatsApp Message protobuf") from exc
     candidates = [field.value for field in fields if field.number == 2 and isinstance(field.value, bytes)]
     if not candidates:
+        # WAProto.Message.deviceSentMessage = field 31; DeviceSentMessage.message = field 2.
+        wrappers = [field.value for field in fields if field.number == 31 and isinstance(field.value, bytes)]
+        if wrappers:
+            wrapped = _field_map(bytes(wrappers[-1]))
+            nested_message = _required_bytes(wrapped, 2, "deviceSentMessage.message")
+            return decode_sender_key_distribution_message(nested_message)
         return None
     nested = _field_map(bytes(candidates[-1]))
     group_raw = _required_bytes(nested, 1, "groupId")
