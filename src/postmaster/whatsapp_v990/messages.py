@@ -54,6 +54,39 @@ def encode_text_message(text: str) -> bytes:
     return field_bytes(1, value)
 
 
+def encode_reply_text_message(
+    text: str,
+    *,
+    stanza_id: str,
+    participant: str,
+    remote_jid: str | None = None,
+    quoted_message: bytes | None = None,
+) -> bytes:
+    value = str(text)
+    reply_id = str(stanza_id or "").strip()
+    sender = str(parse_jid(participant))
+    if not value:
+        raise WhatsAppMessageError("WhatsApp reply text cannot be empty")
+    if not reply_id:
+        raise WhatsAppMessageError("WhatsApp reply requires quoted stanza id")
+    context = [field_bytes(1, reply_id), field_bytes(2, sender)]
+    if quoted_message is not None:
+        context.append(field_bytes(3, bytes(quoted_message)))
+    if remote_jid:
+        context.append(field_bytes(4, str(parse_jid(remote_jid).normalized_user())))
+    extended = [field_bytes(1, value), field_message(17, context)]
+    # WAProto.Message.extendedTextMessage = field 6.
+    return field_message(6, extended)
+
+
+def build_read_receipt(*, destination_jid: str, message_id: str) -> BinaryNode:
+    destination = str(parse_jid(destination_jid).normalized_user())
+    mid = str(message_id or "").strip()
+    if not mid:
+        raise WhatsAppMessageError("WhatsApp read receipt requires message id")
+    return BinaryNode("receipt", {"id": mid, "to": destination, "type": "read"})
+
+
 def encode_device_sent_message(destination_jid: str, message: bytes, *, phash: str | None = None) -> bytes:
     destination = str(parse_jid(destination_jid))
     fields = [field_bytes(1, destination), field_bytes(2, bytes(message))]
@@ -104,6 +137,6 @@ def build_direct_message_stanza(
 
 __all__ = [
     "WhatsAppMessageError", "generate_message_id_v2", "participant_hash_v2",
-    "encode_text_message", "encode_device_sent_message", "encrypted_participant_node",
-    "build_direct_message_stanza",
+    "encode_text_message", "encode_reply_text_message", "build_read_receipt",
+    "encode_device_sent_message", "encrypted_participant_node", "build_direct_message_stanza",
 ]
