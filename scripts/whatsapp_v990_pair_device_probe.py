@@ -23,7 +23,7 @@ from postmaster.whatsapp_v990.crypto import (
 from postmaster.whatsapp_v990.handshake import decode_handshake, encode_client_finish, encode_client_hello
 from postmaster.whatsapp_v990.signal_keys import generate_registration_id, generate_signed_pre_key
 from postmaster.whatsapp_v990.tokens import CURRENT_TOKEN_TABLE
-from postmaster.whatsapp_v990.websocket_driver import open_whatsapp_websocket
+from postmaster.whatsapp_v990.websocket_driver import WebSocketDriverConfig, open_whatsapp_websocket
 
 
 async def _recv_frames(ws, pending: bytes, *, timeout: float = 15.0) -> tuple[list[bytes], bytes]:
@@ -50,7 +50,7 @@ async def main() -> int:
 
     noise = WhatsAppNoiseXX(ephemeral)
     codec = BinaryNodeCodec(CURRENT_TOKEN_TABLE)
-    ws = await open_whatsapp_websocket()
+    ws = await open_whatsapp_websocket(WebSocketDriverConfig(prefer_native=True))
     pending = b""
     try:
         await ws.send(frame_noise_payload(encode_client_hello(ephemeral.public), intro=NOISE_WA_HEADER))
