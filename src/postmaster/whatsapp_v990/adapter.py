@@ -1287,15 +1287,17 @@ class CurrentProtocolAdapter:
         reply_to_message_id: str | None = None,
         emit_read_receipt: bool = False,
     ) -> Mapping[str, Any]:
-        """Encrypt/upload one Stored File and relay its media protobuf through direct Signal fan-out.
+        """Encrypt/upload one Stored File and relay its media protobuf through direct or group E2E.
 
-        Raw file bytes stay server-side. Group media remains fail-closed until sender-key
-        distribution is acceptance-complete.
+        Raw file bytes stay server-side. Groups use the same SenderKey v3 pipeline as group text;
+        group reply/read-receipt behavior remains fail-closed pending controlled acceptance.
         """
         wire, creds = self._require_live_session()
         destination = parse_jid(jid).normalized_user()
-        if destination.is_group:
-            raise CurrentProtocolAdapterError("WhatsApp group media send is not acceptance-complete")
+        if destination.is_group and (reply_to_message_id or emit_read_receipt):
+            raise CurrentProtocolAdapterError(
+                "WhatsApp group media reply/read-receipt flow is not acceptance-complete"
+            )
         if destination.is_broadcast or destination.is_newsletter:
             raise CurrentProtocolAdapterError("WhatsApp broadcast/newsletter media send is not supported")
         fid = str(stored_file_id or "").strip()
@@ -1322,6 +1324,28 @@ class CurrentProtocolAdapter:
             media_conn=media_conn,
         )
         plain_proto = encode_media_message(upload)
+
+        if destination.is_group:
+            result = dict(
+                await self._send_group_payload(
+                    wire=wire,
+                    creds=creds,
+                    destination=destination,
+                    message_proto=plain_proto,
+                    message_type="media",
+                    enc_attrs={"mediatype": media_type},
+                )
+            )
+            result.update(
+                {
+                    "stored_file_id": fid,
+                    "media_type": media_type,
+                    "mimetype": mimetype,
+                    "filename": filename,
+                    "file_size": len(data),
+                }
+            )
+            return result
 
         own_pn = parse_jid(creds.jid)
         own_lid = parse_jid(creds.lid) if creds.lid else None
@@ -1457,6 +1481,7 @@ class CurrentProtocolAdapter:
             "group_listing_implemented": True,
             "group_text_send_implemented": True,
             "group_text_receive_implemented": True,
+            "group_media_send_implemented": True,
             "groups_ready": False,
             "last_error": self._last_error,
         }
