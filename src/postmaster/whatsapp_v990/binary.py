@@ -278,6 +278,25 @@ class BinaryNodeCodec:
             user, pos = self._read_string(raw, pos)
             server = {1:"lid",128:"hosted",129:"hosted.lid"}.get(domain_type, "s.whatsapp.net")
             return str(JID(user, server, device=device, domain_type=domain_type)), pos
+        if first == self.tags.FB_JID:
+            user, pos = self._read_string(raw, pos)
+            b, pos = self._read_n(raw, pos, 2); device = int.from_bytes(b, "big")
+            server, pos = self._read_string(raw, pos)
+            if not server: raise BinaryNodeError("FB JID has empty server")
+            return f"{user}:{device}@{server}", pos
+        if first == self.tags.INTEROP_JID:
+            user, pos = self._read_string(raw, pos)
+            b, pos = self._read_n(raw, pos, 2); device = int.from_bytes(b, "big")
+            b, pos = self._read_n(raw, pos, 2); integrator = int.from_bytes(b, "big")
+            # Current wire format may omit the optional server; in that case preserve
+            # the protocol-default interop domain instead of consuming the next field.
+            before = pos
+            try:
+                server, pos = self._read_string(raw, pos)
+            except BinaryNodeError:
+                server, pos = "interop", before
+            if not server: server = "interop"
+            return f"{integrator}-{user}:{device}@{server}", pos
         raise BinaryNodeError(f"Unknown WABinary string token/tag {first}")
 
     def _read_content(self, raw: bytes, pos: int, first: int) -> tuple[bytes | str | list[BinaryNode], int]:
