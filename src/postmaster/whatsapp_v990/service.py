@@ -109,7 +109,13 @@ class WhatsAppService:
 
     @classmethod
     def create(cls, *, auth_db: str, event_db: str, key_path: str | None = None, adapter: WhatsAppAdapter | None = None) -> "WhatsAppService":
-        return cls(EncryptedAuthStore(auth_db, key_path=key_path), WhatsAppEventStore(event_db), adapter or UnavailableAdapter())
+        auth = EncryptedAuthStore(auth_db, key_path=key_path)
+        if adapter is None:
+            # CurrentProtocolAdapter is explicit-action only: construction/status never opens
+            # a socket. Pairing/reconnect happen only through their dedicated MCP/WebGUI actions.
+            from .adapter import CurrentProtocolAdapter
+            adapter = CurrentProtocolAdapter(auth)
+        return cls(auth, WhatsAppEventStore(event_db), adapter)
 
     def status(self) -> dict[str, Any]:
         network = dict(self.adapter.status())
