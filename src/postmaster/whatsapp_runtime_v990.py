@@ -34,7 +34,14 @@ def install_whatsapp_runtime_v990(
     def get_service() -> WhatsAppService:
         nonlocal wa_obj
         if wa_obj is None:
-            wa_obj = WhatsAppService.create(auth_db=auth_db, event_db=event_db, key_path=key_path)
+            store_factory = getattr(base, "file_store", None)
+            file_store = store_factory() if callable(store_factory) else None
+            wa_obj = WhatsAppService.create(
+                auth_db=auth_db,
+                event_db=event_db,
+                key_path=key_path,
+                file_store=file_store,
+            )
         return wa_obj
 
     def safe_sync(fn, *args, **kwargs):
