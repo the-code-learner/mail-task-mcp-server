@@ -25,9 +25,9 @@ def install_whatsapp_runtime_v990(
 ) -> dict[str, Any]:
     """Install the v9.9 WhatsApp MCP boundary.
 
-    The service defaults to a deliberately unavailable network adapter. Production release must
-    inject the verified current-protocol adapter after real QR/pair/send/receive interoperability
-    acceptance; tools fail closed until then.
+    The service defaults to the clean-room current-protocol adapter, which is explicit-action
+    only: construction/status never opens the network. Pairing and reconnect require their dedicated
+    actions, while text/media/groups remain fail-closed until Signal multi-device acceptance.
     """
     wa_obj = service
 
