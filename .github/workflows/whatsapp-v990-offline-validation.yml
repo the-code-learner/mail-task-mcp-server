@@ -1,0 +1,61 @@
+name: WhatsApp v9.9 offline validation
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'src/postmaster/whatsapp_v990/**'
+      - 'src/postmaster/whatsapp_runtime_v990.py'
+      - 'src/postmaster/webgui_whatsapp_v990.py'
+      - 'tests/test_whatsapp_*_v990.py'
+      - '.github/workflows/whatsapp-v990-offline-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: whatsapp-v990-offline-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-protocol:
+    name: WhatsApp v9.9 offline protocol/runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository runtime dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Compile WhatsApp candidate
+        run: |
+          python -m compileall -q             src/postmaster/whatsapp_v990             src/postmaster/whatsapp_runtime_v990.py             src/postmaster/webgui_whatsapp_v990.py             tests/test_whatsapp_crypto_v990.py             tests/test_whatsapp_protocol_v990.py             tests/test_whatsapp_runtime_v990.py
+
+      - name: Run WhatsApp offline regression suite
+        env:
+          PYTHONPATH: src
+        run: |
+          python -W error::ResourceWarning -m unittest discover             -s tests             -p 'test_whatsapp_*_v990.py'             -v
+
+      - name: Guard incomplete live-interop acceptance flags
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('src/postmaster/whatsapp_runtime_v990.py').read_text(encoding='utf-8')
+          expected = (
+              '"protocol_interop_verified": False',
+              '"signal_multidevice_verified": False',
+              '"controlled_account_interop_verified": False',
+          )
+          missing = [item for item in expected if item not in source]
+          assert not missing, f'Live acceptance flags must stay false until controlled-account evidence exists: {missing}'
+          print('Offline validation passed; live WhatsApp interoperability remains explicitly unverified.')
+          PY
