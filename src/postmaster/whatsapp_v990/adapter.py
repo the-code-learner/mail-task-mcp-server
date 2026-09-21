@@ -21,10 +21,12 @@ from .cert import verify_noise_certificate_chain
 from .client_payload import RegistrationKeys, build_login_payload, build_registration_payload
 from .crypto import CurveKeyPair, WhatsAppNoiseXX, frame_noise_payload, generate_curve_keypair, split_noise_frames
 from .handshake import decode_handshake, encode_client_finish, encode_client_hello
-from .jid import parse_jid
+from .jid import parse_jid, same_user, transfer_device
 from .messages import (
+    build_ack_stanza,
     build_direct_message_stanza,
     build_read_receipt,
+    decode_text_message,
     encode_device_sent_message,
     encode_reply_text_message,
     encode_text_message,
@@ -32,6 +34,7 @@ from .messages import (
     generate_message_id_v2,
     pad_random_max16,
     participant_hash_v2,
+    unpad_random_max16,
 )
 from .pairing import build_pairing_qr_data
 from .signal_keys import SignedPreKey, generate_registration_id, generate_signed_pre_key
@@ -42,7 +45,8 @@ from .signal_server import (
     parse_prekey_count,
     parse_session_bundles,
 )
-from .signal_session import EncryptedSignalSessionStore, initialize_outgoing_session
+from .signal_session import EncryptedSignalSessionStore, decrypt_prekey_message, initialize_outgoing_session
+from .signal_wire import PreKeyWhisperMessageV3
 from .store import EncryptedAuthStore
 from .usync import build_device_query, parse_device_result
 from .tokens import CURRENT_TOKEN_TABLE
@@ -333,9 +337,13 @@ class CurrentProtocolAdapter:
         auth: EncryptedAuthStore,
         *,
         session_opener: SessionOpener = WhatsAppWireSession.open,
+        on_message: Callable[..., Any] | None = None,
+        on_receipt: Callable[..., Any] | None = None,
     ):
         self.auth = auth
         self.session_opener = session_opener
+        self.on_message = on_message
+        self.on_receipt = on_receipt
         self.session: WhatsAppWireSession | None = None
         self._pair_task: asyncio.Task | None = None
         self._qr_task: asyncio.Task | None = None
@@ -622,6 +630,7 @@ class CurrentProtocolAdapter:
             if node.tag == "success":
                 pre_key_count = await self._ensure_server_pre_keys(session, creds)
                 self._connected = True
+                session.start_dispatcher(self._handle_unsolicited)
                 self._keepalive_task = asyncio.create_task(self._keepalive(session))
                 return {"ok": True, "connected": True, "paired": True, "server_pre_key_count": pre_key_count}
             if node.tag in {"failure", "stream:error"}:
@@ -629,6 +638,130 @@ class CurrentProtocolAdapter:
                 raise CurrentProtocolAdapterError(f"WhatsApp login failed with {node.tag}")
         await self._stop_tasks()
         raise CurrentProtocolAdapterError("WhatsApp login did not reach success state")
+
+    async def _emit_callback(self, callback: Callable[..., Any] | None, **kwargs: Any) -> None:
+        if callback is None:
+            return
+        result = callback(**kwargs)
+        if asyncio.iscoroutine(result):
+            await result
+
+    def _incoming_decryption_jid(self, node: BinaryNode) -> str:
+        author = str(node.attrs.get("participant") or node.attrs.get("from") or "").strip()
+        if not author:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp message has no sender")
+        parsed = parse_jid(author)
+        if parsed.is_lid:
+            return str(parsed)
+        alt = (
+            node.attrs.get("participant_lid")
+            or node.attrs.get("sender_lid")
+            or node.attrs.get("peer_recipient_lid")
+        )
+        if alt:
+            try:
+                return str(transfer_device(parsed, parse_jid(str(alt))))
+            except ValueError:
+                pass
+        return str(parsed)
+
+    async def _handle_incoming_message(self, node: BinaryNode) -> None:
+        creds = self._load()
+        if creds is None or not creds.registered or not creds.jid:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp message arrived without paired credentials")
+        sender = str(node.attrs.get("participant") or node.attrs.get("from") or "").strip()
+        if not sender:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp message has no sender")
+        if parse_jid(str(node.attrs.get("from") or sender)).is_group:
+            raise CurrentProtocolAdapterError("WhatsApp group receive sender-key layer is not acceptance-complete")
+        enc = next(
+            (
+                child for child in node.children("enc")
+                if isinstance(child.content, (bytes, bytearray, memoryview))
+            ),
+            None,
+        )
+        if enc is None:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp direct message has no encrypted payload")
+        ciphertext = bytes(enc.content)
+        e2e_type = str(enc.attrs.get("type") or "")
+        decryption_jid = self._incoming_decryption_jid(node)
+        sessions = EncryptedSignalSessionStore(self.auth)
+
+        if e2e_type == "pkmsg":
+            envelope = PreKeyWhisperMessageV3.parse(ciphertext)
+            one_time = self._load_pre_key(envelope.pre_key_id) if envelope.pre_key_id is not None else None
+            signal, plaintext, consumed_pre_key = decrypt_prekey_message(
+                ciphertext,
+                our_identity=creds.identity,
+                our_signed_pre_key=creds.signed_pre_key,
+                our_one_time_pre_key=one_time,
+                our_registration_id=creds.registration_id,
+            )
+            sessions.save(decryption_jid, signal)
+            if consumed_pre_key is not None:
+                self.auth.delete("signal-pre-key", str(int(consumed_pre_key)))
+        elif e2e_type == "msg":
+            signal = sessions.load(decryption_jid)
+            if signal is None:
+                raise CurrentProtocolAdapterError(f"No Signal session for incoming WhatsApp sender {decryption_jid}")
+            plaintext = signal.decrypt_signal(ciphertext)
+            sessions.save(decryption_jid, signal)
+        else:
+            raise CurrentProtocolAdapterError(f"Unsupported WhatsApp direct E2E type {e2e_type!r}")
+
+        message_proto = unpad_random_max16(plaintext)
+        text = decode_text_message(message_proto)
+        direction = "out" if same_user(sender, creds.jid) or (creds.lid and same_user(sender, creds.lid)) else "in"
+        if direction == "out" and node.attrs.get("recipient"):
+            conversation = str(parse_jid(str(node.attrs["recipient"])).normalized_user())
+        else:
+            conversation = str(parse_jid(sender).normalized_user())
+        await self._emit_callback(
+            self.on_message,
+            message_id=str(node.attrs.get("id") or "") or None,
+            jid=conversation,
+            direction=direction,
+            kind="text" if text is not None else "unknown",
+            text=text or "",
+            stored_file_id=None,
+            reply_to_message_id=None,
+        )
+
+    async def _handle_unsolicited(self, node: BinaryNode) -> None:
+        wire = self.session
+        creds = self._load()
+        if wire is None:
+            return
+        if node.tag == "message":
+            try:
+                await self._handle_incoming_message(node)
+                await wire.send_node(build_ack_stanza(node, me_id=creds.jid if creds else None))
+            except Exception as exc:
+                self._last_error = f"{type(exc).__name__}: {exc}"
+                try:
+                    await wire.send_node(build_ack_stanza(node, me_id=creds.jid if creds else None, error_code=500))
+                except Exception:
+                    pass
+            return
+        if node.tag == "receipt":
+            await self._emit_callback(
+                self.on_receipt,
+                message_id=str(node.attrs.get("id") or "") or None,
+                jid=str(node.attrs.get("from") or node.attrs.get("participant") or "") or None,
+                receipt_type=str(node.attrs.get("type") or "delivery"),
+                source="remote",
+            )
+            if node.attrs.get("id") and node.attrs.get("from"):
+                await wire.send_node(build_ack_stanza(node, me_id=creds.jid if creds else None))
+            return
+        if node.tag == "notification":
+            if node.attrs.get("id") and node.attrs.get("from"):
+                await wire.send_node(build_ack_stanza(node, me_id=creds.jid if creds else None))
+            return
+        if node.tag in {"failure", "stream:error"}:
+            self._last_error = f"WhatsApp unsolicited {node.tag}"
+            self._connected = False
 
     def _require_live_session(self) -> tuple[WhatsAppWireSession, ProtocolCredentials]:
         creds = self._load()
@@ -805,8 +938,11 @@ class CurrentProtocolAdapter:
             device_identity=device_identity,
             message_type="text",
         )
-        await wire.send_node(stanza)
-        ack = await self._wait_message_ack(wire, message_id, timeout=30)
+        ack = await wire.send_and_wait(stanza, response_tag="ack", timeout=30)
+        if ack.attrs.get("error") not in (None, "", "0"):
+            raise CurrentProtocolAdapterError(
+                f"WhatsApp rejected message {message_id} with error {ack.attrs.get('error')}"
+            )
 
         receipt_emitted = False
         if emit_read_receipt and reply_to_message_id:
