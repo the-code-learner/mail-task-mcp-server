@@ -196,6 +196,7 @@ def build_group_message_stanza(
     message_type: str = "text",
     addressing_mode: str = "lid",
     additional_attrs: dict[str, str] | None = None,
+    enc_attrs: dict[str, str] | None = None,
 ) -> BinaryNode:
     destination = parse_jid(destination_jid)
     if not destination.is_group:
@@ -222,10 +223,9 @@ def build_group_message_stanza(
         content.append(BinaryNode("participants", {}, recipients))
     if device_identity is not None:
         content.append(BinaryNode("device-identity", {}, bytes(device_identity)))
-    enc_attrs = {"v": "2", "type": "skmsg"}
-    if additional_attrs and additional_attrs.get("mediatype"):
-        enc_attrs["mediatype"] = str(additional_attrs["mediatype"])
-    content.append(BinaryNode("enc", enc_attrs, ciphertext))
+    encryption_attrs = {"v": "2", "type": "skmsg"}
+    encryption_attrs.update({str(k): str(v) for k, v in (enc_attrs or {}).items()})
+    content.append(BinaryNode("enc", encryption_attrs, ciphertext))
     return BinaryNode("message", attrs, content)
 
 
