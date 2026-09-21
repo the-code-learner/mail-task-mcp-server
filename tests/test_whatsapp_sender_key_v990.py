@@ -38,6 +38,22 @@ class SenderKeyV990Tests(unittest.TestCase):
         parsed = SenderKeyDistribution.parse(raw)
         self.assertEqual(parsed, distribution)
 
+    def test_distribution_envelope_decodes_through_device_sent_wrapper(self):
+        from postmaster.whatsapp_v990.messages import encode_device_sent_message
+
+        distribution = SenderKeyDistribution(
+            key_id=88,
+            iteration=0,
+            chain_key=b"d" * 32,
+            signing_public=b"q" * 32,
+        ).serialize()
+        inner = encode_sender_key_distribution_message("999@g.us", distribution)
+        wrapped = encode_device_sent_message("999@g.us", inner, phash="2:ABCDEF")
+        self.assertEqual(
+            decode_sender_key_distribution_message(wrapped),
+            ("999@g.us", distribution),
+        )
+
     def test_sender_key_message_signature_detects_tamper(self):
         from postmaster.whatsapp_v990.crypto import generate_curve_keypair
 
