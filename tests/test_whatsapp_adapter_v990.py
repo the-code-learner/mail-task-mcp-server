@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter
+from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter, ProtocolCredentials
 from postmaster.whatsapp_v990.binary import BinaryNode
+from postmaster.whatsapp_v990.crypto import generate_curve_keypair
+from postmaster.whatsapp_v990.signal_keys import SignalPreKeyBundle, generate_signed_pre_key
+from postmaster.whatsapp_v990.signal_session import EncryptedSignalSessionStore, initialize_outgoing_session
 from postmaster.whatsapp_v990.store import EncryptedAuthStore
 
 
 class FakeSession:
-    def __init__(self, nodes):
+    def __init__(self, nodes, query_responses=None):
         self.nodes=list(nodes)
+        self.query_responses=list(query_responses or [])
+        self.queries=[]
         self.sent=[]
         self.closed=False
 
@@ -23,6 +29,12 @@ class FakeSession:
 
     async def send_node(self, node):
         self.sent.append(node)
+
+    async def query(self, node, *, timeout=30.0):
+        self.queries.append(node)
+        if not self.query_responses:
+            raise AssertionError("unexpected query without prepared response")
+        return self.query_responses.pop(0)
 
     async def close(self):
         self.closed=True
@@ -93,6 +105,133 @@ class WhatsAppAdapterV990Tests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(Exception,"No paired WhatsApp session"):
                 await adapter.reconnect()
             self.assertEqual(calls,0)
+
+
+    def _usync_direct_result(self):
+        return BinaryNode("iq",{"id":"u1","type":"result"},[
+            BinaryNode("usync",{},[
+                BinaryNode("list",{},[
+                    BinaryNode("user",{"jid":"111@s.whatsapp.net"},[
+                        BinaryNode("lid",{"val":"999@lid"}),
+                        BinaryNode("devices",{},[
+                            BinaryNode("device-list",{},[
+                                BinaryNode("device",{"id":"0"}),
+                                BinaryNode("device",{"id":"2","key-index":"7"}),
+                            ])
+                        ]),
+                    ]),
+                    BinaryNode("user",{"jid":"222@s.whatsapp.net"},[
+                        BinaryNode("lid",{"val":"888@lid"}),
+                        BinaryNode("devices",{},[
+                            BinaryNode("device-list",{},[
+                                BinaryNode("device",{"id":"0"}),
+                                BinaryNode("device",{"id":"3","key-index":"8"}),
+                            ])
+                        ]),
+                    ]),
+                ])
+            ])
+        ])
+
+    def _connected_direct_adapter(self, td, *, reply_ack_id=None):
+        auth=self.store(td)
+        identity=generate_curve_keypair()
+        creds=ProtocolCredentials(
+            noise=generate_curve_keypair(),
+            identity=identity,
+            signed_pre_key=generate_signed_pre_key(identity,1),
+            registration_id=111,
+            adv_secret_b64=base64.b64encode(bytes(range(32))).decode("ascii"),
+            registered=True,
+            jid="111:2@s.whatsapp.net",
+            lid="999:2@lid",
+            account_identity_b64=base64.b64encode(b"adv-device-identity").decode("ascii"),
+        )
+        ack=BinaryNode("ack",{"id":reply_ack_id or "placeholder","class":"message"})
+        session=FakeSession([ack],[self._usync_direct_result()])
+        adapter=CurrentProtocolAdapter(auth)
+        adapter._save(creds)
+        adapter.session=session
+        adapter._connected=True
+
+        sessions=EncryptedSignalSessionStore(auth)
+        for address in ("999@lid","888@lid","888:3@lid"):
+            remote_identity=generate_curve_keypair()
+            remote_signed=generate_signed_pre_key(remote_identity,17)
+            bundle=SignalPreKeyBundle(
+                registration_id=222,
+                identity_key=remote_identity.public,
+                signed_pre_key_id=remote_signed.key_id,
+                signed_pre_key=remote_signed.key_pair.public,
+                signed_pre_key_signature=remote_signed.signature,
+            )
+            sessions.save(
+                address,
+                initialize_outgoing_session(
+                    our_identity=creds.identity,
+                    our_registration_id=creds.registration_id,
+                    bundle=bundle,
+                ),
+            )
+        return adapter,session
+
+    async def test_direct_text_fans_out_to_remote_and_other_own_devices_and_waits_for_ack(self):
+        with TemporaryDirectory() as td:
+            adapter,session=self._connected_direct_adapter(td)
+            # Message ids are random; make the prepared ACK follow the outgoing stanza id.
+            original_send=session.send_node
+            async def send_and_ack(node):
+                await original_send(node)
+                if node.tag=="message":
+                    session.nodes[0].attrs["id"]=node.attrs["id"]
+            session.send_node=send_and_ack
+
+            result=await adapter.send_text(jid="222@s.whatsapp.net",text="hello",emit_read_receipt=False)
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["server_ack"])
+            self.assertEqual(result["device_fanout"],3)
+            self.assertEqual(result["own_device_targets"],1)
+            self.assertEqual(result["remote_device_targets"],2)
+            self.assertTrue(result["used_prekey_message"])
+            self.assertFalse(result["read_receipt_emitted"])
+
+            self.assertEqual(len(session.queries),1)
+            self.assertEqual(session.queries[0].attrs["xmlns"],"usync")
+            stanza=session.sent[0]
+            self.assertEqual(stanza.tag,"message")
+            self.assertEqual(stanza.attrs["to"],"222@s.whatsapp.net")
+            participants=stanza.child("participants").children("to")
+            self.assertEqual(
+                {node.attrs["jid"] for node in participants},
+                {"999@lid","888@lid","888:3@lid"},
+            )
+            self.assertNotIn("999:2@lid",{node.attrs["jid"] for node in participants})
+            self.assertEqual(stanza.child("device-identity").content,b"adv-device-identity")
+
+    async def test_reply_emits_read_receipt_only_after_message_ack(self):
+        with TemporaryDirectory() as td:
+            adapter,session=self._connected_direct_adapter(td)
+            order=[]
+            original_send=session.send_node
+            async def send_and_ack(node):
+                order.append(node.tag)
+                await original_send(node)
+                if node.tag=="message":
+                    session.nodes[0].attrs["id"]=node.attrs["id"]
+            session.send_node=send_and_ack
+
+            result=await adapter.send_text(
+                jid="222@s.whatsapp.net",
+                text="reply",
+                reply_to_message_id="incoming-1",
+                emit_read_receipt=True,
+            )
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["read_receipt_emitted"])
+            self.assertEqual(order,["message","receipt"])
+            receipt=session.sent[-1]
+            self.assertEqual(receipt.attrs["id"],"incoming-1")
+            self.assertEqual(receipt.attrs["type"],"read")
 
 
 if __name__ == "__main__":
