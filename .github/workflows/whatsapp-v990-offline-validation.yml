@@ -40,7 +40,11 @@ jobs:
 
       - name: Compile WhatsApp candidate
         run: |
-          python -m compileall -q             src/postmaster/whatsapp_v990             src/postmaster/whatsapp_runtime_v990.py             src/postmaster/webgui_whatsapp_v990.py             tests/test_whatsapp_crypto_v990.py             tests/test_whatsapp_protocol_v990.py             tests/test_whatsapp_runtime_v990.py
+          python -m compileall -q \
+            src/postmaster/whatsapp_v990 \
+            src/postmaster/whatsapp_runtime_v990.py \
+            src/postmaster/webgui_whatsapp_v990.py \
+            tests
 
       - name: Run WhatsApp offline regression suite
         env:
