@@ -946,21 +946,16 @@ class CurrentProtocolAdapter:
             if deferred:
                 wire.nodes = deferred + wire.nodes
 
-    async def _send_group_text(
+    async def _send_group_payload(
         self,
         *,
         wire: WhatsAppWireSession,
         creds: ProtocolCredentials,
         destination: Any,
-        text: str,
-        reply_to_message_id: str | None,
-        emit_read_receipt: bool,
+        message_proto: bytes,
+        message_type: str,
+        enc_attrs: Mapping[str, str] | None = None,
     ) -> Mapping[str, Any]:
-        if reply_to_message_id or emit_read_receipt:
-            raise CurrentProtocolAdapterError(
-                "WhatsApp group reply/read-receipt flow is not acceptance-complete; send a non-reply group message"
-            )
-
         metadata_response = await wire.query(build_group_metadata_query(str(destination)), timeout=30)
         metadata = parse_group_metadata_response(metadata_response)
         addressing_mode = str(metadata.get("addressing_mode") or "pn")
@@ -1013,7 +1008,9 @@ class CurrentProtocolAdapter:
                 continue
             targets.append(target)
         if not targets:
-            raise CurrentProtocolAdapterError("WhatsApp USync returned no devices for group sender-key distribution")
+            raise CurrentProtocolAdapterError(
+                "WhatsApp USync returned no devices for group sender-key distribution"
+            )
 
         group_id = str(destination)
         sender_keys = EncryptedSenderKeyStore(self.auth)
@@ -1063,17 +1060,23 @@ class CurrentProtocolAdapter:
                     "Stored WhatsApp signed device identity is corrupt"
                 ) from exc
 
-        plaintext = pad_random_max16(encode_text_message(text))
+        plaintext = pad_random_max16(bytes(message_proto))
         group_ciphertext = sender_keys.encrypt(group_id, str(sender_identity), plaintext)
         message_id = generate_message_id_v2(creds.jid)
+        top_attrs: dict[str, str] = {}
+        ephemeral = metadata.get("ephemeral_duration")
+        if isinstance(ephemeral, int) and ephemeral > 0:
+            top_attrs["expiration"] = str(ephemeral)
         stanza = build_group_message_stanza(
             destination_jid=group_id,
             message_id=message_id,
             sender_key_ciphertext=group_ciphertext,
             sender_key_recipients=participant_nodes,
             device_identity=device_identity,
-            message_type="text",
+            message_type=message_type,
             addressing_mode=addressing_mode,
+            additional_attrs=top_attrs,
+            enc_attrs=dict(enc_attrs or {}),
         )
         ack = await wire.send_and_wait(stanza, response_tag="ack", timeout=30)
         if ack.attrs.get("error") not in (None, "", "0"):
@@ -1102,6 +1105,28 @@ class CurrentProtocolAdapter:
             "used_prekey_message": include_device_identity,
             "read_receipt_emitted": False,
         }
+
+    async def _send_group_text(
+        self,
+        *,
+        wire: WhatsAppWireSession,
+        creds: ProtocolCredentials,
+        destination: Any,
+        text: str,
+        reply_to_message_id: str | None,
+        emit_read_receipt: bool,
+    ) -> Mapping[str, Any]:
+        if reply_to_message_id or emit_read_receipt:
+            raise CurrentProtocolAdapterError(
+                "WhatsApp group reply/read-receipt flow is not acceptance-complete; send a non-reply group message"
+            )
+        return await self._send_group_payload(
+            wire=wire,
+            creds=creds,
+            destination=destination,
+            message_proto=encode_text_message(text),
+            message_type="text",
+        )
 
     async def send_text(
         self,
