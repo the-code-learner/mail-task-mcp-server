@@ -128,6 +128,11 @@ class WhatsAppWireSession:
         self.closed = False
         self._send_lock = asyncio.Lock()
         self._query_lock = asyncio.Lock()
+        self._recv_lock = asyncio.Lock()
+        self._dispatch_task: asyncio.Task | None = None
+        self._dispatch_handler: Callable[[BinaryNode], Awaitable[None]] | None = None
+        self._waiters: dict[tuple[str, str | None], asyncio.Future] = {}
+        self._unsolicited: asyncio.Queue[BinaryNode] = asyncio.Queue()
 
     @classmethod
     async def open(
@@ -170,20 +175,30 @@ class WhatsAppWireSession:
             await ws.close()
             raise
 
-    async def recv_node(self, *, timeout: float = 30.0) -> BinaryNode:
-        if self.nodes:
-            return self.nodes.pop(0)
-        while not self.closed:
-            value = await asyncio.wait_for(self.ws.recv(), timeout=timeout)
-            if isinstance(value, str):
-                raise CurrentProtocolAdapterError("WhatsApp returned an unexpected text WebSocket message")
-            frames, self.pending = split_noise_frames(self.pending + bytes(value))
-            for frame in frames:
-                plaintext = self.transport.decrypt(frame)
-                self.nodes.append(self.codec.decode(plaintext))
+    @property
+    def dispatching(self) -> bool:
+        return self._dispatch_task is not None and not self._dispatch_task.done()
+
+    async def _recv_direct_node(self, *, timeout: float = 30.0) -> BinaryNode:
+        async with self._recv_lock:
             if self.nodes:
                 return self.nodes.pop(0)
+            while not self.closed:
+                value = await asyncio.wait_for(self.ws.recv(), timeout=timeout)
+                if isinstance(value, str):
+                    raise CurrentProtocolAdapterError("WhatsApp returned an unexpected text WebSocket message")
+                frames, self.pending = split_noise_frames(self.pending + bytes(value))
+                for frame in frames:
+                    plaintext = self.transport.decrypt(frame)
+                    self.nodes.append(self.codec.decode(plaintext))
+                if self.nodes:
+                    return self.nodes.pop(0)
         raise CurrentProtocolAdapterError("WhatsApp wire session is closed")
+
+    async def recv_node(self, *, timeout: float = 30.0) -> BinaryNode:
+        if self.dispatching:
+            return await asyncio.wait_for(self._unsolicited.get(), timeout=timeout)
+        return await self._recv_direct_node(timeout=timeout)
 
     async def send_node(self, node: BinaryNode) -> None:
         wire = self.codec.encode(node)
@@ -191,28 +206,106 @@ class WhatsAppWireSession:
         async with self._send_lock:
             await self.ws.send(frame_noise_payload(encrypted))
 
-    async def query(self, node: BinaryNode, *, timeout: float = 30.0) -> BinaryNode:
-        if node.tag != "iq":
-            raise CurrentProtocolAdapterError("Correlated WhatsApp query must be an iq node")
-        if not node.attrs.get("id"):
-            node.attrs["id"] = "pm-" + secrets.token_hex(8)
-        stanza_id = node.attrs["id"]
-        deferred: list[BinaryNode] = []
-        async with self._query_lock:
+    async def _dispatch_loop(self) -> None:
+        try:
+            while not self.closed:
+                try:
+                    node = await self._recv_direct_node(timeout=60.0)
+                except TimeoutError:
+                    continue
+                stanza_id = str(node.attrs.get("id") or "")
+                matched = False
+                if stanza_id:
+                    for key in ((stanza_id, node.tag), (stanza_id, None)):
+                        future = self._waiters.pop(key, None)
+                        if future is not None and not future.done():
+                            future.set_result(node)
+                            matched = True
+                            break
+                if matched:
+                    continue
+                if self._dispatch_handler is not None:
+                    await self._dispatch_handler(node)
+                else:
+                    self._unsolicited.put_nowait(node)
+        except asyncio.CancelledError:
+            return
+        except Exception as exc:
+            error = CurrentProtocolAdapterError(f"WhatsApp receive dispatcher stopped: {type(exc).__name__}: {exc}")
+            for future in list(self._waiters.values()):
+                if not future.done():
+                    future.set_exception(error)
+            self._waiters.clear()
+            self.closed = True
+
+    def start_dispatcher(self, handler: Callable[[BinaryNode], Awaitable[None]] | None = None) -> None:
+        if self.closed:
+            raise CurrentProtocolAdapterError("Cannot start dispatcher on a closed WhatsApp session")
+        if self.dispatching:
+            if handler is not None:
+                self._dispatch_handler = handler
+            return
+        self._dispatch_handler = handler
+        self._dispatch_task = asyncio.create_task(self._dispatch_loop())
+
+    async def send_and_wait(
+        self,
+        node: BinaryNode,
+        *,
+        response_tag: str | None = None,
+        timeout: float = 30.0,
+    ) -> BinaryNode:
+        stanza_id = str(node.attrs.get("id") or "").strip()
+        if not stanza_id:
+            raise CurrentProtocolAdapterError("Correlated WhatsApp stanza must have an id")
+        if not self.dispatching:
+            deferred: list[BinaryNode] = []
             await self.send_node(node)
             try:
                 async with asyncio.timeout(timeout):
                     while True:
-                        current = await self.recv_node(timeout=timeout)
-                        if current.attrs.get("id") == stanza_id:
+                        current = await self._recv_direct_node(timeout=timeout)
+                        if current.attrs.get("id") == stanza_id and (response_tag is None or current.tag == response_tag):
                             return current
                         deferred.append(current)
             finally:
                 if deferred:
                     self.nodes = deferred + self.nodes
 
+        key = (stanza_id, response_tag)
+        if key in self._waiters:
+            raise CurrentProtocolAdapterError(f"Duplicate correlated WhatsApp waiter for {stanza_id}")
+        future = asyncio.get_running_loop().create_future()
+        self._waiters[key] = future
+        try:
+            await self.send_node(node)
+            return await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+        finally:
+            current = self._waiters.get(key)
+            if current is future:
+                self._waiters.pop(key, None)
+
+    async def query(self, node: BinaryNode, *, timeout: float = 30.0) -> BinaryNode:
+        if node.tag != "iq":
+            raise CurrentProtocolAdapterError("Correlated WhatsApp query must be an iq node")
+        if not node.attrs.get("id"):
+            node.attrs["id"] = "pm-" + secrets.token_hex(8)
+        async with self._query_lock:
+            return await self.send_and_wait(node, response_tag="iq", timeout=timeout)
+
     async def close(self) -> None:
         self.closed = True
+        task, self._dispatch_task = self._dispatch_task, None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        for future in list(self._waiters.values()):
+            if not future.done():
+                future.cancel()
+        self._waiters.clear()
         await self.ws.close()
 
 
