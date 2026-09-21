@@ -9,6 +9,7 @@ on:
       - 'src/postmaster/whatsapp_runtime_v990.py'
       - 'src/postmaster/webgui_whatsapp_v990.py'
       - 'tests/test_whatsapp_*_v990.py'
+      - 'scripts/whatsapp_v990_network_smoke.py'
       - '.github/workflows/whatsapp-v990-offline-validation.yml'
   workflow_dispatch:
 
@@ -59,3 +60,23 @@ jobs:
           assert not missing, f'Live acceptance flags must stay false until controlled-account evidence exists: {missing}'
           print('Offline validation passed; live WhatsApp interoperability remains explicitly unverified.')
           PY
+
+  network-transport-smoke:
+    name: WhatsApp WebSocket unauthenticated transport smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Probe current WhatsApp WebSocket endpoint
+        run: python scripts/whatsapp_v990_network_smoke.py
+
+      - name: State acceptance boundary
+        if: always()
+        run: |
+          echo "This job validates only DNS/TCP/TLS/RFC6455 reachability."
+          echo "It does not validate QR pairing, Noise authentication, Signal multi-device, account interoperability, messages, media, groups, or receipts."
+
