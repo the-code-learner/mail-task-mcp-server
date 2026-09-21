@@ -15,6 +15,11 @@ from postmaster.whatsapp_v990.groups import (
     parse_group_metadata,
     parse_participating_groups,
 )
+from postmaster.whatsapp_v990.messages import encode_text_message, pad_random_max16
+from postmaster.whatsapp_v990.sender_key import (
+    EncryptedSenderKeyStore,
+    encode_sender_key_distribution_message,
+)
 from postmaster.whatsapp_v990.signal_keys import generate_registration_id, generate_signed_pre_key
 from postmaster.whatsapp_v990.store import EncryptedAuthStore
 
@@ -231,6 +236,64 @@ class WhatsAppGroupsV990Tests(unittest.IsolatedAsyncioTestCase):
                 {"111:1@s.whatsapp.net", "222@s.whatsapp.net"},
             )
             self.assertTrue(adapter.status()["group_text_send_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_group_receive_processes_pairwise_distribution_before_skmsg(self):
+        with TemporaryDirectory() as td:
+            sender_auth = EncryptedAuthStore(str(Path(td) / "sender.db"))
+            receiver_auth = EncryptedAuthStore(str(Path(td) / "receiver.db"))
+            author = "222:1@s.whatsapp.net"
+            group = "12345@g.us"
+
+            sender_keys = EncryptedSenderKeyStore(sender_auth)
+            distribution = sender_keys.distribution(group, author)
+            ciphertext = sender_keys.encrypt(
+                group,
+                author,
+                pad_random_max16(encode_text_message("hello inbound group"), random1=b"\x00"),
+            )
+            distribution_message = encode_sender_key_distribution_message(group, distribution)
+
+            captured = []
+            adapter = CurrentProtocolAdapter(
+                receiver_auth,
+                on_message=lambda **kwargs: captured.append(kwargs),
+            )
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+
+            async def fake_pairwise(self, node, loaded_creds, *, e2e_type, ciphertext):
+                self.assert_creds = loaded_creds
+                return distribution_message
+            adapter._decrypt_pairwise_message_proto = types.MethodType(fake_pairwise, adapter)  # type: ignore[method-assign]
+
+            stanza = BinaryNode(
+                "message",
+                {"from": group, "participant": author, "id": "group-msg-1"},
+                [
+                    BinaryNode("enc", {"v": "2", "type": "msg"}, b"pairwise-skdm"),
+                    BinaryNode("enc", {"v": "2", "type": "skmsg"}, ciphertext),
+                ],
+            )
+            await adapter._handle_incoming_message(stanza)
+
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]["jid"], group)
+            self.assertEqual(captured[0]["direction"], "in")
+            self.assertEqual(captured[0]["kind"], "text")
+            self.assertEqual(captured[0]["text"], "hello inbound group")
+            receiver_keys = EncryptedSenderKeyStore(receiver_auth)
+            self.assertIsNotNone(receiver_keys.load(group, author))
+            self.assertTrue(adapter.status()["group_text_receive_implemented"])
             self.assertFalse(adapter.status()["groups_ready"])
 
     async def test_adapter_list_groups_uses_live_session_query(self):
