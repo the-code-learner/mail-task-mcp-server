@@ -60,7 +60,11 @@ from .signal_server import (
     parse_session_bundles,
 )
 from .signal_session import EncryptedSignalSessionStore, decrypt_prekey_message, initialize_outgoing_session
-from .sender_key import EncryptedSenderKeyStore, encode_sender_key_distribution_message
+from .sender_key import (
+    EncryptedSenderKeyStore,
+    decode_sender_key_distribution_message,
+    encode_sender_key_distribution_message,
+)
 from .signal_wire import PreKeyWhisperMessageV3
 from .store import EncryptedAuthStore
 from .usync import build_device_query, parse_device_result
@@ -682,29 +686,16 @@ class CurrentProtocolAdapter:
                 pass
         return str(parsed)
 
-    async def _handle_incoming_message(self, node: BinaryNode) -> None:
-        creds = self._load()
-        if creds is None or not creds.registered or not creds.jid:
-            raise CurrentProtocolAdapterError("Incoming WhatsApp message arrived without paired credentials")
-        sender = str(node.attrs.get("participant") or node.attrs.get("from") or "").strip()
-        if not sender:
-            raise CurrentProtocolAdapterError("Incoming WhatsApp message has no sender")
-        if parse_jid(str(node.attrs.get("from") or sender)).is_group:
-            raise CurrentProtocolAdapterError("WhatsApp group receive sender-key layer is not acceptance-complete")
-        enc = next(
-            (
-                child for child in node.children("enc")
-                if isinstance(child.content, (bytes, bytearray, memoryview))
-            ),
-            None,
-        )
-        if enc is None:
-            raise CurrentProtocolAdapterError("Incoming WhatsApp direct message has no encrypted payload")
-        ciphertext = bytes(enc.content)
-        e2e_type = str(enc.attrs.get("type") or "")
+    async def _decrypt_pairwise_message_proto(
+        self,
+        node: BinaryNode,
+        creds: ProtocolCredentials,
+        *,
+        e2e_type: str,
+        ciphertext: bytes,
+    ) -> bytes:
         decryption_jid = self._incoming_decryption_jid(node)
         sessions = EncryptedSignalSessionStore(self.auth)
-
         if e2e_type == "pkmsg":
             envelope = PreKeyWhisperMessageV3.parse(ciphertext)
             one_time = self._load_pre_key(envelope.pre_key_id) if envelope.pre_key_id is not None else None
@@ -721,13 +712,123 @@ class CurrentProtocolAdapter:
         elif e2e_type == "msg":
             signal = sessions.load(decryption_jid)
             if signal is None:
-                raise CurrentProtocolAdapterError(f"No Signal session for incoming WhatsApp sender {decryption_jid}")
+                raise CurrentProtocolAdapterError(
+                    f"No Signal session for incoming WhatsApp sender {decryption_jid}"
+                )
             plaintext = signal.decrypt_signal(ciphertext)
             sessions.save(decryption_jid, signal)
         else:
-            raise CurrentProtocolAdapterError(f"Unsupported WhatsApp direct E2E type {e2e_type!r}")
+            raise CurrentProtocolAdapterError(
+                f"Unsupported WhatsApp pairwise E2E type {e2e_type!r}"
+            )
+        return unpad_random_max16(plaintext)
 
-        message_proto = unpad_random_max16(plaintext)
+    async def _handle_incoming_group_message(
+        self,
+        node: BinaryNode,
+        creds: ProtocolCredentials,
+    ) -> None:
+        group_id = str(parse_jid(str(node.attrs.get("from") or "")))
+        if not parse_jid(group_id).is_group:
+            raise CurrentProtocolAdapterError("Group message handler requires a g.us sender")
+        author_raw = str(node.attrs.get("participant") or "").strip()
+        if not author_raw:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp group message has no participant")
+        author_jid = self._incoming_decryption_jid(node)
+        sender_keys = EncryptedSenderKeyStore(self.auth)
+
+        text: str | None = None
+        saw_group_ciphertext = False
+        for enc in node.children("enc"):
+            if not isinstance(enc.content, (bytes, bytearray, memoryview)):
+                continue
+            e2e_type = str(enc.attrs.get("type") or "")
+            ciphertext = bytes(enc.content)
+            if e2e_type in {"pkmsg", "msg"}:
+                message_proto = await self._decrypt_pairwise_message_proto(
+                    node,
+                    creds,
+                    e2e_type=e2e_type,
+                    ciphertext=ciphertext,
+                )
+                distribution = decode_sender_key_distribution_message(message_proto)
+                if distribution is not None:
+                    distribution_group, distribution_wire = distribution
+                    if str(parse_jid(distribution_group)) != group_id:
+                        raise CurrentProtocolAdapterError(
+                            "Sender-key distribution group does not match incoming group stanza"
+                        )
+                    sender_keys.process_distribution(
+                        group_id,
+                        author_jid,
+                        distribution_wire,
+                    )
+                else:
+                    candidate = decode_text_message(message_proto)
+                    if candidate is not None:
+                        text = candidate
+                continue
+            if e2e_type == "skmsg":
+                plaintext = sender_keys.decrypt(group_id, author_jid, ciphertext)
+                message_proto = unpad_random_max16(plaintext)
+                candidate = decode_text_message(message_proto)
+                if candidate is not None:
+                    text = candidate
+                saw_group_ciphertext = True
+                continue
+            raise CurrentProtocolAdapterError(
+                f"Unsupported WhatsApp group E2E type {e2e_type!r}"
+            )
+
+        if not saw_group_ciphertext:
+            # A standalone sender-key distribution updates local crypto state but is not a
+            # user-visible chat message.
+            return
+
+        direction = (
+            "out"
+            if same_user(author_raw, creds.jid)
+            or (creds.lid and same_user(author_raw, creds.lid))
+            else "in"
+        )
+        await self._emit_callback(
+            self.on_message,
+            message_id=str(node.attrs.get("id") or "") or None,
+            jid=group_id,
+            direction=direction,
+            kind="text" if text is not None else "unknown",
+            text=text or "",
+            stored_file_id=None,
+            reply_to_message_id=None,
+        )
+
+    async def _handle_incoming_message(self, node: BinaryNode) -> None:
+        creds = self._load()
+        if creds is None or not creds.registered or not creds.jid:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp message arrived without paired credentials")
+        sender = str(node.attrs.get("participant") or node.attrs.get("from") or "").strip()
+        if not sender:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp message has no sender")
+        if parse_jid(str(node.attrs.get("from") or sender)).is_group:
+            await self._handle_incoming_group_message(node, creds)
+            return
+        enc = next(
+            (
+                child for child in node.children("enc")
+                if isinstance(child.content, (bytes, bytearray, memoryview))
+            ),
+            None,
+        )
+        if enc is None:
+            raise CurrentProtocolAdapterError("Incoming WhatsApp direct message has no encrypted payload")
+        ciphertext = bytes(enc.content)
+        e2e_type = str(enc.attrs.get("type") or "")
+        message_proto = await self._decrypt_pairwise_message_proto(
+            node,
+            creds,
+            e2e_type=e2e_type,
+            ciphertext=ciphertext,
+        )
         text = decode_text_message(message_proto)
         direction = "out" if same_user(sender, creds.jid) or (creds.lid and same_user(sender, creds.lid)) else "in"
         if direction == "out" and node.attrs.get("recipient"):
@@ -1330,6 +1431,7 @@ class CurrentProtocolAdapter:
             "media_ready": False,
             "group_listing_implemented": True,
             "group_text_send_implemented": True,
+            "group_text_receive_implemented": True,
             "groups_ready": False,
             "last_error": self._last_error,
         }
