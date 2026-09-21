@@ -30,6 +30,7 @@ from .messages import (
     encode_text_message,
     encrypted_participant_node,
     generate_message_id_v2,
+    pad_random_max16,
     participant_hash_v2,
 )
 from .pairing import build_pairing_qr_data
@@ -655,16 +656,19 @@ class CurrentProtocolAdapter:
         sessions = await self._ensure_signal_sessions(wire, creds, target_jids)
         message_id = generate_message_id_v2(creds.jid)
         if reply_to_message_id:
-            plain = encode_reply_text_message(
+            plain_proto = encode_reply_text_message(
                 value,
                 stanza_id=str(reply_to_message_id),
                 participant=str(destination),
                 remote_jid=str(destination),
             )
         else:
-            plain = encode_text_message(value)
+            plain_proto = encode_text_message(value)
         phash = participant_hash_v2(target_jids)
-        dsm = encode_device_sent_message(str(destination), plain, phash=phash)
+        # WhatsApp pads each top-level WAProto.Message before Signal encryption. The nested
+        # DeviceSentMessage contains the unpadded original message and is itself padded once.
+        plain = pad_random_max16(plain_proto)
+        dsm = pad_random_max16(encode_device_sent_message(str(destination), plain_proto, phash=phash))
 
         participants: list[BinaryNode] = []
         include_device_identity = False
