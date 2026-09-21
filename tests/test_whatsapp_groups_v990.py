@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import types
 import unittest
 
 from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter, ProtocolCredentials
@@ -86,6 +87,151 @@ class WhatsAppGroupsV990Tests(unittest.IsolatedAsyncioTestCase):
         response = BinaryNode("iq", {"type": "error"}, [BinaryNode("error", {"code": "403", "text": "forbidden"})])
         with self.assertRaises(WhatsAppGroupError):
             parse_participating_groups(response)
+
+    async def test_group_text_send_distributes_sender_key_once_then_reuses_it(self):
+        metadata_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "group",
+                    {"id": "12345", "subject": "Test", "addressing_mode": "pn"},
+                    [
+                        BinaryNode("participant", {"jid": "111@s.whatsapp.net"}),
+                        BinaryNode("participant", {"jid": "222@s.whatsapp.net"}),
+                    ],
+                )
+            ],
+        )
+        usync_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "usync",
+                    {},
+                    [
+                        BinaryNode(
+                            "list",
+                            {},
+                            [
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "111@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [
+                                                        BinaryNode("device", {"id": "1", "key-index": "7"}),
+                                                        BinaryNode("device", {"id": "7", "key-index": "9"}),
+                                                    ],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "222@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "0"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+
+        class Signal:
+            def encrypt(self, data):
+                self.last = bytes(data)
+                return "msg", b"pairwise-" + bytes(data[:4])
+
+        class Sessions:
+            def __init__(self, jids):
+                self.items = {jid: Signal() for jid in jids}
+            def load(self, jid):
+                return self.items.get(jid)
+            def save(self, jid, signal):
+                self.items[jid] = signal
+
+        class GroupWire:
+            def __init__(self):
+                self.closed = False
+                self.queries = []
+                self.sent = []
+            async def query(self, node, *, timeout=30.0):
+                self.queries.append(node)
+                if node.attrs.get("xmlns") == "w:g2":
+                    return metadata_response
+                if node.attrs.get("xmlns") == "usync":
+                    return usync_response
+                raise AssertionError(f"unexpected query {node.attrs}")
+            async def send_and_wait(self, node, *, response_tag=None, timeout=30.0):
+                self.sent.append(node)
+                return BinaryNode("ack", {"id": node.attrs["id"], "class": "message"})
+
+        with TemporaryDirectory() as td:
+            auth = EncryptedAuthStore(str(Path(td) / "auth.db"))
+            adapter = CurrentProtocolAdapter(auth)
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+            wire = GroupWire()
+            adapter.session = wire  # type: ignore[assignment]
+            adapter._connected = True
+
+            async def fake_sessions(self, _wire, _creds, addresses):
+                return Sessions(addresses)
+            adapter._ensure_signal_sessions = types.MethodType(fake_sessions, adapter)  # type: ignore[method-assign]
+
+            first = await adapter.send_text(jid="12345@g.us", text="hello group")
+            self.assertTrue(first["server_ack"])
+            self.assertEqual(first["sender_key_recipients"], 2)
+            self.assertEqual(first["device_fanout"], 2)
+            stanza = wire.sent[-1]
+            self.assertEqual(stanza.attrs["to"], "12345@g.us")
+            self.assertEqual(stanza.attrs["addressing_mode"], "pn")
+            self.assertEqual(stanza.child("enc").attrs["type"], "skmsg")
+            self.assertEqual(len(stanza.child("participants").children("to")), 2)
+
+            second = await adapter.send_text(jid="12345@g.us", text="second")
+            self.assertTrue(second["server_ack"])
+            self.assertEqual(second["sender_key_recipients"], 0)
+            stanza2 = wire.sent[-1]
+            self.assertIsNone(stanza2.child("participants"))
+            memory = auth.get_json("group-sender-key-memory", "12345@g.us")
+            self.assertEqual(
+                set(memory["devices"]),
+                {"111:1@s.whatsapp.net", "222@s.whatsapp.net"},
+            )
+            self.assertTrue(adapter.status()["group_text_send_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
 
     async def test_adapter_list_groups_uses_live_session_query(self):
         response = BinaryNode("iq", {"type": "result"}, [BinaryNode("groups", {}, [group_node()])])
