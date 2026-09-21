@@ -33,6 +33,23 @@ jobs:
           version = Path('VERSION').read_text(encoding='utf-8').strip()
           if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
               raise SystemExit(f'Invalid VERSION: {version!r}')
+          if version == '9.9.0':
+              runtime = Path('src/postmaster/whatsapp_runtime_v990.py').read_text(encoding='utf-8')
+              required_acceptance = (
+                  '"protocol_interop_verified": True',
+                  '"signal_multidevice_verified": True',
+                  '"controlled_account_interop_verified": True',
+              )
+              missing_acceptance = [
+                  item for item in required_acceptance if item not in runtime
+              ]
+              if missing_acceptance:
+                  raise SystemExit(
+                      'Refusing stable v9.9.0 release without reviewed controlled-account '
+                      f'WhatsApp acceptance flags: {missing_acceptance}'
+                  )
+              print('WhatsApp v9.9.0 controlled-account acceptance flags verified.')
+
           changelog = Path('CHANGELOG.md').read_text(encoding='utf-8')
           match = re.search(
               rf'^## {re.escape(version)} - .*?\n(?P<body>.*?)(?=^## |\Z)',

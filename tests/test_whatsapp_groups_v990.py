@@ -1,0 +1,589 @@
+from __future__ import annotations
+
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import types
+import unittest
+from unittest.mock import AsyncMock, patch
+
+from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter, ProtocolCredentials
+from postmaster.whatsapp_v990.binary import BinaryNode
+from postmaster.whatsapp_v990.crypto import generate_curve_keypair
+from postmaster.whatsapp_v990.groups import (
+    WhatsAppGroupError,
+    build_group_metadata_query,
+    build_participating_groups_query,
+    parse_group_metadata,
+    parse_participating_groups,
+)
+from postmaster.whatsapp_v990.media import MediaUpload, encode_media_message
+from postmaster.whatsapp_v990.messages import encode_text_message, pad_random_max16
+from postmaster.whatsapp_v990.sender_key import (
+    EncryptedSenderKeyStore,
+    encode_sender_key_distribution_message,
+)
+from postmaster.whatsapp_v990.signal_keys import generate_registration_id, generate_signed_pre_key
+from postmaster.whatsapp_v990.store import EncryptedAuthStore
+
+
+class FakeWire:
+    def __init__(self, response: BinaryNode):
+        self.response = response
+        self.closed = False
+        self.queries: list[BinaryNode] = []
+
+    async def query(self, node: BinaryNode, *, timeout: float = 30.0) -> BinaryNode:
+        self.queries.append(node)
+        return self.response
+
+
+def group_node() -> BinaryNode:
+    return BinaryNode(
+        "group",
+        {
+            "id": "12345",
+            "subject": "Postmaster test",
+            "size": "2",
+            "creation": "1700000000",
+            "creator": "111@s.whatsapp.net",
+            "addressing_mode": "lid",
+        },
+        [
+            BinaryNode("participant", {"jid": "111@s.whatsapp.net", "type": "admin", "lid": "900@lid"}),
+            BinaryNode("participant", {"jid": "222@s.whatsapp.net"}),
+            BinaryNode(
+                "description",
+                {"id": "d1", "participant": "111@s.whatsapp.net", "t": "1700000100"},
+                [BinaryNode("body", {}, b"hello group")],
+            ),
+            BinaryNode("announcement"),
+            BinaryNode("ephemeral", {"expiration": "86400"}),
+        ],
+    )
+
+
+class WhatsAppGroupsV990Tests(unittest.IsolatedAsyncioTestCase):
+    def test_participating_query_matches_current_wg2_shape(self):
+        node = build_participating_groups_query()
+        self.assertEqual(node.tag, "iq")
+        self.assertEqual(node.attrs, {"to": "@g.us", "xmlns": "w:g2", "type": "get"})
+        participating = node.child("participating")
+        self.assertIsNotNone(participating)
+        self.assertEqual([child.tag for child in participating.children()], ["participants", "description"])
+
+    def test_group_metadata_parser_preserves_participants_and_flags(self):
+        parsed = parse_group_metadata(group_node())
+        self.assertEqual(parsed["id"], "12345@g.us")
+        self.assertEqual(parsed["subject"], "Postmaster test")
+        self.assertEqual(parsed["addressing_mode"], "lid")
+        self.assertEqual(parsed["description"], "hello group")
+        self.assertTrue(parsed["announce"])
+        self.assertEqual(parsed["ephemeral_duration"], 86400)
+        self.assertEqual(len(parsed["participants"]), 2)
+        self.assertEqual(parsed["participants"][0]["admin"], "admin")
+        self.assertEqual(parsed["participants"][0]["lid"], "900@lid")
+
+    def test_group_metadata_query_requires_group_jid(self):
+        with self.assertRaises(WhatsAppGroupError):
+            build_group_metadata_query("123@s.whatsapp.net")
+        node = build_group_metadata_query("123@g.us")
+        self.assertEqual(node.attrs["to"], "123@g.us")
+        self.assertEqual(node.child("query").attrs["request"], "interactive")
+
+    def test_participating_parser_surfaces_server_error(self):
+        response = BinaryNode("iq", {"type": "error"}, [BinaryNode("error", {"code": "403", "text": "forbidden"})])
+        with self.assertRaises(WhatsAppGroupError):
+            parse_participating_groups(response)
+
+    async def test_group_text_send_distributes_sender_key_once_then_reuses_it(self):
+        metadata_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "group",
+                    {"id": "12345", "subject": "Test", "addressing_mode": "pn"},
+                    [
+                        BinaryNode("participant", {"jid": "111@s.whatsapp.net"}),
+                        BinaryNode("participant", {"jid": "222@s.whatsapp.net"}),
+                    ],
+                )
+            ],
+        )
+        usync_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "usync",
+                    {},
+                    [
+                        BinaryNode(
+                            "list",
+                            {},
+                            [
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "111@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [
+                                                        BinaryNode("device", {"id": "1", "key-index": "7"}),
+                                                        BinaryNode("device", {"id": "7", "key-index": "9"}),
+                                                    ],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "222@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "0"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+
+        class Signal:
+            def encrypt(self, data):
+                self.last = bytes(data)
+                return "msg", b"pairwise-" + bytes(data[:4])
+
+        class Sessions:
+            def __init__(self, jids):
+                self.items = {jid: Signal() for jid in jids}
+            def load(self, jid):
+                return self.items.get(jid)
+            def save(self, jid, signal):
+                self.items[jid] = signal
+
+        class GroupWire:
+            def __init__(self):
+                self.closed = False
+                self.queries = []
+                self.sent = []
+            async def query(self, node, *, timeout=30.0):
+                self.queries.append(node)
+                if node.attrs.get("xmlns") == "w:g2":
+                    return metadata_response
+                if node.attrs.get("xmlns") == "usync":
+                    return usync_response
+                raise AssertionError(f"unexpected query {node.attrs}")
+            async def send_and_wait(self, node, *, response_tag=None, timeout=30.0):
+                self.sent.append(node)
+                return BinaryNode("ack", {"id": node.attrs["id"], "class": "message"})
+
+        with TemporaryDirectory() as td:
+            auth = EncryptedAuthStore(str(Path(td) / "auth.db"))
+            adapter = CurrentProtocolAdapter(auth)
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+            wire = GroupWire()
+            adapter.session = wire  # type: ignore[assignment]
+            adapter._connected = True
+
+            async def fake_sessions(self, _wire, _creds, addresses):
+                return Sessions(addresses)
+            adapter._ensure_signal_sessions = types.MethodType(fake_sessions, adapter)  # type: ignore[method-assign]
+
+            first = await adapter.send_text(jid="12345@g.us", text="hello group")
+            self.assertTrue(first["server_ack"])
+            self.assertEqual(first["sender_key_recipients"], 2)
+            self.assertEqual(first["device_fanout"], 2)
+            stanza = wire.sent[-1]
+            self.assertEqual(stanza.attrs["to"], "12345@g.us")
+            self.assertEqual(stanza.attrs["addressing_mode"], "pn")
+            self.assertEqual(stanza.child("enc").attrs["type"], "skmsg")
+            self.assertEqual(len(stanza.child("participants").children("to")), 2)
+
+            second = await adapter.send_text(jid="12345@g.us", text="second")
+            self.assertTrue(second["server_ack"])
+            self.assertEqual(second["sender_key_recipients"], 0)
+            stanza2 = wire.sent[-1]
+            self.assertIsNone(stanza2.child("participants"))
+            memory = auth.get_json("group-sender-key-memory", "12345@g.us")
+            self.assertEqual(
+                set(memory["devices"]),
+                {"111:1@s.whatsapp.net", "222@s.whatsapp.net"},
+            )
+            self.assertTrue(adapter.status()["group_text_send_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_group_media_send_uses_sender_key_and_enc_mediatype(self):
+        metadata_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "group",
+                    {"id": "12345", "subject": "Test", "addressing_mode": "pn"},
+                    [
+                        BinaryNode("participant", {"jid": "111@s.whatsapp.net"}),
+                        BinaryNode("participant", {"jid": "222@s.whatsapp.net"}),
+                    ],
+                )
+            ],
+        )
+        usync_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "usync",
+                    {},
+                    [
+                        BinaryNode(
+                            "list",
+                            {},
+                            [
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "111@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "1", "key-index": "7"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "222@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "0"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        media_conn_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "media_conn",
+                    {"auth": "auth-token", "ttl": "60"},
+                    [BinaryNode("host", {"hostname": "mmg.example.com"})],
+                )
+            ],
+        )
+
+        class Signal:
+            def encrypt(self, data):
+                return "msg", b"pairwise-" + bytes(data[:4])
+
+        class Sessions:
+            def __init__(self, jids):
+                self.items = {jid: Signal() for jid in jids}
+            def load(self, jid):
+                return self.items.get(jid)
+            def save(self, jid, signal):
+                self.items[jid] = signal
+
+        class FileStore:
+            def raw_bytes(self, file_id):
+                self.last = file_id
+                return (
+                    {"filename": "report.pdf", "media_type": "application/pdf"},
+                    b"stored-file-payload",
+                )
+
+        class Wire:
+            def __init__(self):
+                self.closed = False
+                self.sent = []
+            async def query(self, node, *, timeout=30.0):
+                if node.attrs.get("xmlns") == "w:m":
+                    return media_conn_response
+                if node.attrs.get("xmlns") == "w:g2":
+                    return metadata_response
+                if node.attrs.get("xmlns") == "usync":
+                    return usync_response
+                raise AssertionError(f"unexpected query {node.attrs}")
+            async def send_and_wait(self, node, *, response_tag=None, timeout=30.0):
+                self.sent.append(node)
+                return BinaryNode("ack", {"id": node.attrs["id"], "class": "message"})
+
+        upload = MediaUpload(
+            media_type="document",
+            url="https://mmg.example.com/file",
+            direct_path="/v/t62/file",
+            media_key=b"k" * 32,
+            file_sha256=b"s" * 32,
+            file_enc_sha256=b"e" * 32,
+            file_length=len(b"stored-file-payload"),
+            mimetype="application/pdf",
+            filename="report.pdf",
+            caption="Quarterly",
+            media_key_timestamp=1700000000,
+        )
+
+        with TemporaryDirectory() as td:
+            auth = EncryptedAuthStore(str(Path(td) / "auth.db"))
+            store = FileStore()
+            adapter = CurrentProtocolAdapter(auth, file_store=store)
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+            wire = Wire()
+            adapter.session = wire  # type: ignore[assignment]
+            adapter._connected = True
+
+            async def fake_sessions(self, _wire, _creds, addresses):
+                return Sessions(addresses)
+            adapter._ensure_signal_sessions = types.MethodType(fake_sessions, adapter)  # type: ignore[method-assign]
+
+            with patch(
+                "postmaster.whatsapp_v990.adapter.upload_media_bytes",
+                new=AsyncMock(return_value=(upload, b"encrypted-media")),
+            ):
+                result = await adapter.send_media(
+                    jid="12345@g.us",
+                    stored_file_id="stored-1",
+                    caption="Quarterly",
+                )
+
+            self.assertTrue(result["server_ack"])
+            self.assertTrue(result["group"])
+            self.assertEqual(result["media_type"], "document")
+            self.assertEqual(result["stored_file_id"], "stored-1")
+            self.assertEqual(store.last, "stored-1")
+            stanza = wire.sent[-1]
+            self.assertNotIn("mediatype", stanza.attrs)
+            self.assertEqual(stanza.child("enc").attrs["type"], "skmsg")
+            self.assertEqual(stanza.child("enc").attrs["mediatype"], "document")
+            self.assertTrue(adapter.status()["group_media_send_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_group_media_receive_downloads_and_saves_canonical_stored_file(self):
+        class ReceiveStore:
+            def __init__(self):
+                self.saved = []
+            def save_bytes(self, **kwargs):
+                self.saved.append(kwargs)
+                return {"id": "received-media-1", "filename": kwargs["filename"]}
+
+        with TemporaryDirectory() as td:
+            sender_auth = EncryptedAuthStore(str(Path(td) / "sender.db"))
+            receiver_auth = EncryptedAuthStore(str(Path(td) / "receiver.db"))
+            author = "222:1@s.whatsapp.net"
+            group = "12345@g.us"
+            upload = MediaUpload(
+                media_type="document",
+                url="https://mmg.example.com/file",
+                direct_path="/v/t62/file",
+                media_key=b"k" * 32,
+                file_sha256=b"s" * 32,
+                file_enc_sha256=b"e" * 32,
+                file_length=17,
+                mimetype="application/pdf",
+                filename="report.pdf",
+                caption="Inbound report",
+                media_key_timestamp=1700000000,
+            )
+            media_proto = encode_media_message(upload)
+
+            sender_keys = EncryptedSenderKeyStore(sender_auth)
+            distribution = sender_keys.distribution(group, author)
+            ciphertext = sender_keys.encrypt(
+                group,
+                author,
+                pad_random_max16(media_proto, random1=b"\x00"),
+            )
+            distribution_message = encode_sender_key_distribution_message(group, distribution)
+            stored = ReceiveStore()
+            captured = []
+            adapter = CurrentProtocolAdapter(
+                receiver_auth,
+                file_store=stored,
+                file_owner_id="davide",
+                file_project_id="postmaster-mcp",
+                on_message=lambda **kwargs: captured.append(kwargs),
+            )
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+
+            async def fake_pairwise(self, node, loaded_creds, *, e2e_type, ciphertext):
+                return distribution_message
+            adapter._decrypt_pairwise_message_proto = types.MethodType(fake_pairwise, adapter)  # type: ignore[method-assign]
+
+            stanza = BinaryNode(
+                "message",
+                {"from": group, "participant": author, "id": "group-media-1"},
+                [
+                    BinaryNode("enc", {"v": "2", "type": "msg"}, b"pairwise-skdm"),
+                    BinaryNode("enc", {"v": "2", "type": "skmsg"}, ciphertext),
+                ],
+            )
+            with patch(
+                "postmaster.whatsapp_v990.adapter.download_media",
+                new=AsyncMock(return_value=b"downloaded-payload"),
+            ):
+                await adapter._handle_incoming_message(stanza)
+
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]["jid"], group)
+            self.assertEqual(captured[0]["kind"], "media")
+            self.assertEqual(captured[0]["text"], "Inbound report")
+            self.assertEqual(captured[0]["stored_file_id"], "received-media-1")
+            self.assertEqual(stored.saved[0]["owner_id"], "davide")
+            self.assertEqual(stored.saved[0]["project_id"], "postmaster-mcp")
+            self.assertEqual(stored.saved[0]["filename"], "report.pdf")
+            self.assertEqual(stored.saved[0]["data"], b"downloaded-payload")
+            self.assertIn("whatsapp", stored.saved[0]["tags"])
+            self.assertTrue(adapter.status()["media_receive_to_stored_file_implemented"])
+
+    async def test_group_receive_processes_pairwise_distribution_before_skmsg(self):
+        with TemporaryDirectory() as td:
+            sender_auth = EncryptedAuthStore(str(Path(td) / "sender.db"))
+            receiver_auth = EncryptedAuthStore(str(Path(td) / "receiver.db"))
+            author = "222:1@s.whatsapp.net"
+            group = "12345@g.us"
+
+            sender_keys = EncryptedSenderKeyStore(sender_auth)
+            distribution = sender_keys.distribution(group, author)
+            ciphertext = sender_keys.encrypt(
+                group,
+                author,
+                pad_random_max16(encode_text_message("hello inbound group"), random1=b"\x00"),
+            )
+            distribution_message = encode_sender_key_distribution_message(group, distribution)
+
+            captured = []
+            adapter = CurrentProtocolAdapter(
+                receiver_auth,
+                on_message=lambda **kwargs: captured.append(kwargs),
+            )
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+
+            async def fake_pairwise(self, node, loaded_creds, *, e2e_type, ciphertext):
+                self.assert_creds = loaded_creds
+                return distribution_message
+            adapter._decrypt_pairwise_message_proto = types.MethodType(fake_pairwise, adapter)  # type: ignore[method-assign]
+
+            stanza = BinaryNode(
+                "message",
+                {"from": group, "participant": author, "id": "group-msg-1"},
+                [
+                    BinaryNode("enc", {"v": "2", "type": "msg"}, b"pairwise-skdm"),
+                    BinaryNode("enc", {"v": "2", "type": "skmsg"}, ciphertext),
+                ],
+            )
+            await adapter._handle_incoming_message(stanza)
+
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]["jid"], group)
+            self.assertEqual(captured[0]["direction"], "in")
+            self.assertEqual(captured[0]["kind"], "text")
+            self.assertEqual(captured[0]["text"], "hello inbound group")
+            receiver_keys = EncryptedSenderKeyStore(receiver_auth)
+            self.assertIsNotNone(receiver_keys.load(group, author))
+            self.assertTrue(adapter.status()["group_text_receive_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_adapter_list_groups_uses_live_session_query(self):
+        response = BinaryNode("iq", {"type": "result"}, [BinaryNode("groups", {}, [group_node()])])
+        with TemporaryDirectory() as td:
+            auth = EncryptedAuthStore(str(Path(td) / "auth.db"))
+            adapter = CurrentProtocolAdapter(auth)
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+            wire = FakeWire(response)
+            adapter.session = wire  # type: ignore[assignment]
+            adapter._connected = True
+            groups = await adapter.list_groups()
+            self.assertEqual(groups[0]["id"], "12345@g.us")
+            self.assertEqual(wire.queries[0].attrs["xmlns"], "w:g2")
+            self.assertTrue(adapter.status()["group_listing_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+
+if __name__ == "__main__":
+    unittest.main()

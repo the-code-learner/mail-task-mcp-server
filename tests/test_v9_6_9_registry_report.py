@@ -12,7 +12,21 @@ class RegistryReportV980Tests(unittest.TestCase):
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
         names = sorted(by_name)
-        self.assertEqual(len(names), 118)
+        self.assertEqual(len(names), 130)
+        self.assertTrue({
+    "email_search_status",
+    "search_emails_hybrid",
+    "get_email_calendar_invites",
+    "send_job_calendar_invite",
+    "whatsapp_status",
+    "whatsapp_start_pairing",
+    "whatsapp_reconnect",
+    "whatsapp_list_messages",
+    "whatsapp_send_text",
+    "whatsapp_send_media",
+    "whatsapp_list_groups",
+    "whatsapp_list_receipts",
+} <= set(by_name))
         self.assertIn("fetch_email_remote_content", by_name)
         self.assertIn("db_status", by_name)
         self.assertIn("db_link_memory", by_name)

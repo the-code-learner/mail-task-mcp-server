@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from contextlib import closing
+import json
+import os
+from pathlib import Path
+import sqlite3
+import stat
+import threading
+from typing import Any, Mapping
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+
+class AuthStoreError(RuntimeError):
+    pass
+
+
+class EncryptedAuthStore:
+    """Persistent opaque WhatsApp auth/session state encrypted at rest.
+
+    The generated master key is stored outside SQLite with mode 0600. No API returns the key or
+    decrypted private material wholesale; callers address explicit state namespaces and names.
+    """
+
+    def __init__(self, db_path: str, key_path: str | None = None):
+        self.db_path = str(db_path)
+        self.key_path = str(key_path or f"{db_path}.key")
+        Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(self.key_path).parent.mkdir(parents=True, exist_ok=True)
+        self._lock = threading.RLock()
+        self._key = self._load_or_create_key()
+        self._init_db()
+
+    def _load_or_create_key(self) -> bytes:
+        path = Path(self.key_path)
+        if path.exists():
+            key = path.read_bytes()
+            if len(key) != 32: raise AuthStoreError("WhatsApp auth master key must be 32 bytes")
+            try:
+                mode = stat.S_IMODE(path.stat().st_mode)
+                if mode & 0o077: os.chmod(path, 0o600)
+            except OSError:
+                pass
+            return key
+        key = os.urandom(32)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "wb") as handle: handle.write(key)
+        except Exception:
+            try: path.unlink(missing_ok=True)
+            except OSError: pass
+            raise
+        return key
+
+    def _connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_db(self) -> None:
+        with closing(self._connect()) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS whatsapp_auth_state (
+                    namespace TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    nonce BLOB NOT NULL,
+                    ciphertext BLOB NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(namespace, name)
+                )
+            """)
+            conn.commit()
+
+    @staticmethod
+    def _aad(namespace: str, name: str) -> bytes:
+        return f"postmaster-whatsapp-v990\0{namespace}\0{name}".encode("utf-8")
+
+    def put_bytes(self, namespace: str, name: str, value: bytes) -> None:
+        ns, nm = str(namespace).strip(), str(name).strip()
+        if not ns or not nm: raise AuthStoreError("Auth state namespace and name are required")
+        nonce = os.urandom(12)
+        ciphertext = AESGCM(self._key).encrypt(nonce, bytes(value), self._aad(ns, nm))
+        with self._lock, closing(self._connect()) as conn:
+            conn.execute(
+                "INSERT INTO whatsapp_auth_state(namespace,name,nonce,ciphertext,updated_at) VALUES(?,?,?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(namespace,name) DO UPDATE SET nonce=excluded.nonce,ciphertext=excluded.ciphertext,updated_at=CURRENT_TIMESTAMP",
+                (ns, nm, nonce, ciphertext),
+            )
+            conn.commit()
+
+    def get_bytes(self, namespace: str, name: str) -> bytes | None:
+        ns, nm = str(namespace).strip(), str(name).strip()
+        with self._lock, closing(self._connect()) as conn:
+            row = conn.execute("SELECT nonce,ciphertext FROM whatsapp_auth_state WHERE namespace=? AND name=?", (ns, nm)).fetchone()
+        if row is None: return None
+        try:
+            return AESGCM(self._key).decrypt(bytes(row["nonce"]), bytes(row["ciphertext"]), self._aad(ns, nm))
+        except Exception as exc:
+            raise AuthStoreError("Unable to authenticate/decrypt WhatsApp auth state") from exc
+
+    def put_json(self, namespace: str, name: str, value: Mapping[str, Any]) -> None:
+        self.put_bytes(namespace, name, json.dumps(dict(value), sort_keys=True, separators=(",", ":")).encode("utf-8"))
+
+    def get_json(self, namespace: str, name: str) -> dict[str, Any] | None:
+        raw = self.get_bytes(namespace, name)
+        if raw is None: return None
+        value = json.loads(raw.decode("utf-8"))
+        if not isinstance(value, dict): raise AuthStoreError("Stored WhatsApp auth JSON must be an object")
+        return value
+
+    def delete(self, namespace: str, name: str) -> bool:
+        with self._lock, closing(self._connect()) as conn:
+            cur = conn.execute("DELETE FROM whatsapp_auth_state WHERE namespace=? AND name=?", (str(namespace), str(name)))
+            conn.commit()
+            return cur.rowcount > 0
+
+    def status(self) -> dict[str, Any]:
+        with self._lock, closing(self._connect()) as conn:
+            count = int(conn.execute("SELECT COUNT(*) FROM whatsapp_auth_state").fetchone()[0])
+        return {"ok": True, "encrypted_at_rest": True, "items": count, "private_material_exposed": False, "key_mode_target": "0600"}
