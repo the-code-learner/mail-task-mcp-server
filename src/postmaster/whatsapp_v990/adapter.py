@@ -21,6 +21,7 @@ from .cert import verify_noise_certificate_chain
 from .client_payload import RegistrationKeys, build_login_payload, build_registration_payload
 from .crypto import CurveKeyPair, WhatsAppNoiseXX, frame_noise_payload, generate_curve_keypair, split_noise_frames
 from .handshake import decode_handshake, encode_client_finish, encode_client_hello
+from .groups import build_participating_groups_query, parse_participating_groups
 from .jid import parse_jid, same_user, transfer_device
 from .media import (
     build_media_conn_query,
@@ -1130,7 +1131,14 @@ class CurrentProtocolAdapter:
         }
 
     async def list_groups(self) -> list[Mapping[str, Any]]:
-        raise CurrentProtocolAdapterError("WhatsApp group synchronization is not acceptance-complete")
+        """Read participating group metadata through the current w:g2 protocol.
+
+        This does not enable group send. Sender-key distribution remains fail-closed until
+        controlled-account interoperability is demonstrated.
+        """
+        wire, _creds = self._require_live_session()
+        response = await wire.query(build_participating_groups_query(), timeout=30)
+        return parse_participating_groups(response)
 
     def status(self) -> Mapping[str, Any]:
         creds = self._load()
@@ -1145,6 +1153,7 @@ class CurrentProtocolAdapter:
             "signal_send_ready": False,
             "media_implemented": True,
             "media_ready": False,
+            "group_listing_implemented": True,
             "groups_ready": False,
             "last_error": self._last_error,
         }
