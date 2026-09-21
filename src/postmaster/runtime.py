@@ -25,6 +25,8 @@ from .runtime_v967 import install_runtime_v967
 from .runtime_v968 import install_runtime_v968
 from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_webgui
 from .runtime_v980 import install_runtime_v980
+from .runtime_v990 import install_runtime_v990
+from .whatsapp_runtime_v990 import install_whatsapp_runtime_v990
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
@@ -39,6 +41,7 @@ from .webgui_regressions_v971 import (
 )
 from .webgui_release_identity import install_webgui_release_identity, project_release_version
 from .webgui_structured_data_v980 import install_webgui_structured_data_v980
+from .webgui_whatsapp_v990 import install_webgui_whatsapp_v990
 from .webgui_tasks import task_fragment as _task_fragment_v945
 from .webgui_v945 import install_webgui_v945
 from .webgui_v951 import install_webgui_v951
@@ -54,6 +57,7 @@ from .webgui_v963 import install_webgui_v963
 from .webgui_v963_high_noise import install_webgui_v963_high_noise
 from .webgui_v964 import install_webgui_v964
 from .webgui_v970 import install_webgui_v970
+from . import webgui_v970 as _webgui_v970
 from .webgui_visual_restoration import install_webgui_visual_restoration
 
 for _name in dir(_core):
@@ -161,6 +165,14 @@ install_mail_safety_ia_v971(_webgui_v962, _webgui_v962_views)
 # unchanged. Destructive DDL is review-only and row deletes require explicit confirmation.
 runtime_status = install_runtime_v980(_base, _core, runtime_status)
 install_webgui_structured_data_v980(app, _base)
+# v9.9.0 source overlays: email/calendar policy + hybrid search first, then the
+# fail-closed clean-room WhatsApp surface. Real WhatsApp acceptance remains false
+# until controlled protocol/multi-device interoperability has been demonstrated.
+_v990 = install_runtime_v990(_base, _core, runtime_status)
+runtime_status = _v990["runtime_status"]
+_wa_v990 = install_whatsapp_runtime_v990(_base, _core, runtime_status)
+runtime_status = _wa_v990["runtime_status"]
+install_webgui_whatsapp_v990(app, _base, _webgui_v962, _webgui_v962_views, _webgui_v970)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
