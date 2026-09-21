@@ -3,8 +3,8 @@ from __future__ import annotations
 """Current-protocol clean-room WhatsApp companion adapter.
 
 Pairing and reconnect are explicit actions. Constructing the adapter never opens the network.
-The Signal message layer intentionally remains fail-closed until its multi-device lifecycle is
-implemented and accepted against a controlled account.
+Direct and group Signal/media paths are implemented clean-room and exercised offline; stable
+acceptance remains fail-closed until controlled-account interoperability is demonstrated.
 """
 
 import asyncio
@@ -1527,8 +1527,8 @@ class CurrentProtocolAdapter:
     async def list_groups(self) -> list[Mapping[str, Any]]:
         """Read participating group metadata through the current w:g2 protocol.
 
-        This does not enable group send. Sender-key distribution remains fail-closed until
-        controlled-account interoperability is demonstrated.
+        Group text/media SenderKey send and receive are implemented separately; stable readiness
+        remains controlled-account gated.
         """
         wire, _creds = self._require_live_session()
         response = await wire.query(build_participating_groups_query(), timeout=30)
@@ -1543,6 +1543,8 @@ class CurrentProtocolAdapter:
             "paired": bool(creds and creds.registered and creds.jid),
             "pairing_pending": bool(pairing.get("qr")),
             "native_websocket": True,
+            "implementation_complete": True,
+            "controlled_acceptance_required": True,
             "signal_send_implemented": True,
             "signal_send_ready": False,
             "media_implemented": True,
