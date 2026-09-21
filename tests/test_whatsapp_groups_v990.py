@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import types
 import unittest
+from unittest.mock import AsyncMock, patch
 
 from postmaster.whatsapp_v990.adapter import CurrentProtocolAdapter, ProtocolCredentials
 from postmaster.whatsapp_v990.binary import BinaryNode
@@ -15,6 +16,7 @@ from postmaster.whatsapp_v990.groups import (
     parse_group_metadata,
     parse_participating_groups,
 )
+from postmaster.whatsapp_v990.media import MediaUpload
 from postmaster.whatsapp_v990.messages import encode_text_message, pad_random_max16
 from postmaster.whatsapp_v990.sender_key import (
     EncryptedSenderKeyStore,
@@ -236,6 +238,180 @@ class WhatsAppGroupsV990Tests(unittest.IsolatedAsyncioTestCase):
                 {"111:1@s.whatsapp.net", "222@s.whatsapp.net"},
             )
             self.assertTrue(adapter.status()["group_text_send_implemented"])
+            self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_group_media_send_uses_sender_key_and_enc_mediatype(self):
+        metadata_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "group",
+                    {"id": "12345", "subject": "Test", "addressing_mode": "pn"},
+                    [
+                        BinaryNode("participant", {"jid": "111@s.whatsapp.net"}),
+                        BinaryNode("participant", {"jid": "222@s.whatsapp.net"}),
+                    ],
+                )
+            ],
+        )
+        usync_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "usync",
+                    {},
+                    [
+                        BinaryNode(
+                            "list",
+                            {},
+                            [
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "111@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "1", "key-index": "7"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                                BinaryNode(
+                                    "user",
+                                    {"jid": "222@s.whatsapp.net"},
+                                    [
+                                        BinaryNode(
+                                            "devices",
+                                            {},
+                                            [
+                                                BinaryNode(
+                                                    "device-list",
+                                                    {},
+                                                    [BinaryNode("device", {"id": "0"})],
+                                                )
+                                            ],
+                                        )
+                                    ],
+                                ),
+                            ],
+                        )
+                    ],
+                )
+            ],
+        )
+        media_conn_response = BinaryNode(
+            "iq",
+            {"type": "result"},
+            [
+                BinaryNode(
+                    "media_conn",
+                    {"auth": "auth-token", "ttl": "60"},
+                    [BinaryNode("host", {"hostname": "mmg.example.com"})],
+                )
+            ],
+        )
+
+        class Signal:
+            def encrypt(self, data):
+                return "msg", b"pairwise-" + bytes(data[:4])
+
+        class Sessions:
+            def __init__(self, jids):
+                self.items = {jid: Signal() for jid in jids}
+            def load(self, jid):
+                return self.items.get(jid)
+            def save(self, jid, signal):
+                self.items[jid] = signal
+
+        class FileStore:
+            def raw_bytes(self, file_id):
+                self.last = file_id
+                return (
+                    {"filename": "report.pdf", "media_type": "application/pdf"},
+                    b"stored-file-payload",
+                )
+
+        class Wire:
+            def __init__(self):
+                self.closed = False
+                self.sent = []
+            async def query(self, node, *, timeout=30.0):
+                if node.attrs.get("xmlns") == "w:m":
+                    return media_conn_response
+                if node.attrs.get("xmlns") == "w:g2":
+                    return metadata_response
+                if node.attrs.get("xmlns") == "usync":
+                    return usync_response
+                raise AssertionError(f"unexpected query {node.attrs}")
+            async def send_and_wait(self, node, *, response_tag=None, timeout=30.0):
+                self.sent.append(node)
+                return BinaryNode("ack", {"id": node.attrs["id"], "class": "message"})
+
+        upload = MediaUpload(
+            media_type="document",
+            url="https://mmg.example.com/file",
+            direct_path="/v/t62/file",
+            media_key=b"k" * 32,
+            file_sha256=b"s" * 32,
+            file_enc_sha256=b"e" * 32,
+            file_length=len(b"stored-file-payload"),
+            mimetype="application/pdf",
+            filename="report.pdf",
+            caption="Quarterly",
+            media_key_timestamp=1700000000,
+        )
+
+        with TemporaryDirectory() as td:
+            auth = EncryptedAuthStore(str(Path(td) / "auth.db"))
+            store = FileStore()
+            adapter = CurrentProtocolAdapter(auth, file_store=store)
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+            wire = Wire()
+            adapter.session = wire  # type: ignore[assignment]
+            adapter._connected = True
+
+            async def fake_sessions(self, _wire, _creds, addresses):
+                return Sessions(addresses)
+            adapter._ensure_signal_sessions = types.MethodType(fake_sessions, adapter)  # type: ignore[method-assign]
+
+            with patch(
+                "postmaster.whatsapp_v990.adapter.upload_media_bytes",
+                new=AsyncMock(return_value=(upload, b"encrypted-media")),
+            ):
+                result = await adapter.send_media(
+                    jid="12345@g.us",
+                    stored_file_id="stored-1",
+                    caption="Quarterly",
+                )
+
+            self.assertTrue(result["server_ack"])
+            self.assertTrue(result["group"])
+            self.assertEqual(result["media_type"], "document")
+            self.assertEqual(result["stored_file_id"], "stored-1")
+            self.assertEqual(store.last, "stored-1")
+            stanza = wire.sent[-1]
+            self.assertNotIn("mediatype", stanza.attrs)
+            self.assertEqual(stanza.child("enc").attrs["type"], "skmsg")
+            self.assertEqual(stanza.child("enc").attrs["mediatype"], "document")
+            self.assertTrue(adapter.status()["group_media_send_implemented"])
             self.assertFalse(adapter.status()["groups_ready"])
 
     async def test_group_receive_processes_pairwise_distribution_before_skmsg(self):
