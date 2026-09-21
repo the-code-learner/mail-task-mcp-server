@@ -50,6 +50,21 @@ V967_LIFECYCLE_MCP_NAMES = {
     "privacy_proxy_provisioning_execute",
 }
 
+V990_MCP_NAMES = {
+    "email_search_status",
+    "search_emails_hybrid",
+    "get_email_calendar_invites",
+    "send_job_calendar_invite",
+    "whatsapp_status",
+    "whatsapp_start_pairing",
+    "whatsapp_reconnect",
+    "whatsapp_list_messages",
+    "whatsapp_send_text",
+    "whatsapp_send_media",
+    "whatsapp_list_groups",
+    "whatsapp_list_receipts",
+}
+
 
 class CanonicalUnsubscribeUrlV960Tests(unittest.TestCase):
     def test_public_email_base_url_then_public_mcp_host_fallback(self):
@@ -255,10 +270,11 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
             legacy_extensions = V967_LIFECYCLE_MCP_NAMES | {"fetch_email_remote_content"}
             self.assertTrue(BASELINE_MCP_NAMES <= actual)
             self.assertTrue(legacy_extensions <= actual)
-            structured_extensions = actual - BASELINE_MCP_NAMES - legacy_extensions
+            self.assertTrue(V990_MCP_NAMES <= actual)
+            structured_extensions = actual - BASELINE_MCP_NAMES - legacy_extensions - V990_MCP_NAMES
             self.assertEqual(len(structured_extensions), 21)
             self.assertTrue(all(name.startswith("db_") for name in structured_extensions))
-            self.assertEqual(len(actual), 118)
+            self.assertEqual(len(actual), 130)
 
 
 if __name__ == "__main__":
