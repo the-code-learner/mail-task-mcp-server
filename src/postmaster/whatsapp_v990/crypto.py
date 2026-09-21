@@ -378,6 +378,13 @@ class WhatsAppNoiseXX:
             raise CryptoError("Noise server static key must be 32 bytes")
         self.mix_key(curve_shared_key(self.ephemeral.private, server_static))
         cert_chain = self.decrypt(encrypted_payload)
+        # The live server identity must chain to WhatsApp's pinned public Noise root before
+        # the client sends its static key or any ClientPayload.
+        try:
+            from .cert import verify_noise_certificate_chain
+            verify_noise_certificate_chain(cert_chain)
+        except Exception as exc:
+            raise CryptoError("Noise server certificate validation failed") from exc
         encrypted_client_static = self.encrypt(noise_static.public)
         self.mix_key(curve_shared_key(noise_static.private, server_ephemeral))
         return encrypted_client_static, cert_chain
