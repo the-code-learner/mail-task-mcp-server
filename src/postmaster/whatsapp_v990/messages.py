@@ -10,7 +10,7 @@ from typing import Iterable
 
 from .binary import BinaryNode
 from .jid import parse_jid
-from .proto import field_bytes, field_message
+from .proto import ProtoError, decode_fields, field_bytes, field_message
 
 
 class WhatsAppMessageError(ValueError):
@@ -99,6 +99,66 @@ def encode_reply_text_message(
     return field_message(6, extended)
 
 
+def decode_text_message(message: bytes) -> str | None:
+    """Extract the text subset supported by the v9.9 clean-room runtime.
+
+    Supports conversation, extendedTextMessage and DeviceSentMessage wrappers. Unknown
+    message kinds return None rather than being mis-decoded as text.
+    """
+    try:
+        fields = decode_fields(bytes(message))
+    except ProtoError as exc:
+        raise WhatsAppMessageError("Invalid WhatsApp Message protobuf") from exc
+    for field in fields:
+        if field.number == 1 and isinstance(field.value, bytes):
+            try:
+                return field.value.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise WhatsAppMessageError("WhatsApp conversation text is not UTF-8") from exc
+        if field.number == 6 and isinstance(field.value, bytes):
+            try:
+                extended = decode_fields(field.value)
+            except ProtoError as exc:
+                raise WhatsAppMessageError("Invalid WhatsApp extendedTextMessage protobuf") from exc
+            text_field = next((item for item in extended if item.number == 1 and isinstance(item.value, bytes)), None)
+            if text_field is not None:
+                try:
+                    return bytes(text_field.value).decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise WhatsAppMessageError("WhatsApp extended text is not UTF-8") from exc
+        if field.number == 31 and isinstance(field.value, bytes):
+            try:
+                device_sent = decode_fields(field.value)
+            except ProtoError as exc:
+                raise WhatsAppMessageError("Invalid WhatsApp DeviceSentMessage protobuf") from exc
+            nested = next((item for item in device_sent if item.number == 2 and isinstance(item.value, bytes)), None)
+            if nested is not None:
+                return decode_text_message(bytes(nested.value))
+    return None
+
+
+def build_ack_stanza(node: BinaryNode, *, me_id: str | None = None, error_code: int | None = None) -> BinaryNode:
+    """Build the protocol transport ACK for a received stanza.
+
+    This is never a WhatsApp read receipt. In particular, message ACKs acknowledge delivery
+    to this companion transport without marking the conversation as read.
+    """
+    stanza_id = str(node.attrs.get("id") or "").strip()
+    sender = str(node.attrs.get("from") or "").strip()
+    if not stanza_id or not sender:
+        raise WhatsAppMessageError("WhatsApp ACK requires received stanza id and from")
+    attrs = {"id": stanza_id, "to": sender, "class": node.tag}
+    if error_code:
+        attrs["error"] = str(int(error_code))
+    for name in ("participant", "recipient", "type"):
+        value = node.attrs.get(name)
+        if value:
+            attrs[name] = str(value)
+    if node.tag == "message" and me_id:
+        attrs["from"] = str(me_id)
+    return BinaryNode("ack", attrs)
+
+
 def build_read_receipt(*, destination_jid: str, message_id: str) -> BinaryNode:
     destination = str(parse_jid(destination_jid).normalized_user())
     mid = str(message_id or "").strip()
@@ -157,6 +217,6 @@ def build_direct_message_stanza(
 
 __all__ = [
     "WhatsAppMessageError", "pad_random_max16", "unpad_random_max16", "generate_message_id_v2", "participant_hash_v2",
-    "encode_text_message", "encode_reply_text_message", "build_read_receipt",
+    "encode_text_message", "encode_reply_text_message", "decode_text_message", "build_ack_stanza", "build_read_receipt",
     "encode_device_sent_message", "encrypted_participant_node", "build_direct_message_stanza",
 ]
