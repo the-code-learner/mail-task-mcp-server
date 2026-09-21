@@ -73,7 +73,7 @@ def derive_x3dh_initiator(
 ) -> tuple[bytes, bytes]:
     """Derive the legacy Signal-v3 initial root/chain pair for the initiator."""
     pieces = [
-        b"ÿ" * 32,
+        b"\xFF" * 32,
         curve_shared_key(our_identity_private, _raw_pub(their_signed_pre_key_public)),
         curve_shared_key(our_base_private, _raw_pub(their_identity_public)),
         curve_shared_key(our_base_private, _raw_pub(their_signed_pre_key_public)),
@@ -94,7 +94,7 @@ def derive_x3dh_responder(
 ) -> tuple[bytes, bytes]:
     """Responder mirror of :func:`derive_x3dh_initiator`."""
     pieces = [
-        b"ÿ" * 32,
+        b"\xFF" * 32,
         curve_shared_key(our_signed_pre_key_private, _raw_pub(their_identity_public)),
         curve_shared_key(our_identity_private, _raw_pub(their_base_public)),
         curve_shared_key(our_signed_pre_key_private, _raw_pub(their_base_public)),
@@ -108,13 +108,13 @@ def derive_x3dh_responder(
 def chain_message_seed(chain_key: bytes) -> bytes:
     if len(chain_key) != 32:
         raise SignalKeyError("Signal chain key must be 32 bytes")
-    return hmac.new(bytes(chain_key), b"", hashlib.sha256).digest()
+    return hmac.new(bytes(chain_key), b"\x01", hashlib.sha256).digest()
 
 
 def next_chain_key(chain_key: bytes) -> bytes:
     if len(chain_key) != 32:
         raise SignalKeyError("Signal chain key must be 32 bytes")
-    return hmac.new(bytes(chain_key), b"", hashlib.sha256).digest()
+    return hmac.new(bytes(chain_key), b"\x02", hashlib.sha256).digest()
 
 
 def derive_message_keys(chain_key: bytes) -> tuple[bytes, bytes, bytes]:
