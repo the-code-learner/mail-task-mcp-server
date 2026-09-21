@@ -414,14 +414,13 @@ async def main() -> int:
                         "Controlled group-media send did not receive a clean server ack"
                     )
 
-            evidence.remote_receipt_observed = (
-                await _wait_for_receipt(events, direct_message_id, timeout)
+            receipt_coro = (
+                _wait_for_receipt(events, direct_message_id, timeout)
                 if require_receipt
-                else False
+                else asyncio.sleep(0, result=False)
             )
-
-            direct_echo = (
-                await _wait_for_message(
+            direct_echo_coro = (
+                _wait_for_message(
                     events,
                     jid=test_jid,
                     token=direct_token,
@@ -429,12 +428,10 @@ async def main() -> int:
                     timeout=timeout,
                 )
                 if require_direct_echo
-                else None
+                else asyncio.sleep(0, result=None)
             )
-            evidence.inbound_direct_echo_observed = direct_echo is not None
-
-            group_echo = (
-                await _wait_for_message(
+            group_echo_coro = (
+                _wait_for_message(
                     events,
                     jid=test_group_jid,
                     token=group_token,
@@ -442,12 +439,10 @@ async def main() -> int:
                     timeout=timeout,
                 )
                 if require_group_echo
-                else None
+                else asyncio.sleep(0, result=None)
             )
-            evidence.inbound_group_echo_observed = group_echo is not None
-
-            group_media_in = (
-                await _wait_for_message(
+            group_media_coro = (
+                _wait_for_message(
                     events,
                     jid=test_group_jid,
                     token=media_token,
@@ -455,8 +450,23 @@ async def main() -> int:
                     timeout=timeout,
                 )
                 if require_inbound_media
-                else None
+                else asyncio.sleep(0, result=None)
             )
+
+            (
+                receipt_observed,
+                direct_echo,
+                group_echo,
+                group_media_in,
+            ) = await asyncio.gather(
+                receipt_coro,
+                direct_echo_coro,
+                group_echo_coro,
+                group_media_coro,
+            )
+            evidence.remote_receipt_observed = bool(receipt_observed)
+            evidence.inbound_direct_echo_observed = direct_echo is not None
+            evidence.inbound_group_echo_observed = group_echo is not None
             evidence.inbound_group_media_observed = group_media_in is not None
             evidence.inbound_group_media_stored_file_observed = bool(
                 group_media_in and group_media_in.get("stored_file_id")
