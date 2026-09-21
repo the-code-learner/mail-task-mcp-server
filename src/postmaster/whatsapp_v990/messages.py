@@ -186,6 +186,49 @@ def encrypted_participant_node(jid: str, *, ciphertext_type: str, ciphertext: by
     return BinaryNode("to", {"jid": target}, [BinaryNode("enc", attrs, bytes(ciphertext))])
 
 
+def build_group_message_stanza(
+    *,
+    destination_jid: str,
+    message_id: str,
+    sender_key_ciphertext: bytes,
+    sender_key_recipients: Iterable[BinaryNode] = (),
+    device_identity: bytes | None = None,
+    message_type: str = "text",
+    addressing_mode: str = "lid",
+    additional_attrs: dict[str, str] | None = None,
+) -> BinaryNode:
+    destination = parse_jid(destination_jid)
+    if not destination.is_group:
+        raise WhatsAppMessageError("Group WhatsApp stanza requires a g.us destination")
+    if addressing_mode not in {"lid", "pn"}:
+        raise WhatsAppMessageError("WhatsApp group addressing_mode must be lid or pn")
+    ciphertext = bytes(sender_key_ciphertext)
+    if not ciphertext:
+        raise WhatsAppMessageError("Group WhatsApp stanza requires sender-key ciphertext")
+
+    attrs = {
+        "id": str(message_id),
+        "to": str(destination),
+        "type": str(message_type),
+        "addressing_mode": addressing_mode,
+    }
+    attrs.update({str(k): str(v) for k, v in (additional_attrs or {}).items()})
+
+    content: list[BinaryNode] = []
+    recipients = list(sender_key_recipients)
+    if recipients:
+        if any(node.tag != "to" or not node.attrs.get("jid") for node in recipients):
+            raise WhatsAppMessageError("Group sender-key recipient nodes must be <to jid=...>")
+        content.append(BinaryNode("participants", {}, recipients))
+    if device_identity is not None:
+        content.append(BinaryNode("device-identity", {}, bytes(device_identity)))
+    enc_attrs = {"v": "2", "type": "skmsg"}
+    if additional_attrs and additional_attrs.get("mediatype"):
+        enc_attrs["mediatype"] = str(additional_attrs["mediatype"])
+    content.append(BinaryNode("enc", enc_attrs, ciphertext))
+    return BinaryNode("message", attrs, content)
+
+
 def build_direct_message_stanza(
     *,
     destination_jid: str,
@@ -218,5 +261,5 @@ def build_direct_message_stanza(
 __all__ = [
     "WhatsAppMessageError", "pad_random_max16", "unpad_random_max16", "generate_message_id_v2", "participant_hash_v2",
     "encode_text_message", "encode_reply_text_message", "decode_text_message", "build_ack_stanza", "build_read_receipt",
-    "encode_device_sent_message", "encrypted_participant_node", "build_direct_message_stanza",
+    "encode_device_sent_message", "encrypted_participant_node", "build_group_message_stanza", "build_direct_message_stanza",
 ]
