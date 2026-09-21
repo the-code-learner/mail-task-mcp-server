@@ -146,6 +146,7 @@ class PendingPreKey:
 @dataclass(slots=True)
 class SignalSession:
     registration_id: int
+    local_registration_id: int
     local_identity: CurveKeyPair
     remote_identity: bytes
     root_key: bytes
@@ -219,7 +220,7 @@ class SignalSession:
             return "msg", serialized
         pending = self.pending_pre_key
         wrapped = PreKeyWhisperMessageV3(
-            registration_id=self.registration_id,
+            registration_id=self.local_registration_id,
             pre_key_id=pending.pre_key_id,
             signed_pre_key_id=pending.signed_pre_key_id,
             base_key=pending.base_key,
@@ -252,6 +253,7 @@ class SignalSession:
     def to_json(self) -> dict[str, Any]:
         return {
             "registration_id": self.registration_id,
+            "local_registration_id": self.local_registration_id,
             "local_identity_private": _b64(self.local_identity.private),
             "local_identity_public": _b64(self.local_identity.public),
             "remote_identity": _b64(_raw_public(self.remote_identity)),
@@ -272,6 +274,7 @@ class SignalSession:
         pending_raw = value.get("pending_pre_key")
         return cls(
             registration_id=int(value["registration_id"]),
+            local_registration_id=int(value.get("local_registration_id", 0)),
             local_identity=local,
             remote_identity=_unb64(value["remote_identity"], length=32),
             root_key=_unb64(value["root_key"], length=32),
@@ -288,6 +291,7 @@ def initialize_outgoing_session(
     *,
     our_identity: CurveKeyPair,
     bundle: SignalPreKeyBundle,
+    our_registration_id: int,
     base_key: CurveKeyPair | None = None,
     ratchet_key: CurveKeyPair | None = None,
 ) -> SignalSession:
@@ -304,6 +308,7 @@ def initialize_outgoing_session(
     local_ratchet = ratchet_key or generate_curve_keypair()
     session = SignalSession(
         registration_id=int(bundle.registration_id),
+        local_registration_id=int(our_registration_id),
         local_identity=our_identity,
         remote_identity=_raw_public(bundle.identity_key),
         root_key=root,
@@ -322,6 +327,7 @@ def initialize_incoming_session(
     our_signed_pre_key: SignedPreKey,
     message: PreKeyWhisperMessageV3,
     our_one_time_pre_key: CurveKeyPair | None = None,
+    our_registration_id: int = 0,
 ) -> SignalSession:
     if message.signed_pre_key_id != our_signed_pre_key.key_id:
         raise SignalSessionError("Incoming Signal pre-key message references an unknown signed pre-key")
@@ -336,6 +342,7 @@ def initialize_incoming_session(
     )
     return SignalSession(
         registration_id=int(message.registration_id),
+        local_registration_id=int(our_registration_id),
         local_identity=our_identity,
         remote_identity=_raw_public(message.identity_key),
         root_key=root,
@@ -351,6 +358,7 @@ def decrypt_prekey_message(
     our_identity: CurveKeyPair,
     our_signed_pre_key: SignedPreKey,
     our_one_time_pre_key: CurveKeyPair | None = None,
+    our_registration_id: int = 0,
 ) -> tuple[SignalSession, bytes, int | None]:
     envelope = PreKeyWhisperMessageV3.parse(raw)
     session = initialize_incoming_session(
@@ -358,6 +366,7 @@ def decrypt_prekey_message(
         our_signed_pre_key=our_signed_pre_key,
         message=envelope,
         our_one_time_pre_key=our_one_time_pre_key,
+        our_registration_id=our_registration_id,
     )
     plaintext = session.decrypt_signal(envelope.message)
     return session, plaintext, envelope.pre_key_id
