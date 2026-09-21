@@ -359,12 +359,16 @@ class CurrentProtocolAdapter:
         on_message: Callable[..., Any] | None = None,
         on_receipt: Callable[..., Any] | None = None,
         file_store: Any | None = None,
+        file_owner_id: str = "default",
+        file_project_id: str | None = None,
     ):
         self.auth = auth
         self.session_opener = session_opener
         self.on_message = on_message
         self.on_receipt = on_receipt
         self.file_store = file_store
+        self.file_owner_id = str(file_owner_id or "default").strip() or "default"
+        self.file_project_id = str(file_project_id).strip() if file_project_id else None
         self.session: WhatsAppWireSession | None = None
         self._pair_task: asyncio.Task | None = None
         self._qr_task: asyncio.Task | None = None
