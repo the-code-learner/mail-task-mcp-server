@@ -14,3 +14,4 @@ huggingface-hub>=0.24,<2
 tokenizers>=0.20,<1
 mistune>=3,<4
 bleach>=6.2,<7
+qrcode==8.2
