@@ -13,7 +13,9 @@ on:
       - 'scripts/whatsapp_v990_noise_server_hello_probe.py'
       - 'scripts/whatsapp_v990_noise_registration_probe.py'
       - 'scripts/whatsapp_v990_pair_device_probe.py'
+      - 'scripts/whatsapp_v990_controlled_interop.py'
       - '.github/workflows/whatsapp-v990-offline-validation.yml'
+      - '.github/workflows/whatsapp-v990-controlled-interop.yml'
   workflow_dispatch:
 
 permissions:
@@ -45,6 +47,7 @@ jobs:
             src/postmaster/whatsapp_v990 \
             src/postmaster/whatsapp_runtime_v990.py \
             src/postmaster/webgui_whatsapp_v990.py \
+            scripts/whatsapp_v990_controlled_interop.py \
             tests
 
       - name: Run WhatsApp offline regression suite
@@ -53,19 +56,51 @@ jobs:
         run: |
           python -W error::ResourceWarning -m unittest discover             -s tests             -p 'test_whatsapp_*_v990.py'             -v
 
-      - name: Guard incomplete live-interop acceptance flags
+      - name: Guard controlled-account release boundary
         run: |
           python - <<'PY'
           from pathlib import Path
-          source = Path('src/postmaster/whatsapp_runtime_v990.py').read_text(encoding='utf-8')
-          expected = (
+
+          runtime = Path('src/postmaster/whatsapp_runtime_v990.py').read_text(encoding='utf-8')
+          harness = Path('scripts/whatsapp_v990_controlled_interop.py').read_text(encoding='utf-8')
+          workflow = Path('.github/workflows/whatsapp-v990-controlled-interop.yml').read_text(encoding='utf-8')
+
+          expected_false = (
               '"protocol_interop_verified": False',
               '"signal_multidevice_verified": False',
               '"controlled_account_interop_verified": False',
           )
-          missing = [item for item in expected if item not in source]
-          assert not missing, f'Live acceptance flags must stay false until controlled-account evidence exists: {missing}'
-          print('Offline validation passed; live WhatsApp interoperability remains explicitly unverified.')
+          missing = [item for item in expected_false if item not in runtime]
+          assert not missing, (
+              'Live acceptance flags must stay false until controlled-account evidence exists: '
+              f'{missing}'
+          )
+
+          required_harness_checks = (
+              'POSTMASTER_WA_TEST_GROUP_JID',
+              'group_sender_key_interop_observed',
+              'media_interop_observed',
+              'receipt_policy_observed',
+              'inbound_group_media_stored_file_observed',
+              'controlled_account_interop_observed',
+          )
+          missing = [item for item in required_harness_checks if item not in harness]
+          assert not missing, f'Controlled interop harness lost release-critical checks: {missing}'
+
+          required_workflow_checks = (
+              'environment: whatsapp-v990-controlled',
+              'POSTMASTER_WA_TEST_GROUP_JID',
+              'require_group_echo',
+              'require_inbound_media',
+              'controlled_account_interop_observed=true',
+          )
+          missing = [item for item in required_workflow_checks if item not in workflow]
+          assert not missing, f'Controlled interop workflow lost release-critical gates: {missing}'
+
+          print(
+              'Offline validation passed; implementation can advance without an account, '
+              'but stable acceptance remains controlled-account gated.'
+          )
           PY
 
   network-transport-smoke:
