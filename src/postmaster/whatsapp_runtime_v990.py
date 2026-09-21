@@ -29,7 +29,13 @@ def install_whatsapp_runtime_v990(
     inject the verified current-protocol adapter after real QR/pair/send/receive interoperability
     acceptance; tools fail closed until then.
     """
-    wa = service or WhatsAppService.create(auth_db=auth_db, event_db=event_db, key_path=key_path)
+    wa_obj = service
+
+    def get_service() -> WhatsAppService:
+        nonlocal wa_obj
+        if wa_obj is None:
+            wa_obj = WhatsAppService.create(auth_db=auth_db, event_db=event_db, key_path=key_path)
+        return wa_obj
 
     def safe_sync(fn, *args, **kwargs):
         try: return fn(*args, **kwargs)
@@ -43,35 +49,35 @@ def install_whatsapp_runtime_v990(
 
     def whatsapp_status():
         """Read-only. Show WhatsApp pairing/network/session status without exposing private keys or secrets."""
-        return safe_sync(wa.status)
+        return safe_sync(get_service().status)
 
     async def whatsapp_start_pairing():
         """WRITE ACTION. Explicitly start WhatsApp companion pairing and return the transient QR payload for WebGUI display."""
-        return await safe_async(wa.start_pairing)
+        return await safe_async(get_service().start_pairing)
 
     async def whatsapp_reconnect():
         """WRITE ACTION. Explicitly reconnect the persisted WhatsApp companion session; never auto-pairs a new device."""
-        return await safe_async(wa.reconnect)
+        return await safe_async(get_service().reconnect)
 
     def whatsapp_list_messages(jid: str | None = None, limit: int = 100):
         """Read-only. Read locally stored WhatsApp messages. Reading never emits a WhatsApp read receipt."""
-        return safe_sync(wa.list_messages, jid=jid, limit=limit)
+        return safe_sync(get_service().list_messages, jid=jid, limit=limit)
 
     async def whatsapp_send_text(jid: str, text: str, reply_to_message_id: str | None = None):
         """WRITE ACTION. Send one WhatsApp text/group message. A read receipt may be emitted only when this explicit send is a reply."""
-        return await safe_async(wa.send_text, jid=jid, text=text, reply_to_message_id=reply_to_message_id)
+        return await safe_async(get_service().send_text, jid=jid, text=text, reply_to_message_id=reply_to_message_id)
 
     async def whatsapp_send_media(jid: str, stored_file_id: str, caption: str = "", reply_to_message_id: str | None = None):
         """WRITE ACTION. Send WhatsApp media from a Postmaster Stored File id; do not route raw attachment Base64 through the MCP call."""
-        return await safe_async(wa.send_media, jid=jid, stored_file_id=stored_file_id, caption=caption, reply_to_message_id=reply_to_message_id)
+        return await safe_async(get_service().send_media, jid=jid, stored_file_id=stored_file_id, caption=caption, reply_to_message_id=reply_to_message_id)
 
     async def whatsapp_list_groups():
         """Read-only. List groups visible to the paired WhatsApp companion session."""
-        return await safe_async(wa.list_groups)
+        return await safe_async(get_service().list_groups)
 
     def whatsapp_list_receipts(limit: int = 200):
         """Read-only. List remote receipts observed by Postmaster plus outbound-reply receipts emitted under the asymmetric policy."""
-        return safe_sync(wa.list_receipts, limit=limit)
+        return safe_sync(get_service().list_receipts, limit=limit)
 
     tools = (
         ("whatsapp_status", whatsapp_status, _ann(read_only=True, idempotent=True)),
@@ -93,7 +99,7 @@ def install_whatsapp_runtime_v990(
     def runtime_status():
         status = old_status()
         status = dict(status) if isinstance(status, dict) else {"ok": True}
-        wa_status = wa.status()
+        wa_status = wa_obj.status() if wa_obj is not None else {"network": {"configured": False, "connected": False}, "paired": False}
         status["whatsapp"] = {
             "clean_room_python": True,
             "tool_count": MCP_WHATSAPP_COMMANDS_V990,
@@ -114,8 +120,8 @@ def install_whatsapp_runtime_v990(
     except Exception: pass
     core.mcp.add_tool(runtime_status, name="runtime_status", annotations=_ann(read_only=True, idempotent=True))
     setattr(core, "runtime_status", runtime_status); setattr(base, "runtime_status", runtime_status)
-    base.whatsapp_service_v990 = lambda: wa
-    return {"service": wa, "runtime_status": runtime_status, "tool_count": MCP_WHATSAPP_COMMANDS_V990}
+    base.whatsapp_service_v990 = get_service
+    return {"service": wa_obj, "service_factory": get_service, "runtime_status": runtime_status, "tool_count": MCP_WHATSAPP_COMMANDS_V990}
 
 
 __all__ = ["MCP_WHATSAPP_COMMANDS_V990", "install_whatsapp_runtime_v990"]
