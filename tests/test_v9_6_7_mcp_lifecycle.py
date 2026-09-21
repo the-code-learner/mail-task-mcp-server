@@ -490,7 +490,21 @@ class ReleaseBoundaryV967Tests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 118)
+        self.assertEqual(len(by_name), 130)
+        self.assertTrue({
+    "email_search_status",
+    "search_emails_hybrid",
+    "get_email_calendar_invites",
+    "send_job_calendar_invite",
+    "whatsapp_status",
+    "whatsapp_start_pairing",
+    "whatsapp_reconnect",
+    "whatsapp_list_messages",
+    "whatsapp_send_text",
+    "whatsapp_send_media",
+    "whatsapp_list_groups",
+    "whatsapp_list_receipts",
+} <= set(by_name))
         self.assertEqual(EXPECTED_V967_TOOLS - set(by_name), set())
         self.assertIn("fetch_email_remote_content", by_name)
         self.assertIn("privacy_proxy_action", by_name["set_amp_account_state"].input_schema["properties"])
