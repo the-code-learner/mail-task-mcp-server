@@ -4,24 +4,34 @@ on:
   workflow_dispatch:
     inputs:
       require_inbound_echo:
-        description: Require controlled peer to echo the probe token back
+        description: Require controlled direct peer to echo the direct probe token
+        required: true
+        default: true
+        type: boolean
+      require_group_echo:
+        description: Require controlled peer to echo the group probe token
+        required: true
+        default: true
+        type: boolean
+      require_inbound_media:
+        description: Require controlled peer media in the test group and Stored File handoff
         required: true
         default: true
         type: boolean
       require_remote_receipt:
-        description: Require a remote delivery/read receipt for the probe text
+        description: Require a remote delivery/read receipt for the direct probe text
         required: true
         default: true
         type: boolean
       run_media:
-        description: Exercise encrypted media upload and direct media send
+        description: Exercise direct/group encrypted media upload and send
         required: true
         default: true
         type: boolean
       observe_timeout_seconds:
-        description: Seconds to wait for controlled peer echo/receipt (10-240)
+        description: Seconds per controlled peer observation window (10-300)
         required: true
-        default: '90'
+        default: '120'
         type: string
 
 permissions:
@@ -33,9 +43,9 @@ concurrency:
 
 jobs:
   controlled-account:
-    name: WhatsApp controlled-account interoperability
+    name: WhatsApp controlled-account full interoperability
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 14
     environment: whatsapp-v990-controlled
     steps:
       - uses: actions/checkout@v4
@@ -54,23 +64,28 @@ jobs:
           AUTH_DB: ${{ secrets.POSTMASTER_WA_AUTH_DB_B64 }}
           AUTH_KEY: ${{ secrets.POSTMASTER_WA_AUTH_KEY_B64 }}
           TEST_JID: ${{ secrets.POSTMASTER_WA_TEST_JID }}
+          TEST_GROUP_JID: ${{ secrets.POSTMASTER_WA_TEST_GROUP_JID }}
         run: |
           test -n "$AUTH_DB" || { echo "POSTMASTER_WA_AUTH_DB_B64 is not configured in the whatsapp-v990-controlled environment"; exit 2; }
           test -n "$AUTH_KEY" || { echo "POSTMASTER_WA_AUTH_KEY_B64 is not configured in the whatsapp-v990-controlled environment"; exit 2; }
           test -n "$TEST_JID" || { echo "POSTMASTER_WA_TEST_JID is not configured in the whatsapp-v990-controlled environment"; exit 2; }
+          test -n "$TEST_GROUP_JID" || { echo "POSTMASTER_WA_TEST_GROUP_JID is not configured in the whatsapp-v990-controlled environment"; exit 2; }
           echo "Controlled-session secrets are configured (values not printed)."
 
       - name: Compile controlled interop harness
         run: |
           python -m compileall -q             src/postmaster/whatsapp_v990             scripts/whatsapp_v990_controlled_interop.py
 
-      - name: Run controlled account text/media/groups/receipt/echo interoperability
+      - name: Run controlled direct/group text/media/receipt/inbound interoperability
         env:
           PYTHONPATH: src
           POSTMASTER_WA_AUTH_DB_B64: ${{ secrets.POSTMASTER_WA_AUTH_DB_B64 }}
           POSTMASTER_WA_AUTH_KEY_B64: ${{ secrets.POSTMASTER_WA_AUTH_KEY_B64 }}
           POSTMASTER_WA_TEST_JID: ${{ secrets.POSTMASTER_WA_TEST_JID }}
+          POSTMASTER_WA_TEST_GROUP_JID: ${{ secrets.POSTMASTER_WA_TEST_GROUP_JID }}
           POSTMASTER_WA_REQUIRE_INBOUND_ECHO: ${{ inputs.require_inbound_echo }}
+          POSTMASTER_WA_REQUIRE_GROUP_ECHO: ${{ inputs.require_group_echo }}
+          POSTMASTER_WA_REQUIRE_INBOUND_MEDIA: ${{ inputs.require_inbound_media }}
           POSTMASTER_WA_REQUIRE_REMOTE_RECEIPT: ${{ inputs.require_remote_receipt }}
           POSTMASTER_WA_RUN_MEDIA: ${{ inputs.run_media }}
           POSTMASTER_WA_OBSERVE_TIMEOUT_SECONDS: ${{ inputs.observe_timeout_seconds }}
@@ -90,6 +105,9 @@ jobs:
         if: always()
         run: |
           echo "This workflow never changes source acceptance flags automatically."
+          echo "A release-qualifying run must leave every full-profile input enabled and must end with"
+          echo "controlled_account_interop_observed=true in the non-secret evidence artifact."
           echo "A successful run must be reviewed before protocol_interop_verified, signal_multidevice_verified,"
           echo "or controlled_account_interop_verified can change in source."
-          echo "No QR refs, auth database bytes, auth key, JID, private keys or session secrets are written to the evidence artifact."
+          echo "No QR refs, auth database bytes, auth key, JIDs, private keys, session secrets or media payloads"
+          echo "are written to the evidence artifact."
