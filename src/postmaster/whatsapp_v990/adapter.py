@@ -101,6 +101,7 @@ class WhatsAppWireSession:
         self.nodes: list[BinaryNode] = []
         self.closed = False
         self._send_lock = asyncio.Lock()
+        self._query_lock = asyncio.Lock()
 
     @classmethod
     async def open(
@@ -163,6 +164,26 @@ class WhatsAppWireSession:
         encrypted = self.transport.encrypt(wire)
         async with self._send_lock:
             await self.ws.send(frame_noise_payload(encrypted))
+
+    async def query(self, node: BinaryNode, *, timeout: float = 30.0) -> BinaryNode:
+        if node.tag != "iq":
+            raise CurrentProtocolAdapterError("Correlated WhatsApp query must be an iq node")
+        if not node.attrs.get("id"):
+            node.attrs["id"] = "pm-" + secrets.token_hex(8)
+        stanza_id = node.attrs["id"]
+        deferred: list[BinaryNode] = []
+        async with self._query_lock:
+            await self.send_node(node)
+            try:
+                async with asyncio.timeout(timeout):
+                    while True:
+                        current = await self.recv_node(timeout=timeout)
+                        if current.attrs.get("id") == stanza_id:
+                            return current
+                        deferred.append(current)
+            finally:
+                if deferred:
+                    self.nodes = deferred + self.nodes
 
     async def close(self) -> None:
         self.closed = True
