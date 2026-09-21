@@ -119,12 +119,10 @@ class WhatsAppRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("data-qr-payload",panel)
         self.assertNotIn("wa.me/settings/linked_devices#safe-test",panel)
         self.assertNotIn("<script>",panel)
-        if qr_status["available"]:
-            self.assertIn("WhatsApp pairing QR",panel)
-            self.assertIn("data:image/svg+xml;base64,",panel)
-        else:
-            self.assertIn("Pairing QR renderer unavailable",panel)
-            self.assertNotIn("data:image/svg+xml;base64,",panel)
+        self.assertTrue(qr_status["available"])
+        self.assertIn("WhatsApp pairing QR",panel)
+        self.assertIn("data:image/svg+xml;base64,",panel)
+        self.assertNotIn("Pairing QR renderer unavailable",panel)
 
     async def test_webgui_installer_adds_view_nav_and_explicit_routes(self):
         with TemporaryDirectory() as td:
