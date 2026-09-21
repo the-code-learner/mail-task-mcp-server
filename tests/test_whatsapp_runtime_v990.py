@@ -65,6 +65,22 @@ class WhatsAppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(runtime["whatsapp"]["signal_multidevice_verified"])
             self.assertFalse(runtime["whatsapp"]["controlled_account_interop_verified"])
 
+    async def test_default_service_wires_canonical_file_store_without_network(self):
+        with TemporaryDirectory() as td:
+            store = object()
+            service = WhatsAppService.create(
+                auth_db=str(Path(td) / "auth-real.db"),
+                event_db=str(Path(td) / "events-real.db"),
+                key_path=str(Path(td) / "auth-real.key"),
+                file_store=store,
+                file_owner_id="davide",
+                file_project_id="postmaster-mcp",
+            )
+            self.assertIs(service.adapter.file_store, store)
+            self.assertEqual(service.adapter.file_owner_id, "davide")
+            self.assertEqual(service.adapter.file_project_id, "postmaster-mcp")
+            self.assertFalse(service.adapter.status()["connected"])
+
     async def test_pairing_strips_private_material_and_persists_qr(self):
         with TemporaryDirectory() as td:
             _,core,_,service,_=self.make(td)
