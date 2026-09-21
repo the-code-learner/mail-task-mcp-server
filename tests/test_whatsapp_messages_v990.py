@@ -8,7 +8,9 @@ from postmaster.whatsapp_v990.messages import (
     encode_text_message,
     encrypted_participant_node,
     generate_message_id_v2,
+    pad_random_max16,
     participant_hash_v2,
+    unpad_random_max16,
 )
 from postmaster.whatsapp_v990.proto import decode_fields
 
@@ -28,6 +30,17 @@ class WhatsAppMessagesV990Tests(unittest.TestCase):
             participant_hash_v2(["1@s.whatsapp.net","2@s.whatsapp.net"]),
         )
         self.assertTrue(participant_hash_v2(["1@s.whatsapp.net"]).startswith("2:"))
+
+    def test_whatsapp_message_padding_roundtrip_and_bounds(self):
+        raw=b"hello protobuf"
+        for low_nibble in (0,1,7,15):
+            padded=pad_random_max16(raw,random1=bytes((low_nibble,)))
+            self.assertEqual(len(padded)-len(raw),low_nibble+1)
+            self.assertEqual(unpad_random_max16(padded),raw)
+        with self.assertRaises(Exception):
+            unpad_random_max16(b"")
+        with self.assertRaises(Exception):
+            unpad_random_max16(b"x"+bytes((17,)))
 
     def test_text_and_device_sent_message_wire_fields(self):
         msg=encode_text_message("hello")
