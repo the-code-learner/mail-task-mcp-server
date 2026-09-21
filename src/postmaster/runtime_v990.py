@@ -606,8 +606,8 @@ def install_runtime_v990(
     def email_search_status(account_id: str | None = None):
         """Read-only. Return v9.9 email lexical/semantic index status for one account."""
         aid = _account_id(base, account_id)
-        result = email_index.status(account_id=aid)
-        result.update({"imap_on_demand_enrichment": True, "external_remote_resource_fetch": False, "attachment_text": True})
+        result = email_index.status()
+        result.update({"account_id": aid, "imap_on_demand_enrichment": True, "external_remote_resource_fetch": False, "attachment_text": True})
         return result
 
     def search_emails_hybrid(query: str, mailbox: str = "INBOX", since_days: int = 90, limit: int = 20,
