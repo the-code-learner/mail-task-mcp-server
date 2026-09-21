@@ -53,7 +53,7 @@ async def main() -> int:
             encrypted_payload=server.payload,
             noise_static=noise_static,
         )
-        cert = verify_server_cert_chain(cert_chain)
+        cert = verify_noise_certificate_chain(cert_chain)
 
         print("WhatsApp live Noise ServerHello decrypted successfully")
         print(f"Server ephemeral bytes: {len(server.ephemeral)}")
