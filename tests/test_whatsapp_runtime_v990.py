@@ -61,6 +61,9 @@ class WhatsAppRuntimeTests(unittest.IsolatedAsyncioTestCase):
             runtime=core.runtime_status()
             self.assertTrue(runtime["whatsapp"]["read_receipts_asymmetric"])
             self.assertFalse(runtime["whatsapp"]["local_read_emits_receipt"])
+            self.assertFalse(runtime["whatsapp"]["protocol_interop_verified"])
+            self.assertFalse(runtime["whatsapp"]["signal_multidevice_verified"])
+            self.assertFalse(runtime["whatsapp"]["controlled_account_interop_verified"])
 
     async def test_pairing_strips_private_material_and_persists_qr(self):
         with TemporaryDirectory() as td:
