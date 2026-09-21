@@ -15,7 +15,7 @@ import os
 import secrets
 from typing import Any, Awaitable, Callable, Mapping
 
-from .adv import verify_and_sign_pair_success_identity
+from .adv import encode_signed_device_identity, verify_and_sign_pair_success_identity
 from .binary import BinaryNode, BinaryNodeCodec
 from .cert import verify_noise_certificate_chain
 from .client_payload import RegistrationKeys, build_login_payload, build_registration_payload
@@ -467,7 +467,7 @@ class CurrentProtocolAdapter:
                 creds.lid = lid
                 creds.platform = platform_node.attrs.get("name") if platform_node is not None else None
                 creds.account_identity_b64 = base64.b64encode(
-                    verified.signed_identity.details
+                    encode_signed_device_identity(verified.signed_identity, include_signature_key=True)
                 ).decode("ascii")
                 self._save(creds)
                 self.auth.put_json("runtime", "identity", {"jid": jid, "lid": lid, "platform": creds.platform})
