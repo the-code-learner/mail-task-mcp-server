@@ -16,6 +16,7 @@ on:
       - 'scripts/whatsapp_v990_controlled_interop.py'
       - '.github/workflows/whatsapp-v990-offline-validation.yml'
       - '.github/workflows/whatsapp-v990-controlled-interop.yml'
+      - '.github/workflows/stable-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -64,6 +65,7 @@ jobs:
           runtime = Path('src/postmaster/whatsapp_runtime_v990.py').read_text(encoding='utf-8')
           harness = Path('scripts/whatsapp_v990_controlled_interop.py').read_text(encoding='utf-8')
           workflow = Path('.github/workflows/whatsapp-v990-controlled-interop.yml').read_text(encoding='utf-8')
+          stable_release = Path('.github/workflows/stable-release.yml').read_text(encoding='utf-8')
 
           expected_false = (
               '"protocol_interop_verified": False',
@@ -96,6 +98,16 @@ jobs:
           )
           missing = [item for item in required_workflow_checks if item not in workflow]
           assert not missing, f'Controlled interop workflow lost release-critical gates: {missing}'
+
+          release_interlock = (
+              "version == '9.9.0'",
+              '"protocol_interop_verified": True',
+              '"signal_multidevice_verified": True',
+              '"controlled_account_interop_verified": True',
+              'Refusing stable v9.9.0 release',
+          )
+          missing = [item for item in release_interlock if item not in stable_release]
+          assert not missing, f'Stable-release WhatsApp interlock is incomplete: {missing}'
 
           print(
               'Offline validation passed; implementation can advance without an account, '
