@@ -16,7 +16,7 @@ from postmaster.whatsapp_v990.groups import (
     parse_group_metadata,
     parse_participating_groups,
 )
-from postmaster.whatsapp_v990.media import MediaUpload
+from postmaster.whatsapp_v990.media import MediaUpload, encode_media_message
 from postmaster.whatsapp_v990.messages import encode_text_message, pad_random_max16
 from postmaster.whatsapp_v990.sender_key import (
     EncryptedSenderKeyStore,
@@ -413,6 +413,93 @@ class WhatsAppGroupsV990Tests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stanza.child("enc").attrs["mediatype"], "document")
             self.assertTrue(adapter.status()["group_media_send_implemented"])
             self.assertFalse(adapter.status()["groups_ready"])
+
+    async def test_group_media_receive_downloads_and_saves_canonical_stored_file(self):
+        class ReceiveStore:
+            def __init__(self):
+                self.saved = []
+            def save_bytes(self, **kwargs):
+                self.saved.append(kwargs)
+                return {"id": "received-media-1", "filename": kwargs["filename"]}
+
+        with TemporaryDirectory() as td:
+            sender_auth = EncryptedAuthStore(str(Path(td) / "sender.db"))
+            receiver_auth = EncryptedAuthStore(str(Path(td) / "receiver.db"))
+            author = "222:1@s.whatsapp.net"
+            group = "12345@g.us"
+            upload = MediaUpload(
+                media_type="document",
+                url="https://mmg.example.com/file",
+                direct_path="/v/t62/file",
+                media_key=b"k" * 32,
+                file_sha256=b"s" * 32,
+                file_enc_sha256=b"e" * 32,
+                file_length=17,
+                mimetype="application/pdf",
+                filename="report.pdf",
+                caption="Inbound report",
+                media_key_timestamp=1700000000,
+            )
+            media_proto = encode_media_message(upload)
+
+            sender_keys = EncryptedSenderKeyStore(sender_auth)
+            distribution = sender_keys.distribution(group, author)
+            ciphertext = sender_keys.encrypt(
+                group,
+                author,
+                pad_random_max16(media_proto, random1=b"\x00"),
+            )
+            distribution_message = encode_sender_key_distribution_message(group, distribution)
+            stored = ReceiveStore()
+            captured = []
+            adapter = CurrentProtocolAdapter(
+                receiver_auth,
+                file_store=stored,
+                file_owner_id="davide",
+                file_project_id="postmaster-mcp",
+                on_message=lambda **kwargs: captured.append(kwargs),
+            )
+            identity = generate_curve_keypair()
+            creds = ProtocolCredentials(
+                noise=generate_curve_keypair(),
+                identity=identity,
+                signed_pre_key=generate_signed_pre_key(identity, 1),
+                registration_id=generate_registration_id(),
+                adv_secret_b64="AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=",
+                registered=True,
+                jid="111:7@s.whatsapp.net",
+            )
+            adapter._save(creds)
+
+            async def fake_pairwise(self, node, loaded_creds, *, e2e_type, ciphertext):
+                return distribution_message
+            adapter._decrypt_pairwise_message_proto = types.MethodType(fake_pairwise, adapter)  # type: ignore[method-assign]
+
+            stanza = BinaryNode(
+                "message",
+                {"from": group, "participant": author, "id": "group-media-1"},
+                [
+                    BinaryNode("enc", {"v": "2", "type": "msg"}, b"pairwise-skdm"),
+                    BinaryNode("enc", {"v": "2", "type": "skmsg"}, ciphertext),
+                ],
+            )
+            with patch(
+                "postmaster.whatsapp_v990.adapter.download_media",
+                new=AsyncMock(return_value=b"downloaded-payload"),
+            ):
+                await adapter._handle_incoming_message(stanza)
+
+            self.assertEqual(len(captured), 1)
+            self.assertEqual(captured[0]["jid"], group)
+            self.assertEqual(captured[0]["kind"], "media")
+            self.assertEqual(captured[0]["text"], "Inbound report")
+            self.assertEqual(captured[0]["stored_file_id"], "received-media-1")
+            self.assertEqual(stored.saved[0]["owner_id"], "davide")
+            self.assertEqual(stored.saved[0]["project_id"], "postmaster-mcp")
+            self.assertEqual(stored.saved[0]["filename"], "report.pdf")
+            self.assertEqual(stored.saved[0]["data"], b"downloaded-payload")
+            self.assertIn("whatsapp", stored.saved[0]["tags"])
+            self.assertTrue(adapter.status()["media_receive_to_stored_file_implemented"])
 
     async def test_group_receive_processes_pairwise_distribution_before_skmsg(self):
         with TemporaryDirectory() as td:
