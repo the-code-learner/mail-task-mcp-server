@@ -53,6 +53,28 @@ class JIDAndBinaryTests(unittest.TestCase):
             codec.decode(bytes(broken))
 
 
+class CurrentTokenTableTests(unittest.TestCase):
+    def test_pair_device_tokens_are_pinned_to_current_snapshot(self):
+        self.assertEqual(CURRENT_TOKEN_TABLE.version, 20260921)
+        self.assertEqual(CURRENT_TOKEN_TABLE.token_for("iq"), (None, 25))
+        self.assertEqual(CURRENT_TOKEN_TABLE.token_for("pair-device"), (1, 238))
+        self.assertEqual(CURRENT_TOKEN_TABLE.token_for("ref"), (1, 80))
+
+    def test_fb_and_interop_jid_wire_tags_decode(self):
+        codec = BinaryNodeCodec(CURRENT_TOKEN_TABLE)
+        # FB_JID: user string, 16-bit device, server string.
+        fb = bytes([246, 252, 3]) + b"123" + bytes([0, 7, 3])
+        value, pos = codec._read_string(fb, 1, first=246)
+        self.assertEqual(value, "123:7@s.whatsapp.net")
+        self.assertEqual(pos, len(fb))
+
+        # INTEROP_JID: user string, 16-bit device, 16-bit integrator, optional server.
+        interop = bytes([245, 252, 3]) + b"456" + bytes([0, 2, 0, 9, 3])
+        value, pos = codec._read_string(interop, 1, first=245)
+        self.assertEqual(value, "9-456:2@s.whatsapp.net")
+        self.assertEqual(pos, len(interop))
+
+
 class ProtoTests(unittest.TestCase):
     def test_minimal_wire_codec_roundtrip(self):
         nested = field_varint(1, 7) + field_bytes(2, "desktop")
@@ -132,6 +154,7 @@ from postmaster.whatsapp_v990.handshake import (
 )
 from postmaster.whatsapp_v990.pairing import PAIRING_QR_PREFIX, PairingQR, build_pairing_qr_data, companion_web_client_type
 from postmaster.whatsapp_v990.websocket_driver import WebSocketDriverConfig, WebSocketDriverError, open_whatsapp_websocket
+from postmaster.whatsapp_v990.tokens import CURRENT_TOKEN_TABLE
 
 
 class HandshakeAndPairingTests(unittest.IsolatedAsyncioTestCase):
