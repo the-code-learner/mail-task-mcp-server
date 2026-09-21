@@ -30,6 +30,8 @@ from .groups import (
 from .jid import parse_jid, same_user, transfer_device
 from .media import (
     build_media_conn_query,
+    decode_media_descriptor,
+    download_media,
     encode_media_message,
     infer_media_type,
     parse_media_conn,
@@ -727,6 +729,62 @@ class CurrentProtocolAdapter:
             )
         return unpad_random_max16(plaintext)
 
+    async def _materialize_incoming_content(
+        self,
+        message_proto: bytes,
+        *,
+        message_id: str | None,
+    ) -> tuple[str, str, str | None]:
+        text = decode_text_message(message_proto)
+        if text is not None:
+            return "text", text, None
+
+        descriptor = decode_media_descriptor(message_proto)
+        if descriptor is None:
+            return "unknown", "", None
+        if self.file_store is None:
+            raise CurrentProtocolAdapterError(
+                "Postmaster Stored File store is not configured for incoming WhatsApp media"
+            )
+
+        payload = await download_media(descriptor)
+        suffix = {
+            "image": ".jpg",
+            "video": ".mp4",
+            "audio": ".ogg",
+            "document": ".bin",
+            "sticker": ".webp",
+        }.get(descriptor.media_type, ".bin")
+        raw_name = str(descriptor.filename or "").replace("\\", "/").split("/")[-1].strip()
+        if (
+            not raw_name
+            or raw_name in {".", ".."}
+            or "\x00" in raw_name
+            or len(raw_name) > 200
+        ):
+            token = str(message_id or secrets.token_hex(8)).replace("/", "_")[:80]
+            raw_name = f"whatsapp-{token}{suffix}"
+        try:
+            info = self.file_store.save_bytes(
+                owner_id=self.file_owner_id,
+                project_id=self.file_project_id,
+                filename=raw_name,
+                data=payload,
+                media_type=descriptor.mimetype,
+                description="Inbound WhatsApp media",
+                tags=["whatsapp", "inbound"],
+            )
+        except Exception as exc:
+            raise CurrentProtocolAdapterError(
+                f"Unable to save inbound WhatsApp media as Stored File: {exc}"
+            ) from exc
+        file_id = str(info.get("id") or "").strip()
+        if not file_id:
+            raise CurrentProtocolAdapterError(
+                "Stored File save returned no file id for inbound WhatsApp media"
+            )
+        return "media", str(descriptor.caption or ""), file_id
+
     async def _handle_incoming_group_message(
         self,
         node: BinaryNode,
@@ -741,7 +799,9 @@ class CurrentProtocolAdapter:
         author_jid = self._incoming_decryption_jid(node)
         sender_keys = EncryptedSenderKeyStore(self.auth)
 
-        text: str | None = None
+        kind = "unknown"
+        text = ""
+        stored_file_id: str | None = None
         saw_group_ciphertext = False
         for enc in node.children("enc"):
             if not isinstance(enc.content, (bytes, bytearray, memoryview)):
@@ -768,16 +828,18 @@ class CurrentProtocolAdapter:
                         distribution_wire,
                     )
                 else:
-                    candidate = decode_text_message(message_proto)
-                    if candidate is not None:
-                        text = candidate
+                    kind, text, stored_file_id = await self._materialize_incoming_content(
+                        message_proto,
+                        message_id=str(node.attrs.get("id") or "") or None,
+                    )
                 continue
             if e2e_type == "skmsg":
                 plaintext = sender_keys.decrypt(group_id, author_jid, ciphertext)
                 message_proto = unpad_random_max16(plaintext)
-                candidate = decode_text_message(message_proto)
-                if candidate is not None:
-                    text = candidate
+                kind, text, stored_file_id = await self._materialize_incoming_content(
+                    message_proto,
+                    message_id=str(node.attrs.get("id") or "") or None,
+                )
                 saw_group_ciphertext = True
                 continue
             raise CurrentProtocolAdapterError(
@@ -800,9 +862,9 @@ class CurrentProtocolAdapter:
             message_id=str(node.attrs.get("id") or "") or None,
             jid=group_id,
             direction=direction,
-            kind="text" if text is not None else "unknown",
-            text=text or "",
-            stored_file_id=None,
+            kind=kind,
+            text=text,
+            stored_file_id=stored_file_id,
             reply_to_message_id=None,
         )
 
@@ -833,7 +895,10 @@ class CurrentProtocolAdapter:
             e2e_type=e2e_type,
             ciphertext=ciphertext,
         )
-        text = decode_text_message(message_proto)
+        kind, text, stored_file_id = await self._materialize_incoming_content(
+            message_proto,
+            message_id=str(node.attrs.get("id") or "") or None,
+        )
         direction = "out" if same_user(sender, creds.jid) or (creds.lid and same_user(sender, creds.lid)) else "in"
         if direction == "out" and node.attrs.get("recipient"):
             conversation = str(parse_jid(str(node.attrs["recipient"])).normalized_user())
@@ -844,9 +909,9 @@ class CurrentProtocolAdapter:
             message_id=str(node.attrs.get("id") or "") or None,
             jid=conversation,
             direction=direction,
-            kind="text" if text is not None else "unknown",
-            text=text or "",
-            stored_file_id=None,
+            kind=kind,
+            text=text,
+            stored_file_id=stored_file_id,
             reply_to_message_id=None,
         )
 
@@ -1486,6 +1551,7 @@ class CurrentProtocolAdapter:
             "group_text_send_implemented": True,
             "group_text_receive_implemented": True,
             "group_media_send_implemented": True,
+            "media_receive_to_stored_file_implemented": True,
             "groups_ready": False,
             "last_error": self._last_error,
         }
