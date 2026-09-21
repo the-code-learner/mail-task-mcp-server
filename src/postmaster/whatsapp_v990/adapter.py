@@ -22,10 +22,28 @@ from .client_payload import RegistrationKeys, build_login_payload, build_registr
 from .crypto import CurveKeyPair, WhatsAppNoiseXX, frame_noise_payload, generate_curve_keypair, split_noise_frames
 from .handshake import decode_handshake, encode_client_finish, encode_client_hello
 from .jid import parse_jid
+from .messages import (
+    build_direct_message_stanza,
+    build_read_receipt,
+    encode_device_sent_message,
+    encode_reply_text_message,
+    encode_text_message,
+    encrypted_participant_node,
+    generate_message_id_v2,
+    participant_hash_v2,
+)
 from .pairing import build_pairing_qr_data
 from .signal_keys import SignedPreKey, generate_registration_id, generate_signed_pre_key
-from .signal_server import build_prekey_count_query, build_prekey_upload, parse_prekey_count
+from .signal_server import (
+    build_prekey_count_query,
+    build_prekey_upload,
+    build_session_query,
+    parse_prekey_count,
+    parse_session_bundles,
+)
+from .signal_session import EncryptedSignalSessionStore, initialize_outgoing_session
 from .store import EncryptedAuthStore
+from .usync import build_device_query, parse_device_result
 from .tokens import CURRENT_TOKEN_TABLE
 from .websocket_driver import WebSocketDriverConfig, open_whatsapp_websocket
 
@@ -518,8 +536,203 @@ class CurrentProtocolAdapter:
         await self._stop_tasks()
         raise CurrentProtocolAdapterError("WhatsApp login did not reach success state")
 
-    async def send_text(self, **kwargs) -> Mapping[str, Any]:
-        raise CurrentProtocolAdapterError("WhatsApp Signal multi-device send layer is not acceptance-complete")
+    def _require_live_session(self) -> tuple[WhatsAppWireSession, ProtocolCredentials]:
+        creds = self._load()
+        if creds is None or not creds.registered or not creds.jid:
+            raise CurrentProtocolAdapterError("No paired WhatsApp session is stored")
+        if not self._connected or self.session is None or self.session.closed:
+            raise CurrentProtocolAdapterError("WhatsApp companion session is not connected; reconnect explicitly first")
+        return self.session, creds
+
+    async def _ensure_signal_sessions(
+        self,
+        wire: WhatsAppWireSession,
+        creds: ProtocolCredentials,
+        addresses: list[str],
+    ) -> EncryptedSignalSessionStore:
+        store = EncryptedSignalSessionStore(self.auth)
+        missing = [address for address in dict.fromkeys(addresses) if store.load(address) is None]
+        if not missing:
+            return store
+        response = await wire.query(build_session_query(missing), timeout=30)
+        bundles = parse_session_bundles(response)
+        for address in missing:
+            bundle = bundles.get(address)
+            if bundle is None:
+                # Servers should echo the requested device JID exactly. Keep a conservative
+                # normalized fallback for equivalent textual encodings only.
+                target = str(parse_jid(address))
+                bundle = next(
+                    (value for key, value in bundles.items() if str(parse_jid(key)) == target),
+                    None,
+                )
+            if bundle is None:
+                raise CurrentProtocolAdapterError(f"WhatsApp returned no Signal pre-key bundle for {address}")
+            signal = initialize_outgoing_session(
+                our_identity=creds.identity,
+                bundle=bundle,
+                our_registration_id=creds.registration_id,
+            )
+            store.save(address, signal)
+        return store
+
+    async def _wait_message_ack(
+        self,
+        wire: WhatsAppWireSession,
+        message_id: str,
+        *,
+        timeout: float = 30.0,
+    ) -> BinaryNode:
+        deferred: list[BinaryNode] = []
+        try:
+            async with asyncio.timeout(timeout):
+                while True:
+                    node = await wire.recv_node(timeout=timeout)
+                    if node.tag == "ack" and node.attrs.get("id") == message_id:
+                        if node.attrs.get("error") not in (None, "", "0"):
+                            raise CurrentProtocolAdapterError(
+                                f"WhatsApp rejected message {message_id} with error {node.attrs.get('error')}"
+                            )
+                        return node
+                    if node.tag in {"failure", "stream:error"}:
+                        raise CurrentProtocolAdapterError(f"WhatsApp send failed with {node.tag}")
+                    deferred.append(node)
+        finally:
+            if deferred:
+                wire.nodes = deferred + wire.nodes
+
+    async def send_text(
+        self,
+        *,
+        jid: str,
+        text: str,
+        reply_to_message_id: str | None = None,
+        emit_read_receipt: bool = False,
+    ) -> Mapping[str, Any]:
+        """Send a direct 1:1 text through current USync + Signal multi-device fan-out.
+
+        Group sender-key distribution is deliberately separate and remains fail-closed.
+        """
+        wire, creds = self._require_live_session()
+        destination = parse_jid(jid).normalized_user()
+        if destination.is_group:
+            raise CurrentProtocolAdapterError("WhatsApp group send is not acceptance-complete")
+        if destination.is_broadcast or destination.is_newsletter:
+            raise CurrentProtocolAdapterError("WhatsApp broadcast/newsletter send is not supported by this v9.9 direct-send path")
+        value = str(text)
+        if not value:
+            raise CurrentProtocolAdapterError("WhatsApp text cannot be empty")
+
+        own_pn = parse_jid(creds.jid)
+        own_lid = parse_jid(creds.lid) if creds.lid else None
+        sender_identity = own_lid.normalized_user() if destination.is_lid and own_lid is not None else own_pn.normalized_user()
+        usync = await wire.query(
+            build_device_query([str(sender_identity), str(destination)], context="message"),
+            timeout=30,
+        )
+        discovered = parse_device_result(
+            usync,
+            own_jid=creds.lid if destination.is_lid and creds.lid else creds.jid,
+            prefer_lid=True,
+        )
+
+        own_users = {own_pn.user}
+        if own_lid is not None:
+            own_users.add(own_lid.user)
+        own_device = int(own_pn.device or 0)
+        targets = []
+        for target in discovered:
+            parsed = parse_jid(target.jid)
+            # LID migration can change the user part, so parse_device_result's own_jid filter
+            # alone cannot always recognize the current companion. Exclude it explicitly.
+            if parsed.user in own_users and int(parsed.device or 0) == own_device:
+                continue
+            targets.append(target)
+        if not targets:
+            raise CurrentProtocolAdapterError("WhatsApp USync returned no target devices for direct send")
+
+        target_jids = [target.jid for target in targets]
+        sessions = await self._ensure_signal_sessions(wire, creds, target_jids)
+        message_id = generate_message_id_v2(creds.jid)
+        if reply_to_message_id:
+            plain = encode_reply_text_message(
+                value,
+                stanza_id=str(reply_to_message_id),
+                participant=str(destination),
+                remote_jid=str(destination),
+            )
+        else:
+            plain = encode_text_message(value)
+        phash = participant_hash_v2(target_jids)
+        dsm = encode_device_sent_message(str(destination), plain, phash=phash)
+
+        participants: list[BinaryNode] = []
+        include_device_identity = False
+        own_count = 0
+        remote_count = 0
+        for target in targets:
+            target_jid = target.jid
+            target_user = parse_jid(target_jid).user
+            is_own = target_user in own_users
+            signal = sessions.load(target_jid)
+            if signal is None:
+                raise CurrentProtocolAdapterError(f"Signal session disappeared for {target_jid}")
+            ciphertext_type, ciphertext = signal.encrypt(dsm if is_own else plain)
+            sessions.save(target_jid, signal)
+            participants.append(
+                encrypted_participant_node(
+                    target_jid,
+                    ciphertext_type=ciphertext_type,
+                    ciphertext=ciphertext,
+                )
+            )
+            include_device_identity = include_device_identity or ciphertext_type == "pkmsg"
+            if is_own:
+                own_count += 1
+            else:
+                remote_count += 1
+
+        device_identity: bytes | None = None
+        if include_device_identity:
+            if not creds.account_identity_b64:
+                raise CurrentProtocolAdapterError("Paired WhatsApp credentials have no signed device identity")
+            try:
+                device_identity = base64.b64decode(creds.account_identity_b64, validate=True)
+            except Exception as exc:
+                raise CurrentProtocolAdapterError("Stored WhatsApp signed device identity is corrupt") from exc
+
+        stanza = build_direct_message_stanza(
+            destination_jid=str(destination),
+            message_id=message_id,
+            participants=participants,
+            device_identity=device_identity,
+            message_type="text",
+        )
+        await wire.send_node(stanza)
+        ack = await self._wait_message_ack(wire, message_id, timeout=30)
+
+        receipt_emitted = False
+        if emit_read_receipt and reply_to_message_id:
+            await wire.send_node(
+                build_read_receipt(
+                    destination_jid=str(destination),
+                    message_id=str(reply_to_message_id),
+                )
+            )
+            receipt_emitted = True
+
+        return {
+            "ok": True,
+            "message_id": message_id,
+            "to": str(destination),
+            "server_ack": True,
+            "ack_class": ack.attrs.get("class"),
+            "device_fanout": len(participants),
+            "own_device_targets": own_count,
+            "remote_device_targets": remote_count,
+            "used_prekey_message": include_device_identity,
+            "read_receipt_emitted": receipt_emitted,
+        }
 
     async def send_media(self, **kwargs) -> Mapping[str, Any]:
         raise CurrentProtocolAdapterError("WhatsApp media send layer is not acceptance-complete")
@@ -536,7 +749,7 @@ class CurrentProtocolAdapter:
             "paired": bool(creds and creds.registered and creds.jid),
             "pairing_pending": bool(pairing.get("qr")),
             "native_websocket": True,
-            "signal_send_ready": False,
+            "signal_send_ready": True,
             "media_ready": False,
             "groups_ready": False,
             "last_error": self._last_error,
