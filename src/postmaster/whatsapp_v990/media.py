@@ -308,6 +308,13 @@ def decode_media_descriptor(message: bytes) -> MediaDescriptor | None:
             selected = (kind, nested)
             break
     if selected is None:
+        # WAProto.Message.deviceSentMessage = field 31; DeviceSentMessage.message = field 2.
+        wrapper = _bytes(outer, 31)
+        if wrapper is not None:
+            wrapped = _field_map(wrapper)
+            nested_message = _bytes(wrapped, 2)
+            if nested_message is not None:
+                return decode_media_descriptor(nested_message)
         return None
     kind, nested = selected
     values = _field_map(nested)
