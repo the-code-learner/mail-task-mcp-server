@@ -3,7 +3,9 @@ from __future__ import annotations
 import unittest
 
 from postmaster.whatsapp_v990.messages import (
+    build_ack_stanza,
     build_direct_message_stanza,
+    decode_text_message,
     encode_device_sent_message,
     encode_text_message,
     encrypted_participant_node,
@@ -58,6 +60,30 @@ class WhatsAppMessagesV990Tests(unittest.TestCase):
         self.assertEqual(inner[1].value,msg)
         self.assertEqual(inner[2].number,3)
         self.assertEqual(inner[2].value,b"2:ABCDEF")
+
+    def test_text_decoder_handles_conversation_extended_and_device_sent(self):
+        plain=encode_text_message("hello")
+        self.assertEqual(decode_text_message(plain),"hello")
+        extended=encode_reply_text_message(
+            "reply",stanza_id="m1",participant="123@s.whatsapp.net",remote_jid="123@s.whatsapp.net"
+        )
+        self.assertEqual(decode_text_message(extended),"reply")
+        dsm=encode_device_sent_message("123@s.whatsapp.net",plain,phash="2:ABCDEF")
+        self.assertEqual(decode_text_message(dsm),"hello")
+
+    def test_transport_ack_is_not_read_receipt(self):
+        incoming=BinaryNode(
+            "message",
+            {"id":"m1","from":"123:2@lid","type":"text","participant":"123:2@lid"},
+        )
+        ack=build_ack_stanza(incoming,me_id="999:4@s.whatsapp.net")
+        self.assertEqual(ack.tag,"ack")
+        self.assertEqual(ack.attrs["id"],"m1")
+        self.assertEqual(ack.attrs["to"],"123:2@lid")
+        self.assertEqual(ack.attrs["class"],"message")
+        self.assertEqual(ack.attrs["from"],"999:4@s.whatsapp.net")
+        self.assertEqual(ack.attrs["type"],"text")
+        self.assertNotEqual(ack.attrs.get("type"),"read")
 
     def test_direct_stanza_participants_and_device_identity(self):
         p1=encrypted_participant_node("123@s.whatsapp.net",ciphertext_type="pkmsg",ciphertext=b"a")
