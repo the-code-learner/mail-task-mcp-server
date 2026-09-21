@@ -359,10 +359,36 @@ def install_runtime_v990(
     tracking_approval_db: str | None = None,
     email_search_db: str | None = None,
 ) -> dict[str, Any]:
-    """Install v9.9 email/calendar policy and search overlays; WhatsApp installs separately."""
-    approval_store = TrackingApprovalStore(tracking_approval_db or "/data/tracking-approvals-v990.db")
-    embed_one, model_id = _semantic_embedder(base)
-    email_index = HybridEmailIndex(email_search_db or "/data/email-search-v990.db", embed_one=embed_one, model_id=model_id)
+    """Install v9.9 email/calendar policy and search overlays; WhatsApp installs separately.
+
+    Persistent v9.9 stores are initialized lazily so importing the composed runtime remains
+    side-effect free in validation/test environments that intentionally do not mount /data.
+    Production still uses the persistent /data paths on first explicit feature use.
+    """
+    approval_store_obj: TrackingApprovalStore | None = None
+    email_index_obj: HybridEmailIndex | None = None
+    embed_one: Callable[[str], Sequence[float]] | None = None
+    model_id = "lexical-only"
+    semantic_resolved = False
+
+    def get_approval_store() -> TrackingApprovalStore:
+        nonlocal approval_store_obj
+        if approval_store_obj is None:
+            approval_store_obj = TrackingApprovalStore(tracking_approval_db or "/data/tracking-approvals-v990.db")
+        return approval_store_obj
+
+    def get_email_index() -> HybridEmailIndex:
+        nonlocal email_index_obj, embed_one, model_id, semantic_resolved
+        if email_index_obj is None:
+            if not semantic_resolved:
+                embed_one, model_id = _semantic_embedder(base)
+                semantic_resolved = True
+            email_index_obj = HybridEmailIndex(
+                email_search_db or "/data/email-search-v990.db",
+                embed_one=embed_one,
+                model_id=model_id,
+            )
+        return email_index_obj
 
     old_send = core.send_email
     old_reply = core.reply_email
@@ -421,7 +447,7 @@ def install_runtime_v990(
             "send_email", account_id=aid, to=to, subject=subject, body=body, body_html=body_html, body_amp=body_amp,
             cc=cc, bcc=bcc, attachments=attachments, campaign_id=campaign_id, idempotency_key=idempotency_key, extras=extras,
         )
-        blocked = _guard_tracking_off(approval_store, operation="send_email", intent=intent, effective=eff, approval_id=tracking_disable_approval_id)
+        blocked = _guard_tracking_off(get_approval_store(), operation="send_email", intent=intent, effective=eff, approval_id=tracking_disable_approval_id)
         if blocked:
             return blocked
         return old_send(
@@ -454,7 +480,7 @@ def install_runtime_v990(
             operation, account_id=aid, mailbox=mailbox, uid=uid, body=body, body_html=body_html, cc=cc, bcc=bcc,
             attachments=attachments, campaign_id=campaign_id, idempotency_key=idempotency_key, extras=extras,
         )
-        blocked = _guard_tracking_off(approval_store, operation=operation, intent=intent, effective=eff, approval_id=tracking_disable_approval_id)
+        blocked = _guard_tracking_off(get_approval_store(), operation=operation, intent=intent, effective=eff, approval_id=tracking_disable_approval_id)
         if blocked:
             return blocked
         return delegate(
@@ -606,7 +632,7 @@ def install_runtime_v990(
     def email_search_status(account_id: str | None = None):
         """Read-only. Return v9.9 email lexical/semantic index status for one account."""
         aid = _account_id(base, account_id)
-        result = email_index.status()
+        result = get_email_index().status()
         result.update({"account_id": aid, "imap_on_demand_enrichment": True, "external_remote_resource_fetch": False, "attachment_text": True})
         return result
 
@@ -620,9 +646,9 @@ def install_runtime_v990(
         aid = _account_id(base, account_id)
         enrichment = {"indexed": 0, "discovered": 0, "failures": [], "network_scope": "none"}
         if enrich_imap:
-            enrichment = _enrich_email_index(base=base, core=core, index=email_index, query=query, account_id=aid,
+            enrichment = _enrich_email_index(base=base, core=core, index=get_email_index(), query=query, account_id=aid,
                                               mailbox=mailbox, since_days=since_days, enrich_limit=enrich_limit)
-        result = email_index.search(query, account_id=aid, mailbox=mailbox, since_days=since_days, limit=limit)
+        result = get_email_index().search(query, account_id=aid, mailbox=mailbox, since_days=since_days, limit=limit)
         result["enrichment"] = enrichment
         result["external_remote_resource_fetch"] = False
         return result
@@ -699,7 +725,7 @@ def install_runtime_v990(
             "subject_ascii_preferred": True,
             "stored_file_link_preferred_over_attachment": True,
             "calendar_invites": {"task_registry_passive": True, "explicit_send_only": True, "inbound_mime_local_analysis": True, "automatic_rsvp": False},
-            "email_hybrid_search": {"fts5": True, "semantic": embed_one is not None, "attachments": True, "imap_on_demand": True, "external_resource_fetch": False},
+            "email_hybrid_search": {"fts5": True, "semantic": bool(embed_one) if semantic_resolved else False, "semantic_lazy": True, "attachments": True, "imap_on_demand": True, "external_resource_fetch": False},
         })
         return status
 
@@ -728,11 +754,13 @@ def install_runtime_v990(
         setattr(core, name, fn)
         setattr(base, name, fn)
 
-    base.tracking_approval_store_v990 = lambda: approval_store
-    base.email_search_index_v990 = lambda: email_index
+    base.tracking_approval_store_v990 = get_approval_store
+    base.email_search_index_v990 = get_email_index
     return {
-        "approval_store": approval_store,
-        "email_index": email_index,
+        "approval_store": approval_store_obj,
+        "email_index": email_index_obj,
+        "approval_store_factory": get_approval_store,
+        "email_index_factory": get_email_index,
         "runtime_status": runtime_status,
         "mcp_command_count_expected": MCP_COMMAND_COUNT_V990,
     }
