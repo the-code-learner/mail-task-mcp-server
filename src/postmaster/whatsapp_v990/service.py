@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextlib import closing
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import sqlite3
 import threading
@@ -108,7 +109,17 @@ class WhatsAppService:
     adapter: WhatsAppAdapter
 
     @classmethod
-    def create(cls, *, auth_db: str, event_db: str, key_path: str | None = None, adapter: WhatsAppAdapter | None = None) -> "WhatsAppService":
+    def create(
+        cls,
+        *,
+        auth_db: str,
+        event_db: str,
+        key_path: str | None = None,
+        adapter: WhatsAppAdapter | None = None,
+        file_store: Any | None = None,
+        file_owner_id: str | None = None,
+        file_project_id: str | None = None,
+    ) -> "WhatsAppService":
         auth = EncryptedAuthStore(auth_db, key_path=key_path)
         events = WhatsAppEventStore(event_db)
         if adapter is None:
@@ -120,6 +131,9 @@ class WhatsAppService:
                 auth,
                 on_message=lambda **kwargs: events.record_message(**kwargs),
                 on_receipt=lambda **kwargs: events.record_receipt(**kwargs),
+                file_store=file_store,
+                file_owner_id=file_owner_id or os.getenv("DEFAULT_OWNER_ID", "default"),
+                file_project_id=file_project_id,
             )
         return cls(auth, events, adapter)
 
