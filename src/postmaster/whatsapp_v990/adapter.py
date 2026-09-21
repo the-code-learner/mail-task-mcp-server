@@ -24,6 +24,7 @@ from .handshake import decode_handshake, encode_client_finish, encode_client_hel
 from .jid import parse_jid
 from .pairing import build_pairing_qr_data
 from .signal_keys import SignedPreKey, generate_registration_id, generate_signed_pre_key
+from .signal_server import build_prekey_count_query, build_prekey_upload, parse_prekey_count
 from .store import EncryptedAuthStore
 from .tokens import CURRENT_TOKEN_TABLE
 from .websocket_driver import WebSocketDriverConfig, open_whatsapp_websocket
@@ -45,6 +46,8 @@ class ProtocolCredentials:
     lid: str | None = None
     platform: str | None = None
     account_identity_b64: str | None = None
+    next_pre_key_id: int = 1
+    first_unuploaded_pre_key_id: int = 1
 
     def to_json(self) -> dict[str, Any]:
         def b64(value: bytes) -> str:
@@ -65,6 +68,8 @@ class ProtocolCredentials:
             "lid": self.lid,
             "platform": self.platform,
             "account_identity_b64": self.account_identity_b64,
+            "next_pre_key_id": self.next_pre_key_id,
+            "first_unuploaded_pre_key_id": self.first_unuploaded_pre_key_id,
         }
 
     @classmethod
@@ -89,6 +94,8 @@ class ProtocolCredentials:
             lid=str(value.get("lid")) if value.get("lid") else None,
             platform=str(value.get("platform")) if value.get("platform") else None,
             account_identity_b64=str(value.get("account_identity_b64")) if value.get("account_identity_b64") else None,
+            next_pre_key_id=int(value.get("next_pre_key_id", 1)),
+            first_unuploaded_pre_key_id=int(value.get("first_unuploaded_pre_key_id", 1)),
         )
 
 
@@ -230,6 +237,65 @@ class CurrentProtocolAdapter:
 
     def _save(self, creds: ProtocolCredentials) -> None:
         self.auth.put_json("protocol", "credentials", creds.to_json())
+
+    def _store_pre_key(self, key_id: int, pair: CurveKeyPair) -> None:
+        self.auth.put_json("signal-pre-key", str(int(key_id)), {
+            "private": base64.b64encode(pair.private).decode("ascii"),
+            "public": base64.b64encode(pair.public).decode("ascii"),
+        })
+
+    def _load_pre_key(self, key_id: int) -> CurveKeyPair | None:
+        value = self.auth.get_json("signal-pre-key", str(int(key_id)))
+        if not value:
+            return None
+        try:
+            private = base64.b64decode(str(value["private"]), validate=True)
+            public = base64.b64decode(str(value["public"]), validate=True)
+        except Exception as exc:
+            raise CurrentProtocolAdapterError("Stored Signal pre-key is corrupt") from exc
+        if len(private) != 32 or len(public) != 32:
+            raise CurrentProtocolAdapterError("Stored Signal pre-key has invalid length")
+        return CurveKeyPair(private, public)
+
+    def _pending_pre_keys(self, creds: ProtocolCredentials, count: int) -> dict[int, CurveKeyPair]:
+        start = int(creds.first_unuploaded_pre_key_id)
+        target = start + int(count)
+        while creds.next_pre_key_id < target:
+            key_id = int(creds.next_pre_key_id)
+            self._store_pre_key(key_id, generate_curve_keypair())
+            creds.next_pre_key_id = key_id + 1
+            self._save(creds)
+        result: dict[int, CurveKeyPair] = {}
+        for key_id in range(start, target):
+            pair = self._load_pre_key(key_id)
+            if pair is None:
+                pair = generate_curve_keypair()
+                self._store_pre_key(key_id, pair)
+            result[key_id] = pair
+        return result
+
+    async def _ensure_server_pre_keys(self, session: WhatsAppWireSession, creds: ProtocolCredentials) -> int:
+        count_response = await session.query(build_prekey_count_query(), timeout=30)
+        server_count = parse_prekey_count(count_response)
+        upload_count = 812 if server_count == 0 else (5 if server_count <= 5 else 0)
+        if upload_count == 0:
+            return server_count
+        start = int(creds.first_unuploaded_pre_key_id)
+        keys = self._pending_pre_keys(creds, upload_count)
+        response = await session.query(
+            build_prekey_upload(
+                registration_id=creds.registration_id,
+                identity_public=creds.identity.public,
+                signed_pre_key=creds.signed_pre_key,
+                pre_keys=keys,
+            ),
+            timeout=60,
+        )
+        if response.attrs.get("type") == "error" or response.child("error") is not None:
+            raise CurrentProtocolAdapterError("WhatsApp rejected Signal pre-key upload")
+        creds.first_unuploaded_pre_key_id = start + upload_count
+        self._save(creds)
+        return server_count + upload_count
 
     async def _stop_tasks(self) -> None:
         current = asyncio.current_task()
@@ -442,9 +508,10 @@ class CurrentProtocolAdapter:
         for _ in range(32):
             node = await session.recv_node(timeout=20)
             if node.tag == "success":
+                pre_key_count = await self._ensure_server_pre_keys(session, creds)
                 self._connected = True
                 self._keepalive_task = asyncio.create_task(self._keepalive(session))
-                return {"ok": True, "connected": True, "paired": True}
+                return {"ok": True, "connected": True, "paired": True, "server_pre_key_count": pre_key_count}
             if node.tag in {"failure", "stream:error"}:
                 await self._stop_tasks()
                 raise CurrentProtocolAdapterError(f"WhatsApp login failed with {node.tag}")
