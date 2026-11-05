@@ -1,22 +1,22 @@
-# Generic tracked links (v9.8.2)
+# Generic tracked links (v9.8.3)
 
-Postmaster v9.8.2 exposes its existing click-redirect capability as a generic MCP resource, independent from email delivery.
+Postmaster v9.8.2 exposed click redirects as generic MCP resources. v9.8.3 extends the same surface so a generic tracked link may target either an HTTP/HTTPS destination or an existing private Postmaster Stored File `file_id`, independent from email delivery.
 
-A generic tracked link stores an HTTP/HTTPS destination on the Postmaster server and returns a complete opaque public URL under the existing callback family:
+Both target types return a complete opaque public URL under the existing callback family:
 
 ```text
 https://<PUBLIC_POSTMASTER_HOST>/t/c/glnk_<opaque-random-token>
 ```
 
-When that URL is opened, Postmaster records a click event and issues a `302` redirect to the destination stored server-side.
+For an HTTP/HTTPS target, Postmaster records a click event and issues a `302` redirect to the server-side destination. For a Stored File target, Postmaster records the click and serves the canonical local file bytes directly with no intermediate redirect.
 
-The destination is never accepted from the public request/query string, so the public callback cannot be turned into a query-controlled open redirect.
+Neither the web destination nor the private `file_id` is accepted from the public request/query string. Public tokens are opaque capabilities resolved only from server-side persistence.
 
 ## Why this is separate from email tracking
 
 Existing email click tracking is delivery/campaign/recipient aware and remains unchanged.
 
-v9.8.2 adds separate additive tables for generic links instead of manufacturing synthetic email campaigns or deliveries:
+v9.8.2 added separate additive tables for generic links instead of manufacturing synthetic email campaigns or deliveries. v9.8.3 extends the same generic link table with additive target/file-incarnation columns:
 
 - `generic_tracking_links`
 - `generic_tracking_clicks`
@@ -27,7 +27,7 @@ Existing email and Stored File tracking tokens continue through the historical r
 
 ## MCP tools
 
-v9.8.2 adds five MCP commands.
+v9.8.2 introduced five generic-link MCP commands. v9.8.3 adds one more command for Stored File targets.
 
 ### create_tracked_link
 
@@ -58,6 +58,38 @@ The response intentionally includes the complete `tracked_url`. This is differen
 
 The MCP client or LLM may then use the returned tracked URL in any user-authorized context: chat, a document, a social post, a QR payload, a message sent through another service, or another workflow.
 
+### create_tracked_file_link
+
+Creates a reusable tracked direct-download URL from an existing private Postmaster Stored File.
+
+Required:
+
+- `owner_id`
+- `file_id`: exact FileStore identifier
+- `label`: human/agent-readable purpose
+
+Optional:
+
+- `project_id`: project context; a project-local file or owner-global file is allowed, but a file from another project is rejected
+- `idempotency_key`: stable retry key for the exact create intent
+
+Example intent:
+
+```text
+owner_id: davide
+project_id: postmaster-mcp
+file_id: <stored-file-id>
+label: Product brochure
+idempotency_key: brochure-link-v1
+```
+
+The response returns `target_type="stored_file"`, authenticated metadata such as `file_id`, filename/media type/size, and the complete opaque `tracked_url`.
+
+The public URL itself contains no `file_id`. Internally the record is bound to the exact current `file_id + SHA-256 + created_at` incarnation. At click time Postmaster verifies that exact incarnation, then serves canonical FileStore bytes directly. If the file is deleted or the same `file_id` is recreated later, the old tracked URL fails closed with `404`.
+
+This deliberately mirrors the anti-resurrection and terminal-download semantics of tracked Stored File links already used in email, without manufacturing an email campaign/delivery.
+
+
 ### list_tracked_links
 
 Lists generic tracked links inside an owner/project scope and returns each complete `tracked_url` plus aggregate click counters.
@@ -75,7 +107,8 @@ Omitting `project_id` provides an owner-wide view after the existing owner autho
 
 Returns one scoped generic tracked link, including:
 
-- label and destination;
+- label and target type;
+- HTTP/HTTPS destination for URL targets, or authenticated file ID/filename/media type/size for Stored File targets;
 - complete tracked URL;
 - status;
 - total click count;
@@ -108,9 +141,9 @@ Links are always owner-scoped and can additionally be project-scoped. The MCP la
 
 ## Idempotency
 
-A non-empty `idempotency_key` is bound to the exact owner/project + destination + label intent.
+A non-empty `idempotency_key` is bound to the exact owner/project + target + label intent. For Stored Files the exact target includes the original file incarnation, not only the textual `file_id`.
 
-Retrying the same intent returns the existing tracked link. Reusing the same key with a different destination or label fails closed.
+Retrying the same intent returns the existing tracked link. Reusing the same key with a different destination, file incarnation or label fails closed.
 
 ## Privacy and click identity
 
@@ -128,7 +161,7 @@ As with email analytics, a click event proves that the tracked URL was requested
 
 ## Public callback / Cloudflare Access
 
-v9.8.2 introduces **no new anonymous route**.
+v9.8.3 introduces **no new anonymous route**.
 
 Generic links use the same existing callback family:
 
@@ -146,7 +179,9 @@ Keep the rest of Postmaster protected. In particular, do not expose `/mcp`, the 
 
 - Tokens are random and opaque.
 - Generic tokens use the dedicated `glnk_` prefix so legacy callback types remain unambiguous.
-- The public request cannot supply or override the redirect destination.
+- The public request cannot supply or override a redirect destination or Stored File ID.
+- Stored File targets are bound to exact SHA-256 + created_at incarnation metadata and are served directly from canonical local FileStore bytes.
+- Deleting and recreating the same file ID does not resurrect an old tracked file URL.
 - Only active links resolve; revoked links return `404`.
 - A same-origin Postmaster tracked URL is rejected as a new destination, preventing accidental double wrapping.
 - Telemetry/history is preserved across revocation.
@@ -156,7 +191,7 @@ Keep the rest of Postmaster protected. In particular, do not expose `/mcp`, the 
 
 The feature uses additive tables in the existing analytics SQLite database and the existing durable data volume.
 
-v9.8.2 requires:
+v9.8.3 requires:
 
 - no `postmaster-mcp.yml` change;
 - no new Python dependency;

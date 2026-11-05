@@ -2,6 +2,23 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.3 - 2026-11-05
+
+### Added / changed
+- Added `create_tracked_file_link(owner_id, file_id, label, project_id=None, idempotency_key=None)`, the MCP equivalent of Postmaster's tracked Stored File links used in email. It creates a complete opaque `/t/c/glnk_...` URL directly from a private FileStore `file_id`; the public request serves the file bytes directly rather than redirecting through another public capability URL.
+- Generic tracked-link records now support `target_type="stored_file"`. Existing `list_tracked_links`, `get_tracked_link`, `list_tracked_link_events` and `revoke_tracked_link` manage URL and Stored File targets through one MCP surface.
+- Tracked file links are bound to the exact Stored File incarnation using private `file_id + SHA-256 + created_at` metadata. Deleting and recreating the same `file_id` does not resurrect an old tracked URL, matching the anti-resurrection guarantee already used by tracked Stored File links in email.
+- Added owner/project FileStore authorization checks, required labels, exact-intent idempotency, direct filename/media-type delivery and click telemetry for tracked file downloads.
+- The composed MCP surface increases from **123 to 124 commands**.
+
+### Compatibility / privacy / deployment
+- Existing v9.8.2 HTTP/HTTPS generic tracked links retain their historical `302` behavior. Existing email-tracking and Stored File capability tokens continue through their previous route implementations unchanged.
+- Generic tracked files reuse the existing `GET /t/c/*` callback family and the existing local FileStore; there is no second public file URL, no internal HTTP/DNS hop and no public `file_id` in the tracked URL.
+- Click requests are recorded with the existing privacy-preserving generic telemetry; raw source IP addresses are not persisted. A request is telemetry, not proof of a human download.
+- The additive analytics migration only extends `generic_tracking_links` with target/file-incarnation metadata and an index; no destructive migration is introduced.
+- `postmaster-mcp.yml` is unchanged. `requirements.txt` is unchanged. No new Python dependency, public endpoint or Cloudflare Worker change is introduced.
+- This is a **source release** boundary only. Publishing v9.8.3 does not activate production, restart Postmaster, mutate Portainer or change Cloudflare configuration; runtime activation remains a separate owner-controlled action.
+
 ## 9.8.2 - 2026-11-05
 
 ### Added

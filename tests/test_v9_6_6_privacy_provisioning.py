@@ -272,9 +272,10 @@ class ReleaseBoundaryV966CompatibilityTests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 123)
+        self.assertEqual(len(by_name), 124)
         self.assertIn("create_tracked_link", by_name)
         self.assertIn("list_tracked_links", by_name)
+        self.assertIn("create_tracked_file_link", by_name)
         props = by_name["set_amp_account_state"].input_schema["properties"]
         self.assertIn("privacy_proxy_action", props)
         self.assertIn("privacy_proxy_confirm", props)

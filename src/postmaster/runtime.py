@@ -26,6 +26,8 @@ from .runtime_v968 import install_runtime_v968
 from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_webgui
 from .runtime_v980 import install_runtime_v980
 from .runtime_v982 import install_runtime_v982
+from .runtime_v983 import install_runtime_v983
+from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
@@ -162,10 +164,25 @@ install_mail_safety_ia_v971(_webgui_v962, _webgui_v962_views)
 # unchanged. Destructive DDL is review-only and row deletes require explicit confirmation.
 runtime_status = install_runtime_v980(_base, _core, runtime_status)
 install_webgui_structured_data_v980(app, _base)
-# v9.8.2 adds owner/project-scoped generic tracked links on the existing /t/c/* callback
-# without changing legacy email/file tracking semantics or deployment configuration.
-_v982 = install_runtime_v982(app, _base, _core, _core.runtime_status)
+# v9.8.2 adds owner/project-scoped generic tracked links on the existing /t/c/* callback.
+# v9.8.3 reuses that same store/route family and adds exact-incarnation Stored File targets.
+_v983_store = bind_generic_tracked_link_store_v983(_base)()
+_v982 = install_runtime_v982(
+    app,
+    _base,
+    _core,
+    _core.runtime_status,
+    store=_v983_store,
+)
 runtime_status = _v982["runtime_status"]
+_v983 = install_runtime_v983(
+    app,
+    _base,
+    _core,
+    runtime_status,
+    store=_v983_store,
+)
+runtime_status = _v983["runtime_status"]
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
