@@ -2,6 +2,22 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.2 - 2026-11-05
+
+### Added
+- Added **generic MCP-managed tracked links** that are independent from email campaigns/deliveries. An MCP client can create a tracked HTTP/HTTPS URL, assign a required human/agent-readable label, receive the complete tracked URL and reuse it in any user-authorized workflow rather than only inside email.
+- Added five owner/project-scoped MCP commands: `create_tracked_link`, `list_tracked_links`, `get_tracked_link`, `list_tracked_link_events` and `revoke_tracked_link`. The composed MCP surface increases from **118 to 123 commands**.
+- Added optional exact-intent idempotency for generic link creation, aggregate click counters, privacy-preserving event listing and explicit `confirm=true` revocation that preserves history while disabling the public redirect.
+- Added additive `generic_tracking_links` and `generic_tracking_clicks` tables in the existing analytics database. Generic records do not manufacture synthetic email campaigns, deliveries or recipients.
+
+### Compatibility / privacy / deployment
+- Generic links reuse the existing `GET /t/c/*` public callback family with a dedicated opaque `glnk_` token prefix. Non-generic tokens are delegated unchanged to the existing email / Stored File tracking implementation.
+- The redirect destination is resolved only from server-side persistence; public query parameters cannot choose or override it. Revoked/unknown generic tokens fail closed with `404`.
+- Generic click telemetry reuses the existing keyed client-fingerprint pipeline. Raw source IP addresses are not stored.
+- Existing email tracking semantics, Sent-clean behavior, historical detracking, Stored File public capabilities, recipient privacy and existing analytics tables remain unchanged.
+- `postmaster-mcp.yml` is unchanged. `requirements.txt` is unchanged. No new public endpoint, Python dependency or Cloudflare Worker change is introduced.
+- This is a **source release** boundary only. Publishing v9.8.2 does not activate production, restart Postmaster, mutate Portainer or change Cloudflare configuration; runtime activation remains a separate owner-controlled action.
+
 ## 9.8.1 - 2026-09-06
 
 ### Fixed / changed

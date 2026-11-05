@@ -20,9 +20,11 @@ class V972FinalMailCompositionTests(unittest.TestCase):
         self.assertEqual(core.link_store.__name__, "_store")
 
         tools = runtime.mcp._tool_manager.list_tools()
-        self.assertEqual(len(tools), 118)
-        self.assertIn("send_email", {tool.name for tool in tools})
-        self.assertIn("get_stored_file_resource", {tool.name for tool in tools})
+        self.assertEqual(len(tools), 123)
+        names = {tool.name for tool in tools}
+        self.assertIn("send_email", names)
+        self.assertIn("get_stored_file_resource", names)
+        self.assertIn("create_tracked_link", names)
 
 
 if __name__ == "__main__":

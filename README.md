@@ -483,6 +483,28 @@ AMP for Email is optional and uses separately scoped, time-limited delivery toke
 
 ---
 
+# Generic tracked links (v9.8.2)
+
+Postmaster can now create reusable tracked URLs directly through MCP, independently from email delivery.
+
+The five generic-link commands are:
+
+```text
+create_tracked_link
+list_tracked_links
+get_tracked_link
+list_tracked_link_events
+revoke_tracked_link
+```
+
+Creation requires an `owner_id`, an HTTP/HTTPS destination and a human/agent-readable `label`; `project_id` and an idempotency key are optional. The creation/read tools intentionally return the complete opaque `tracked_url`, allowing an MCP client or LLM to use it in any user-authorized context rather than only inside email.
+
+Generic links reuse the existing `/t/c/*` callback path but are persisted separately from email campaign/delivery tracking. Revocation requires explicit confirmation, preserves history and makes the public URL return `404`. Raw source IP addresses are not persisted.
+
+See [docs/GENERIC_TRACKED_LINKS.md](docs/GENERIC_TRACKED_LINKS.md) for scope, privacy, callback and deployment details.
+
+---
+
 # Security model
 
 Postmaster MCP uses a split security perimeter:
