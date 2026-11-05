@@ -56,6 +56,7 @@ V982_GENERIC_TRACKING_MCP_NAMES = {
     "list_tracked_link_events",
     "revoke_tracked_link",
 }
+V983_TRACKED_FILE_MCP_NAMES = {"create_tracked_file_link"}
 
 
 class CanonicalUnsubscribeUrlV960Tests(unittest.TestCase):
@@ -263,15 +264,17 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
             self.assertTrue(BASELINE_MCP_NAMES <= actual)
             self.assertTrue(legacy_extensions <= actual)
             self.assertTrue(V982_GENERIC_TRACKING_MCP_NAMES <= actual)
+            self.assertTrue(V983_TRACKED_FILE_MCP_NAMES <= actual)
             structured_extensions = (
                 actual
                 - BASELINE_MCP_NAMES
                 - legacy_extensions
                 - V982_GENERIC_TRACKING_MCP_NAMES
+                - V983_TRACKED_FILE_MCP_NAMES
             )
             self.assertEqual(len(structured_extensions), 21)
             self.assertTrue(all(name.startswith("db_") for name in structured_extensions))
-            self.assertEqual(len(actual), 123)
+            self.assertEqual(len(actual), 124)
 
 
 if __name__ == "__main__":
