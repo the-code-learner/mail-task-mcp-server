@@ -467,9 +467,11 @@ class V972StoredFilePublicDownloadTests(unittest.TestCase):
         self._route("/t/c/{token}")
 
         tools = self.runtime.mcp._tool_manager.list_tools()
-        self.assertEqual(len(tools), 118)
+        self.assertEqual(len(tools), 123)
         names = {tool.name for tool in tools}
         self.assertIn("get_stored_file_resource", names)
+        self.assertIn("create_tracked_link", names)
+        self.assertIn("list_tracked_links", names)
 
         status = self.runtime.tracking_status()
         self.assertTrue(status["link_tracking"]["stored_file_public_downloads"])
