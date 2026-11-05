@@ -483,25 +483,28 @@ AMP for Email is optional and uses separately scoped, time-limited delivery toke
 
 ---
 
-# Generic tracked links (v9.8.2)
+# Generic tracked links (v9.8.3)
 
-Postmaster can now create reusable tracked URLs directly through MCP, independently from email delivery.
+Postmaster can create reusable tracked URLs directly through MCP, independently from email delivery. Targets may be either an HTTP/HTTPS destination or an existing private Stored File `file_id`.
 
-The five generic-link commands are:
+The generic-link commands are:
 
 ```text
 create_tracked_link
+create_tracked_file_link
 list_tracked_links
 get_tracked_link
 list_tracked_link_events
 revoke_tracked_link
 ```
 
-Creation requires an `owner_id`, an HTTP/HTTPS destination and a human/agent-readable `label`; `project_id` and an idempotency key are optional. The creation/read tools intentionally return the complete opaque `tracked_url`, allowing an MCP client or LLM to use it in any user-authorized context rather than only inside email.
+`create_tracked_link` takes an HTTP/HTTPS destination. `create_tracked_file_link` takes a FileStore `file_id` and produces the same kind of tracked direct-download link that Postmaster already uses for Stored Files inside tracked email. Both require a human/agent-readable `label`; `project_id` and an idempotency key are optional.
 
-Generic links reuse the existing `/t/c/*` callback path but are persisted separately from email campaign/delivery tracking. Revocation requires explicit confirmation, preserves history and makes the public URL return `404`. Raw source IP addresses are not persisted.
+The creation/read tools intentionally return the complete opaque `tracked_url`, allowing an MCP client or LLM to use it in any user-authorized context. A tracked file URL does not expose the private `file_id`: it serves canonical local FileStore bytes only after verifying the exact original `file_id + SHA-256 + created_at` incarnation. Delete + recreate of the same ID therefore leaves the old URL invalid.
 
-See [docs/GENERIC_TRACKED_LINKS.md](docs/GENERIC_TRACKED_LINKS.md) for scope, privacy, callback and deployment details.
+Generic links reuse the existing `/t/c/*` callback path but remain separate from email campaign/delivery tracking. Revocation requires explicit confirmation, preserves history and makes the public URL return `404`. Raw source IP addresses are not persisted.
+
+See [docs/GENERIC_TRACKED_LINKS.md](docs/GENERIC_TRACKED_LINKS.md) for scope, privacy, Stored File semantics, callback and deployment details.
 
 ---
 
