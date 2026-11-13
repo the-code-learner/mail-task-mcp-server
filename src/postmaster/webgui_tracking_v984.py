@@ -166,11 +166,8 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
         f'{" active" if active==k else ""}">{label}</button>'
         for k, label in period_choices
     )
-    if active == "custom":
-        fday = since.astimezone(_ZONE).date().isoformat()
-        tday = (until.astimezone(_ZONE) - timedelta(days=1)).date().isoformat()
-    else:
-        fday, tday = "", ""
+    fday = since.astimezone(_ZONE).date().isoformat()
+    tday = (until.astimezone(_ZONE) - timedelta(days=1)).date().isoformat()
     custom = (
         f'<label>From <input type="date" name="from" value="{escape(fday)}"></label>'
         f'<label>To <input type="date" name="to" value="{escape(tday)}"></label>'
