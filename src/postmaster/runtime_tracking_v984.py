@@ -36,6 +36,13 @@ def install_runtime_tracking_v984(base: Any, core: Any, *, store: Any) -> dict[s
         owner_id: str | None = None,
         project_id: str | None = None,
         event_kind: str | None = None,
+        recipient: str | None = None,
+        country: str | None = None,
+        city: str | None = None,
+        provider: str | None = None,
+        domain: str | None = None,
+        asn: int | None = None,
+        sort: str = "desc",
         since: str | None = None,
         until: str | None = None,
         limit: int = 200,
@@ -51,8 +58,10 @@ def install_runtime_tracking_v984(base: Any, core: Any, *, store: Any) -> dict[s
         try:
             return global_tracking_network_events(
                 analytics, account_id=account_id, owner_id=owner_id,
-                project_id=project_id, event_kind=event_kind, since=since,
-                until=until, limit=limit, offset=offset,
+                project_id=project_id, event_kind=event_kind,
+                recipient=recipient, country=country, city=city,
+                provider=provider, domain=domain, asn=asn, sort=sort,
+                since=since, until=until, limit=limit, offset=offset,
             )
         except Exception as exc:
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
