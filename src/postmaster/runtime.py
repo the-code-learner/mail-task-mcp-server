@@ -33,6 +33,7 @@ from .runtime_contacts_v984 import install_runtime_contacts_v984
 from .webgui_files_v984 import install_file_previews_v984
 from .webgui_tracking_v984 import install_tracking_dashboard_v984
 from .webgui_contacts_v984 import install_contacts_webgui_v984
+from .webgui_versions_v984 import install_versions_webgui_v984
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -201,6 +202,7 @@ runtime_status = _v984_contacts["runtime_status"]
 install_file_previews_v984(app, _base)
 install_tracking_dashboard_v984(_webgui_v962_views)
 install_contacts_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
+install_versions_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
