@@ -490,7 +490,7 @@ class ReleaseBoundaryV967Tests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 124)
+        self.assertEqual(len(by_name), 130)
         self.assertEqual(EXPECTED_V967_TOOLS - set(by_name), set())
         self.assertIn("fetch_email_remote_content", by_name)
         for name in ("create_tracked_link", "list_tracked_links", "get_tracked_link", "list_tracked_link_events", "revoke_tracked_link", "create_tracked_file_link"):

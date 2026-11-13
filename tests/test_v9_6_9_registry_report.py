@@ -12,7 +12,7 @@ class RegistryReportV983Tests(unittest.TestCase):
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
         names = sorted(by_name)
-        self.assertEqual(len(names), 124)
+        self.assertEqual(len(names), 130)
         self.assertIn("fetch_email_remote_content", by_name)
         self.assertIn("db_status", by_name)
         self.assertIn("db_link_memory", by_name)

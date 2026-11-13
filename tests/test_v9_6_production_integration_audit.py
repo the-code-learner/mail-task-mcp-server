@@ -151,7 +151,7 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 124)
+        self.assertEqual(len(by_name), 130)
         self.assertIn("fetch_email_remote_content", by_name)
         self.assertIn("create_tracked_link", by_name)
         self.assertIn("revoke_tracked_link", by_name)
