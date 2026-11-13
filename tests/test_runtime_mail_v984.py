@@ -23,7 +23,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from postmaster.runtime_v984 import MCP_COMMAND_COUNT_V984, install_runtime_mail_v984
+from postmaster.runtime_mail_v984 import MCP_COMMAND_COUNT_V984, install_runtime_mail_v984
 from postmaster.calendar_v984 import build_calendar_request
 
 
