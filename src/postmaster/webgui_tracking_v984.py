@@ -110,11 +110,20 @@ def _sent(base: Any, account_id: str, since: datetime, until: datetime) -> tuple
 
 
 def _events(base: Any, account_id: str, owner_id: str, project_id: str,
-            since: datetime, until: datetime) -> tuple[list[dict[str, Any]], bool]:
+            since: datetime, until: datetime, *,
+            filters: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
     # Bounded rows keep the WebGUI responsive; full historical paging is available via MCP.
     first = global_tracking_network_events(
         base.analytics_store(), account_id=account_id or None,
         owner_id=owner_id or None, project_id=project_id or None,
+        event_kind=filters.get("event_kind") or None,
+        recipient=filters.get("recipient") or None,
+        country=filters.get("country") or None,
+        city=filters.get("city") or None,
+        provider=filters.get("provider") or None,
+        domain=filters.get("domain") or None,
+        asn=filters.get("asn") or None,
+        sort=filters.get("sort") or "desc",
         since=since.isoformat(), until=until.isoformat(), limit=500, offset=0,
     )
     return list(first["events"]), len(first["events"]) >= 500
@@ -144,8 +153,17 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
     account = str(request.query_params.get("account_id") or "").strip()
     owner = str(request.query_params.get("owner_id") or "").strip()
     project = str(request.query_params.get("project_id") or "").strip()
+    event_filters = {
+        key: str(request.query_params.get(key) or "").strip()
+        for key in ("event_kind", "recipient", "country", "city", "provider", "domain", "asn", "sort")
+    }
+    if event_filters.get("asn"):
+        try:
+            event_filters["asn"] = int(event_filters["asn"])
+        except ValueError:
+            event_filters["asn"] = None
     try:
-        events, truncated = _events(base, account, owner, project, since, until)
+        events, truncated = _events(base, account, owner, project, since, until, filters=event_filters)
         sent, sent_truncated = _sent(base, account, since, until)
         received, received_note = _received(base, account, since, until)
     except Exception as exc:
@@ -172,6 +190,33 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
         f'<label>From <input type="date" name="from" value="{escape(fday)}"></label>'
         f'<label>To <input type="date" name="to" value="{escape(tday)}"></label>'
     )
+    kinds_options = '<option value="">All events</option>' + "".join(
+        f'<option value="{code}"{" selected" if event_filters.get("event_kind")==code else ""}>{label}</option>'
+        for code, label in (
+            ("email_open","Email opens"),
+            ("email_click","Email clicks"),
+            ("tracked_url_click","URL clicks"),
+            ("tracked_file_download","Tracked file downloads"),
+        )
+    )
+    filter_fields = (
+        f'<label>Event type <select name="event_kind">{kinds_options}</select></label>'
+        + ''.join(
+            f'<label>{label} <input name="{key}" value="{escape(str(event_filters.get(key) or ""),quote=True)}" '
+            f'placeholder="{placeholder}"></label>'
+            for key,label,placeholder in (
+                ("recipient","Recipient","Email address"),
+                ("country","Country","ISO country"),
+                ("city","City","City name"),
+                ("provider","Network provider","ISP or organization"),
+                ("domain","Domain","Domain or destination"),
+                ("asn","ASN","Autonomous system"),
+            )
+        )
+        + '<label>Timeline order <select name="sort">'
+        + '<option value="desc"'+(' selected' if event_filters.get("sort")!="asc" else '')+'>Newest first</option>'
+        + '<option value="asc"'+(' selected' if event_filters.get("sort")=="asc" else '')+'>Oldest first</option></select></label>'
+    )
     counts = (
         ("Tracking events shown", len(events)),
         ("Opens observed", kinds["email_open"]),
@@ -195,6 +240,9 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
 .v984-tracking .v984-toolbar input,.v984-tracking .v984-toolbar select{max-width:165px}
 .v984-tracking .v984-period{border:1px solid var(--line);border-radius:7px;padding:7px 10px;background:var(--card);color:var(--text)}
 .v984-tracking .v984-period.active{background:var(--a);color:white}
+.v984-tracking .v984-filters{border:1px solid var(--line);border-radius:8px;padding:8px;flex-basis:100%;margin-top:8px}
+.v984-tracking .v984-filters summary{font-weight:700;cursor:pointer}
+.v984-tracking .v984-filters .v984-toolbar{padding:8px 0}
 .v984-tracking .v984-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:14px 0}
 .v984-tracking .v984-stat,.v984-tracking .v984-panel{padding:13px;border:1px solid var(--line);border-radius:9px;background:var(--card)}
 .v984-tracking .v984-stat small{display:block;color:var(--muted)}
@@ -224,7 +272,8 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
 <label>Account <select name="account_id"><option value="">All accounts</option>{options}</select></label>
 <label>Owner <input name="owner_id" value="{escape(owner,quote=True)}" placeholder="All owners"></label>
 <label>Project <input name="project_id" value="{escape(project,quote=True)}" placeholder="All projects"></label>
-{tabs}{custom}<button type="submit">Apply</button></form>
+{tabs}{custom}<details class="v984-filters"><summary>Advanced filters</summary>
+<div class="v984-toolbar">{filter_fields}</div></details><button type="submit">Apply</button></form>
 <p class="v984-hint">{escape(label)} · {escape(warning)}</p>
 <div class="v984-stats">{cards}</div>
 {heat}
