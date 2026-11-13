@@ -119,7 +119,7 @@ def install_week_calendar_v984(tasks: Any) -> None:
         year, month = tasks._calendar_month(request)
         extra = {
             "task_view": "calendar", "calendar_mode": "week",
-            "calendar_week": datetime.now(ZoneInfo(tasks.TASK_CALENDAR_TIMEZONE)).date().isoformat(),
+            "calendar_week": date(year,month,1).isoformat(),
             "show_completed": "1" if show_completed else None,
             "calendar_month": f"{year:04d}-{month:02d}",
         }
