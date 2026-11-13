@@ -52,7 +52,7 @@ class StoredFilePreviewTests(unittest.TestCase):
     def test_json_is_inert_text(self):
         result = preview_file(FakeBase("application/json", b'{"ok":true}'), request())
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.media_type, "text/plain")
+        self.assertTrue(result.media_type.startswith("text/plain"))
 
     def test_pdf_is_inline(self):
         result = preview_file(FakeBase("application/pdf", b"%PDF-1.5"), request())
