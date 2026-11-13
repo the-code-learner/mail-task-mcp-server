@@ -37,7 +37,7 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
                     browser TEXT,os TEXT,client_source TEXT,metadata_confidence TEXT
                 );
                 CREATE TABLE generic_tracking_links (
-                    id TEXT PRIMARY KEY, label TEXT, target_type TEXT
+                    id TEXT PRIMARY KEY, label TEXT, target_type TEXT, destination_host TEXT NOT NULL DEFAULT ''
                 );
                 CREATE TABLE generic_tracking_clicks (
                     id INTEGER PRIMARY KEY, tracked_link_id TEXT,
@@ -48,8 +48,8 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
                     (1,'mail-1','recipient@example.com','del-1','ExampleClient','Browser','OS','pixel','low');
                 INSERT INTO tracking_clicks VALUES
                     (2,'mail-2','other@example.net','del-2','click-1','ClientClick','Browser','OS','link','medium');
-                INSERT INTO generic_tracking_links VALUES
-                    ('link-1','File URL','stored_file');
+                INSERT INTO generic_tracking_links(id,label,target_type,destination_host) VALUES
+                    ('link-1','File URL','stored_file','example.com');
                 INSERT INTO generic_tracking_clicks VALUES
                     (3,'link-1','Downloader','Browser','OS','link','medium');
                 """)
