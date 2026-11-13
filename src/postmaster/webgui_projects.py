@@ -41,11 +41,11 @@ def files_fragment(base: Any, request: Request) -> str:
             compact=True,
         )
         rows.append(
-            f'<tr><td>{filename}<div class="small muted mono">{escape(file_id)}</div><div class="small muted">{escape(str(stored.get("description") or ""))}</div></td>'
+            f'<tr><td><a href="/dashboard/files/{escape(file_id)}/preview" target="_blank" rel="noopener">{filename}</a><div class="small muted mono">{escape(file_id)}</div><div class="small muted">{escape(str(stored.get("description") or ""))}</div></td>'
             f'<td>{escape(str(stored.get("owner_id") or ""))}<div class="small muted">{scope}</div></td>'
             f'<td class="mono small">{escape(str(stored.get("media_type") or "application/octet-stream"))}<div class="muted">{int(stored.get("size_bytes") or 0)} bytes</div></td>'
             f'<td class="small">{escape(", ".join(stored.get("tags") or []))}</td>'
-            f'<td class="actions"><a href="/dashboard/files/{escape(file_id)}/download"><button type="button">Download</button></a>'
+            f'<td class="actions"><a href="/dashboard/files/{escape(file_id)}/preview" target="_blank" rel="noopener"><button type="button">Preview</button></a><a href="/dashboard/files/{escape(file_id)}/download"><button type="button">Download</button></a>'
             f'<form method="post" action="/dashboard/files/delete" onsubmit="return confirm(\'Delete this stored file?\');"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="file_id" value="{escape(file_id)}"><button class="danger" type="submit">Delete</button></form></td></tr>'
         )
     total = int(status.get("files", 0)) if isinstance(status, dict) else len(files)
@@ -132,7 +132,7 @@ def project_overview_fragment(base: Any, request: Request) -> str:
         fid = str(row.get("id") or "")
         filename = project_label_html(str(row.get("filename") or ""), project)
         file_rows.append(
-            f'<tr><td>{filename}<div class="small muted mono">{escape(fid)}</div></td><td>{escape(str(row.get("media_type") or ""))}</td><td>{int(row.get("size_bytes") or 0)} bytes</td><td class="actions"><a href="/dashboard/files/{escape(fid)}/download"><button type="button">Download</button></a></td></tr>'
+            f'<tr><td><a href="/dashboard/files/{escape(fid)}/preview" target="_blank" rel="noopener">{filename}</a><div class="small muted mono">{escape(fid)}</div></td><td>{escape(str(row.get("media_type") or ""))}</td><td>{int(row.get("size_bytes") or 0)} bytes</td><td class="actions"><a href="/dashboard/files/{escape(fid)}/download"><button type="button">Download</button></a></td></tr>'
         )
 
     task_tab = escape(dashboard_url(request, tab="scheduler", project=project), quote=True)
