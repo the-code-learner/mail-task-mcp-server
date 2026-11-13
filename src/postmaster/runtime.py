@@ -27,6 +27,8 @@ from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_web
 from .runtime_v980 import install_runtime_v980
 from .runtime_v982 import install_runtime_v982
 from .runtime_v983 import install_runtime_v983
+from .runtime_mail_v984 import install_runtime_mail_v984
+from .runtime_tracking_v984 import install_runtime_tracking_v984
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -183,6 +185,13 @@ _v983 = install_runtime_v983(
     store=_v983_store,
 )
 runtime_status = _v983["runtime_status"]
+# v9.8.4 ports the non-WhatsApp email/calendar/search features from the 9.9 RC
+# and makes the enriched tracking history visible through the authenticated MCP
+# control plane, without owner/project access partitioning.
+_v984_mail = install_runtime_mail_v984(_base, _core, runtime_status)
+runtime_status = _v984_mail["runtime_status"]
+_v984_network = install_runtime_tracking_v984(_base, _core, store=_v983_store)
+runtime_status = _v984_network["runtime_status"]
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())
