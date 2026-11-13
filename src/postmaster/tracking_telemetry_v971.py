@@ -7,6 +7,7 @@ from html import escape
 from typing import Any
 
 from .provider_classification import classify_click_events
+from .tracking_geoip_v984 import enrich_ip, ensure_email_geo_columns
 
 
 SENSITIVE_RETENTION_DAYS = 30
@@ -96,10 +97,11 @@ def _ensure_schema(analytics: Any) -> None:
                 ON tracking_sensitive_telemetry(delivery_id,observed_at DESC);
             """
         )
+    ensure_email_geo_columns(analytics)
 
 
 def enforce_sensitive_retention(analytics: Any, *, days: int = SENSITIVE_RETENTION_DAYS) -> int:
-    """Delete raw IP/geolocation sidecar rows older than the explicit retention window.
+    """Explicit administrative purge only (never run automatically in v9.8.4).
 
     Base tracking events, keyed fingerprints and aggregate counters are intentionally retained.
     """
@@ -149,7 +151,7 @@ def _persist_sensitive(
     country_code: str,
 ) -> None:
     _ensure_schema(analytics)
-    geo = _geo_estimate(country_code)
+    geo = enrich_ip(client_ip, country_code)
     with analytics._connect() as conn:
         conn.execute(
             """
@@ -184,7 +186,18 @@ def _persist_sensitive(
                 _SCHEMA_VERSION,
             ),
         )
-    enforce_sensitive_retention(analytics)
+        conn.execute(
+            """UPDATE tracking_sensitive_telemetry SET
+                geo_region=?, geo_city=?, geo_postal_code=?, geo_latitude=?,
+                geo_longitude=?, geo_accuracy_km=?, geo_asn=?, geo_isp=?, geo_organization=?
+               WHERE event_kind=? AND event_id=?""",
+            (
+                geo["geo_region"], geo["geo_city"], geo["geo_postal_code"],
+                geo["geo_latitude"], geo["geo_longitude"], geo["geo_accuracy_km"],
+                geo["geo_asn"], geo["geo_isp"], geo["geo_organization"],
+                event_kind, int(event_id),
+            ),
+        )
 
 
 def _latest_open_event_id(analytics: Any, *, delivery_id: str, opened_at: str) -> tuple[int, str] | None:
@@ -215,7 +228,6 @@ def install_tracking_telemetry_v971(base: Any, core: Any) -> None:
     analytics = base.analytics_store()
     links = core.link_store()
     _ensure_schema(analytics)
-    enforce_sensitive_retention(analytics)
 
     if getattr(analytics, _INSTALLED_FLAG, False):
         return
@@ -346,7 +358,6 @@ def sensitive_events_for_account(
     if not selected:
         return []
     _ensure_schema(analytics)
-    enforce_sensitive_retention(analytics)
     bounded = max(1, min(int(limit), 500))
     message_filter = str(message_id or "").strip()
     with analytics._connect() as conn:
@@ -366,7 +377,9 @@ def sensitive_events_for_account(
                     o.country_code,o.browser,o.os,o.client_source,o.metadata_confidence,
                     d.message_id,d.open_count AS event_count,c.subject,
                     '' AS link_id,'' AS original_url,'' AS anchor_text,
-                    s.source_ip,s.captured_at,s.geo_country_code,s.geo_label,s.geo_source,s.geo_confidence
+                    s.source_ip,s.captured_at,s.geo_country_code,s.geo_label,s.geo_source,s.geo_confidence,
+                    s.geo_region,s.geo_city,s.geo_postal_code,s.geo_latitude,s.geo_longitude,
+                    s.geo_accuracy_km,s.geo_asn,s.geo_isp,s.geo_organization
                 FROM tracking_opens o
                 JOIN tracking_deliveries d ON d.id=o.delivery_id
                 JOIN tracking_campaigns c ON c.id=o.campaign_id
@@ -396,7 +409,9 @@ def sensitive_events_for_account(
                     cx.country_code,cx.browser,cx.os,cx.client_source,cx.metadata_confidence,
                     COALESCE(NULLIF(l.message_id,''),d.message_id) AS message_id,
                     0 AS event_count,c.subject,cx.link_id,l.original_url,l.anchor_text,
-                    s.source_ip,s.captured_at,s.geo_country_code,s.geo_label,s.geo_source,s.geo_confidence
+                    s.source_ip,s.captured_at,s.geo_country_code,s.geo_label,s.geo_source,s.geo_confidence,
+                    s.geo_region,s.geo_city,s.geo_postal_code,s.geo_latitude,s.geo_longitude,
+                    s.geo_accuracy_km,s.geo_asn,s.geo_isp,s.geo_organization
                 FROM tracking_clicks cx
                 JOIN tracking_links l ON l.id=cx.link_occurrence_id
                 JOIN tracking_deliveries d ON d.id=cx.delivery_id
@@ -449,7 +464,10 @@ def _fmt_geo(row: dict[str, Any]) -> str:
     label = str(row.get("geo_label") or "Unavailable")
     source = str(row.get("geo_source") or "")
     confidence = str(row.get("geo_confidence") or "unknown")
-    return f"{label} · {source} · confidence {confidence}"
+    provider = str(row.get("geo_isp") or row.get("geo_organization") or "")
+    asn = str(row.get("geo_asn") or "")
+    network = f" · {provider} AS{asn}" if provider or asn else ""
+    return f"{label}{network} · {source} · confidence {confidence}"
 
 
 def _event_details(row: dict[str, Any]) -> str:
