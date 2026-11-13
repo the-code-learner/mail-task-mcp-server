@@ -215,6 +215,13 @@ def global_tracking_network_events(
     owner_id: str | None = None,
     project_id: str | None = None,
     event_kind: str | None = None,
+    recipient: str | None = None,
+    country: str | None = None,
+    city: str | None = None,
+    provider: str | None = None,
+    domain: str | None = None,
+    asn: int | None = None,
+    sort: str = "desc",
     since: str | None = None,
     until: str | None = None,
     limit: int = 200,
@@ -245,7 +252,7 @@ def global_tracking_network_events(
           SELECT 'email_open' AS event_kind,s.event_id,s.observed_at,
              s.account_id,'' AS owner_id,NULL AS project_id,o.recipient,s.delivery_id,
              '' AS tracked_link_id,'' AS label,'email' AS target_type,
-             o.user_agent,o.browser,o.os,o.client_source,o.metadata_confidence,{geo}
+             o.user_agent,o.browser,o.os,o.client_source,o.metadata_confidence,{geo},'' AS destination_host
           FROM tracking_sensitive_telemetry s
           JOIN tracking_opens o ON s.event_kind='open' AND o.id=s.event_id
           WHERE s.event_kind='open'
@@ -253,7 +260,7 @@ def global_tracking_network_events(
           SELECT 'email_click',s.event_id,s.observed_at,
              s.account_id,'' AS owner_id,NULL AS project_id,c.recipient,s.delivery_id,
              c.link_id,'' AS label,'email' AS target_type,
-             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{geo}
+             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{geo},'' AS destination_host
           FROM tracking_sensitive_telemetry s
           JOIN tracking_clicks c ON s.event_kind='click' AND c.id=s.event_id
           WHERE s.event_kind='click'
@@ -262,7 +269,7 @@ def global_tracking_network_events(
              n.event_id,n.observed_at,
              '' AS account_id,n.owner_id,n.project_id,'' AS recipient,'' AS delivery_id,
              n.tracked_link_id,l.label,l.target_type,
-             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{generic_geo}
+             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{generic_geo},l.destination_host
           FROM generic_tracking_network_v984 n
           JOIN generic_tracking_clicks c ON c.id=n.event_id
           JOIN generic_tracking_links l ON l.id=n.tracked_link_id
@@ -275,6 +282,25 @@ def global_tracking_network_events(
             if value is not None and str(value).strip():
                 filters.append(f"{col}=?")
                 params.append(str(value).strip())
+        if recipient:
+            filters.append("recipient LIKE ?")
+            params.append("%" + str(recipient).strip() + "%")
+        if country:
+            filters.append("geo_country_code=?")
+            params.append(str(country).strip().upper())
+        if city:
+            filters.append("geo_city LIKE ?")
+            params.append("%" + str(city).strip() + "%")
+        if provider:
+            filters.append("(geo_isp LIKE ? OR geo_organization LIKE ?)")
+            params.extend(["%" + str(provider).strip() + "%"] * 2)
+        if asn is not None:
+            filters.append("geo_asn=?")
+            params.append(int(asn))
+        if domain:
+            filters.append("(destination_host LIKE ? OR recipient LIKE ?)")
+            val = "%" + str(domain).strip().lower() + "%"
+            params.extend([val, val])
         if since:
             filters.append("observed_at>=?")
             params.append(str(since))
@@ -284,7 +310,8 @@ def global_tracking_network_events(
         where = " WHERE " + " AND ".join(filters) if filters else ""
         bounded = max(1, min(int(limit), 500))
         skip = max(0, int(offset))
-        sql = f"SELECT * FROM ({union}){where} ORDER BY observed_at DESC,event_id DESC LIMIT ? OFFSET ?"
+        direction = "ASC" if str(sort).lower() == "asc" else "DESC"
+        sql = f"SELECT * FROM ({union}){where} ORDER BY observed_at {direction},event_id {direction} LIMIT ? OFFSET ?"
         rows = [dict(x) for x in conn.execute(sql, (*params, bounded, skip)).fetchall()]
     return {
         "ok": True, "events": rows, "returned": len(rows), "offset": skip,
