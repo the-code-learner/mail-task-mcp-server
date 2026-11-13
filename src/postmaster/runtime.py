@@ -11,6 +11,7 @@ from . import webgui_v962 as _webgui_v962
 from . import webgui_v962_views as _webgui_v962_views
 from . import webgui_v963 as _webgui_v963
 from . import webgui_v964 as _webgui_v964
+from . import webgui_v970 as _webgui_v970
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
