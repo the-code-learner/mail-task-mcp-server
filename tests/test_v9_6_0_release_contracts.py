@@ -280,9 +280,11 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
                     "email_search_status", "search_emails_hybrid",
                     "get_email_calendar_invites", "send_job_calendar_invite",
                     "list_tracking_network_events", "get_tracking_network_event",
+                    "list_contacts", "list_incoming_contact_candidates",
+                    "save_contact", "set_contact_ignored",
                 },
             )
-            self.assertEqual(len(actual), 130)
+            self.assertEqual(len(actual), 134)
 
 
 if __name__ == "__main__":

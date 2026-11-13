@@ -272,7 +272,7 @@ class ReleaseBoundaryV966CompatibilityTests(unittest.TestCase):
 
         tools = asyncio.run(runtime.mcp.list_tools())
         by_name = {tool.name: tool for tool in tools}
-        self.assertEqual(len(by_name), 130)
+        self.assertEqual(len(by_name), 134)
         self.assertIn("create_tracked_link", by_name)
         self.assertIn("list_tracked_links", by_name)
         self.assertIn("create_tracked_file_link", by_name)
