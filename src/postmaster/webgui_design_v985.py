@@ -319,16 +319,44 @@ DESIGN_SCRIPT = r"""<script id="v985-production-ui">
  'use strict';
  const folders={INBOX:'inbox',Sent:'sent',Drafts:'drafts',Spam:'spam'};
  let composePending=false;
+ let pendingMailboxRole=null;
  const scope = document.querySelector('#v984-scopebar');
  function currentFolder(){
    const p=new URL(location.href).searchParams;
    return (p.get('mailbox')||'INBOX').toLowerCase();
  }
+ function syncMailboxes(){
+   // IMAP providers use different special-folder names. Reuse the role-mapped
+   // links that the existing authenticated inbox renderer already resolved.
+   const tabs=document.querySelector('#panel-inbox.active .v960-mailbox-tabs');
+   if(!tabs)return;
+   const byRole=new Map();
+   tabs.querySelectorAll('a[href]').forEach(link=>{
+     const role=(link.textContent||'').trim().toLowerCase();
+     if(['inbox','sent','drafts','spam'].includes(role))byRole.set(role,link);
+   });
+   document.querySelectorAll('[data-v985-mailbox]').forEach(alias=>{
+     const role=alias.dataset.v985Mailbox.toLowerCase();
+     const resolved=byRole.get(role);
+     if(resolved)alias.href=resolved.href;
+   });
+   if(pendingMailboxRole){
+     const role=pendingMailboxRole.toLowerCase();
+     pendingMailboxRole=null;
+     const resolved=byRole.get(role);
+     if(resolved){
+       const desired=new URL(resolved.href,location.href).searchParams.get('mailbox')||'INBOX';
+       if(desired.toLowerCase()!==currentFolder())resolved.click();
+     }
+   }
+ }
  function updateAliases(){
    const active=document.querySelector('.tab-panel.active')?.dataset.panel||'overview';
    const current=currentFolder();
    document.querySelectorAll('[data-v985-mailbox]').forEach(a=>{
-     const chosen=active==='inbox'&&a.dataset.v985Mailbox.toLowerCase()===current;
+     const actual=new URL(a.href,location.href).searchParams.get('mailbox')
+       ||a.dataset.v985Mailbox;
+     const chosen=active==='inbox'&&actual.toLowerCase()===current;
      a.classList.toggle('v985-folder-active',chosen);
      if(chosen) a.setAttribute('aria-current','page');
      else a.removeAttribute('aria-current');
@@ -350,11 +378,12 @@ DESIGN_SCRIPT = r"""<script id="v985-production-ui">
    if(a){composePending=true;queueMicrotask(revealCompose);}
    const link=event.target.closest('[data-v985-mailbox]');
    if(link){
-     // v962 handles this ordinary fragment navigation; preserve the query.
+     pendingMailboxRole=link.dataset.v985Mailbox;
+     // v962 still owns the lazy load and browser history.
      queueMicrotask(updateAliases);
    }
  });
- const observer=new MutationObserver(()=>{updateAliases();revealCompose();});
+ const observer=new MutationObserver(()=>{syncMailboxes();updateAliases();revealCompose();});
  const main=document.querySelector('.v970-workspace > main');
  if(main)observer.observe(main,{subtree:false,childList:true});
  window.addEventListener('popstate',updateAliases);
