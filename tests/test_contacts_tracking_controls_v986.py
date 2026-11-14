@@ -73,8 +73,8 @@ class ContactAndPeriodV986Tests(unittest.TestCase):
                 req(b"period=custom&from=2026-11-01&to=2026-11-03"),"custom"
             )
         self.assertIn('name="period" value="custom"',html)
-        self.assertIn('name="from" type="date" value="2026-11-01"',html)
-        self.assertIn('name="to" type="date" value="2026-11-03"',html)
+        self.assertIn('type="date" name="from" value="2026-11-01"',html)
+        self.assertIn('type="date" name="to" value="2026-11-03"',html)
 
 
 if __name__=="__main__":
