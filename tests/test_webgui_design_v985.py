@@ -27,7 +27,7 @@ class ApprovedDesignV985Tests(unittest.TestCase):
         self.assertIn('name="text"',html)
         self.assertIn('name="inbox_search"',html)
         self.assertIn('data-v962-nav="overview"',html)
-        self.assertIn('<div class="v970-context-actions',html)
+        self.assertIn('<div class="v970-context-actions">',html)
         self.assertIn('data-v970-theme-toggle',html)
         self.assertIn('v9.8.5',html)
         self.assertNotIn("UI demo",html)
@@ -59,6 +59,29 @@ class ApprovedDesignV985Tests(unittest.TestCase):
         self.assertIn('input[name="to"]',DESIGN_SCRIPT)
         self.assertNotIn("/dashboard/compose/send",DESIGN_SCRIPT)
         self.assertIn("data-v985-mailbox",DESIGN_SCRIPT)
+
+    def test_scopebar_integration_uses_the_real_top_header_insertion_hook(self):
+        from starlette.applications import Starlette
+        from starlette.responses import HTMLResponse
+        from postmaster.webgui_scopebar_v984 import install_scopebar_webgui_v984
+
+        class FakeV962:
+            SCRIPT=""
+            def __init__(self):
+                self._styles=lambda: "/* existing */"
+                self._nav=lambda: "old nav"
+                self._shell=lambda req: HTMLResponse(
+                    '<!doctype html><html><head></head><body><div class="shell">'
+                    +contextbar("9.8.5")+'<main>Work</main></div></body></html>'
+                )
+        fake=FakeV962()
+        mockv970=SimpleNamespace(_context_bar=lambda:"")
+        install_webgui_design_v985(fake,mockv970,"9.8.5")
+        install_scopebar_webgui_v984(Starlette(),object(),fake,mockv970)
+        html=fake._shell(None).body.decode("utf-8")
+        self.assertEqual(html.count('id="v984-scopebar"'),1)
+        self.assertLess(html.index('id="v984-scopebar"'),html.index("</header>"))
+        self.assertIn('data-v984-scope="owner_id"',html)
 
     def test_no_fake_data_or_fake_success(self):
         self.assertNotIn("example.com",DESIGN_STYLE+DESIGN_SCRIPT)
