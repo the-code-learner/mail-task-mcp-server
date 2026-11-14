@@ -425,11 +425,51 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
             )
-        return _response_page(
-            "Version change scheduled",
-            f'<p>Target release: <strong>{_e(result.get("target_version_ref"))}</strong></p>'
-            '<p>Postmaster will restart through the existing runtime selector. '
-            'Reconnect and verify the installed build after restart.</p>',
+        # Show an explicit, styled countdown rather than returning the user to
+        # an unstyled POST endpoint. The update is only *scheduled*: the linked
+        # dashboard will show the real build after the bootstrap completes.
+        # Meta refresh works with JavaScript disabled. Client-side countdown
+        # navigates after exactly 10 seconds; no POST is repeated on refresh.
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta http-equiv="refresh" content="10;url=/?ui_view=system&amp;settings_tab=versions#system">'
+            '<title>Updating Postmaster MCP</title>'
+            '<style>html{color-scheme:dark}*{box-sizing:border-box}'
+            'body{margin:0;min-height:100dvh;display:grid;place-items:center;'
+            'background:#101b2a;color:#edf3ff;font-family:Inter,system-ui,Arial,sans-serif}'
+            'main{width:min(500px,calc(100vw - 32px));padding:38px 30px;'
+            'border:1px solid #34465f;border-radius:16px;text-align:center;'
+            'background:#172437;box-shadow:0 18px 44px #070f1d55}'
+            '.mark{display:inline-grid;place-items:center;width:64px;height:64px;'
+            'margin-bottom:15px;border-radius:17px;background:#274574;'
+            'color:#a4c8ff;font-size:32px}h1{font-size:23px;margin:0 0 12px}'
+            'p{line-height:1.6;color:#adbed5;font-size:14px}'
+            'strong{color:#eff5ff}.seconds{font-weight:750;color:#8ab5ff}'
+            '.bar{height:6px;background:#283c57;border-radius:6px;overflow:hidden;'
+            'margin:23px 0}.bar>span{display:block;height:100%;width:100%;'
+            'background:#6598ee;transform-origin:left;transition:transform 1s linear}'
+            'a{color:#9ac2ff}a:focus-visible{outline:2px solid #9ac2ff;outline-offset:3px}'
+            '</style></head><body>'
+            '<main role="status" aria-live="polite">'
+            '<div class="mark" aria-hidden="true">✉</div>'
+            '<h1>Updating Postmaster MCP</h1>'
+            '<p>Update scheduled for <strong>' + _e(result.get("target_version_ref")) +
+            '</strong>. The container is restarting.</p>'
+            '<p>Returning to the dashboard in <span id="countdown" class="seconds">10</span> seconds…</p>'
+            '<div class="bar" aria-hidden="true"><span id="progress"></span></div>'
+            '<p><a href="/?ui_view=system&amp;settings_tab=versions#system">Return to dashboard now</a></p>'
+            '<p>The dashboard will report the installed build after restart. '
+            'A scheduled update is not yet a verified installation.</p>'
+            '</main>'
+            '<script>(()=>{"use strict";const url="/?ui_view=system&settings_tab=versions#system";'
+            'const start=Date.now();let finished=false;'
+            'const tick=()=>{if(finished)return;const remaining=Math.max(0,10-Math.floor((Date.now()-start)/1000));'
+            'document.getElementById("countdown").textContent=String(remaining);'
+            'document.getElementById("progress").style.transform="scaleX("+(remaining/10)+")";'
+            'if(remaining===0){finished=true;location.replace(url);return;}'
+            'setTimeout(tick,250);};tick();})();</script></body></html>',
+            headers={"Cache-Control": "no-store"},
         )
 
     async def save_channel(req: Request) -> Response:
