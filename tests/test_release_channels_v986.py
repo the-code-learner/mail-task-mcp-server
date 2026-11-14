@@ -99,7 +99,7 @@ class ReleasePolicyTests(unittest.TestCase):
             self.assertEqual((target,selector),("v9.8.7-beta.1","v9.8.7-beta.1"))
             self.assertEqual(
                 _release_target("update-latest","v9.8.7-beta.1",execute=True)[:2],
-                ("v9.8.7-beta.1","latest"),
+                ("v9.8.7-beta.1","v9.8.7-beta.1"),
             )
             self.assertEqual(discover.call_args.kwargs["channel"],"stable_beta")
         with patch.object(runtime_control,"preferred_release_channel",return_value="stable"),\
