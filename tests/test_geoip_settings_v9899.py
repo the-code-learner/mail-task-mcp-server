@@ -89,12 +89,15 @@ class GeoIPSettingsTests(unittest.TestCase):
     def test_settings_tab_is_wired_to_active_runtime(self):
         from postmaster import webgui_settings_v985
         import inspect
-        import postmaster.runtime as runtime
+        from pathlib import Path
         source=inspect.getsource(webgui_settings_v985)
+        runtime_source=(Path(__file__).resolve().parents[1] /
+                        "src/postmaster/runtime.py").read_text(encoding="utf-8")
         self.assertIn('tab("geoip","GeoIP databases")',source)
         self.assertIn('geoip_settings_panel(base,request)',source)
-        paths=[r.path for r in runtime.app.router.routes if hasattr(r,"path")]
-        self.assertEqual(paths.count("/dashboard/geoip/install"),1)
+        self.assertIn("install_geoip_settings(app, _base, _webgui_v962)",runtime_source)
+        self.assertIn('Route("/dashboard/geoip/install", install, methods=["POST"])',
+                      inspect.getsource(install_geoip_settings))
 
 if __name__=="__main__":
     unittest.main()
