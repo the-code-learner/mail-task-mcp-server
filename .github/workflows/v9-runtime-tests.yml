@@ -69,7 +69,7 @@ jobs:
           import re
           from pathlib import Path
           version = Path('VERSION').read_text().strip()
-          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version), version
+          assert re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-beta\.[1-9][0-9]*)?', version), version
           changelog = Path('CHANGELOG.md').read_text()
           assert f'## {version} - ' in changelog, 'VERSION must have a CHANGELOG release entry'
           print(f'Version metadata OK: {version}')

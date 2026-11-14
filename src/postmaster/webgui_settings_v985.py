@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from html import escape
+import re
 from typing import Any
 
 from starlette.requests import Request
@@ -14,7 +15,6 @@ from .webgui_v962_views import _panel
 def render_settings_v985(base: Any, request: Request) -> str:
     version=versions_settings(base)
     actions=(
-        ("Email accounts","accounts","Manage configured sender accounts and connectivity"),
         ("Privacy and security","security","Inspect privacy proxy, authentication and mail policy"),
         ("MCP Catalog","coverage","Inspect the available MCP capabilities"),
         ("Contacts and sending permissions","contacts","Authorized recipients and domains"),
@@ -43,35 +43,142 @@ def render_settings_v985(base: Any, request: Request) -> str:
         +status_card("File Store",base.file_store().status)
         +status_card("Scheduler",base.scheduler().status)
     )
+    # Reuse the production account editor and CSRF-protected actions. Do not
+    # create an alternative credentials store or duplicate account-management API.
+    from .webgui_v962_views import render_accounts
+    account_panel = render_accounts(base, request)
+    prefix = '<section class="tab-panel" id="panel-accounts" data-panel="accounts">'
+    if not (account_panel.startswith(prefix) and account_panel.endswith("</section>")):
+        raise RuntimeError("Unexpected registered account editor markup")
+    account_panel = account_panel[len(prefix):-len("</section>")]
+    account_panel = re.sub(
+        r'href="/\?ui_view=accounts&amp;edit_account=([^"]+)#accounts"',
+        lambda match: (
+            'href="/?ui_view=system&amp;settings_tab=accounts&amp;edit_account='
+            + match.group(1) + '#system"'
+        ),
+        account_panel,
+    )
+    account_panel = account_panel.replace(
+        'href="/?ui_view=accounts#accounts"',
+        'href="/?ui_view=system&amp;settings_tab=accounts#system"',
+    )
+    account_panel = re.sub(
+        r'(<form\b[^>]*\baction="/dashboard/account/(?:save|test|default|delete)"[^>]*>)',
+        r'\1<input type="hidden" name="return_to" value="settings">',
+        account_panel,
+    )
+    current = str(request.query_params.get("settings_tab") or "versions").strip()
+    if current not in {"versions","accounts","services","diagnostics"}:
+        current = "versions"
+    def tab(name: str, label: str) -> str:
+        active = name == current
+        return (
+            '<button type="button" role="tab" id="v986-settings-tab-' + name + '" '
+            'data-v986-settings-tab="' + name + '" '
+            'aria-controls="v986-settings-pane-' + name + '" '
+            'aria-selected="' + ("true" if active else "false") + '"'
+            + (' class="current"' if active else '') + '>' + label + '</button>'
+        )
+    def pane_attrs(name: str) -> str:
+        return (
+            ' role="tabpanel" id="v986-settings-pane-' + name + '" '
+            'aria-labelledby="v986-settings-tab-' + name + '" '
+            'data-v986-settings-pane="' + name + '"'
+            + ('' if name == current else ' hidden')
+        )
     html=(
-        '<div class="v985-settings">'
+        '<div class="v985-settings" data-v986-settings>'
         '<div class="v985-pagehead"><div><h2>Settings</h2>'
         '<p>Release management, accounts, privacy and system configuration</p></div></div>'
-        '<div class="v985-settings-tabs" aria-label="Settings categories">'
-        '<a class="current" href="#v984-versions">Versions & updates</a>'
-        '<a href="#v985-settings-other">Manage services</a>'
-        '<a href="#v985-settings-diagnostics">Diagnostics</a>'
+        '<div class="v985-settings-tabs" role="tablist" aria-label="Settings categories">'
+        +tab("versions","Versions &amp; updates")
+        +tab("accounts","Email accounts")
+        +tab("services","Manage services")
+        +tab("diagnostics","Diagnostics")
+        +'</div>'
+        '<div'+pane_attrs("versions")+'>'+version+'</div>'
+        '<div'+pane_attrs("accounts")+'>'
+        '<div class="v986-accounts-head">'
+        '<div><h3>Email accounts</h3><p>Add, edit, test, set default or remove a configured IMAP/SMTP account. '
+        'Passwords and application tokens are never displayed.</p></div>'
+        '<button type="button" data-v986-add-account>+ Add email account</button>'
         '</div>'
-        +version
-        +'<section class="v985-settings-card" id="v985-settings-other">'
-        '<h3>Services & permissions</h3><div class="v985-settings-shortcuts">'
-        +shortcuts
-        +'</div></section>'
-        +'<details class="v985-settings-card" id="v985-settings-diagnostics">'
-        '<summary>Detailed service status</summary><p class="small muted">'
-        'Live subsystem snapshots; expand individual sections for diagnostic details.</p>'
-        '<div class="v985-settings-diagnostics">'+diagnostics+'</div></details>'
+        +account_panel+'</div>'
+        '<div'+pane_attrs("services")+'>'
+        '<section class="v985-settings-card" id="v985-settings-other">'
+        '<h3>Services &amp; permissions</h3><div class="v985-settings-shortcuts">'
+        +shortcuts+'</div></section></div>'
+        '<div'+pane_attrs("diagnostics")+'>'
+        '<section class="v985-settings-card" id="v985-settings-diagnostics">'
+        '<h3>Detailed service status</h3><p class="small muted">'
+        'Live subsystem snapshots; each section can be inspected independently.</p>'
+        '<div class="v985-settings-diagnostics">'+diagnostics+'</div></section></div>'
         '</div>'
     )
     return _panel("system",html)
 
 
+
+SETTINGS_SCRIPT = r"""
+<script id="v986-settings-tabs">
+(() => {
+  // Event delegation survives replacement of lazy settings fragments.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button[data-v986-settings-tab]');
+    if (!button) return;
+    const root = button.closest('[data-v986-settings]');
+    if (!root) return;
+    const chosen = button.dataset.v986SettingsTab;
+    root.querySelectorAll('[data-v986-settings-pane]').forEach(pane => {
+      pane.hidden = pane.dataset.v986SettingsPane !== chosen;
+    });
+    root.querySelectorAll('button[data-v986-settings-tab]').forEach(tab => {
+      const selected = tab.dataset.v986SettingsTab === chosen;
+      tab.classList.toggle('current', selected);
+      tab.setAttribute('aria-selected', String(selected));
+    });
+    const url = new URL(location.href);
+    url.searchParams.set('ui_view','system');
+    url.searchParams.set('settings_tab',chosen);
+    url.hash='system';
+    history.replaceState(null,'',url.toString());
+  });
+  document.addEventListener('click', event => {
+    const btn = event.target.closest('[data-v986-add-account]');
+    if(!btn)return;
+    const root = btn.closest('[data-v986-settings]');
+    if(!root)return;
+    if(new URL(location.href).searchParams.has('edit_account')){
+      window.location.assign('/?ui_view=system&settings_tab=accounts#system');
+      return;
+    }
+    const editor=root.querySelector('details[data-v962-state-key="accounts-editor"]');
+    if(editor){
+      editor.open=true;
+      editor.scrollIntoView({block:'start',behavior:'smooth'});
+      editor.querySelector('input[name="account_id"]')?.focus();
+    }
+  });
+})();
+</script>"""
+
 SETTINGS_STYLE = r"""
 .v985-settings{max-width:1380px;margin:auto}
 .v985-settings-tabs{display:flex;flex-wrap:wrap;gap:7px;border-bottom:1px solid var(--v970-line);margin:15px 0}
-.v985-settings-tabs a{color:var(--v970-muted);padding:10px 13px;text-decoration:none;font-size:12px;
- border-bottom:2px solid transparent}
-.v985-settings-tabs a.current,.v985-settings-tabs a:hover{color:var(--v970-accent);border-bottom-color:var(--v970-accent)}
+.v985-settings-tabs button{color:var(--v970-muted)!important;padding:10px 13px!important;text-decoration:none;font-size:12px;
+ border:0!important;border-bottom:2px solid transparent!important;background:transparent!important;border-radius:0!important}
+.v985-settings-tabs button.current,.v985-settings-tabs button:hover{color:var(--v970-accent)!important;border-bottom-color:var(--v970-accent)!important}
+.v985-settings [data-v986-settings-pane][hidden]{display:none!important}
+.v986-accounts-head{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;margin:16px 0}
+.v986-accounts-head p{color:var(--v970-muted);font-size:11px;margin:4px 0}
+.v986-accounts-head button{background:var(--v970-accent);color:white;border-radius:8px;padding:8px 14px}
+.v985-settings [data-v986-settings-pane="accounts"] .v951-pagehead{display:none}
+.v985-settings [data-v986-settings-pane="accounts"] .v962-collapsible{margin:12px 0}
+.v985-settings [data-v986-settings-pane="accounts"] td.actions{display:flex;flex-wrap:wrap;gap:6px}
+.v985-settings [data-v986-settings-pane="accounts"] td.actions form{display:inline-flex}
+.v985-settings [data-v986-settings-pane="accounts"] .card.wide{padding:15px!important}
+.v985-settings [data-v986-settings-pane="accounts"] .form-section{padding:12px 0;border-top:1px solid var(--v970-line)}
 .v985-settings .card.wide,.v985-settings-card{border:1px solid var(--v970-line)!important;
  background:var(--v970-surface)!important;border-radius:10px!important;padding:18px!important;margin:14px 0!important}
 .v985-settings h3{font-size:16px;margin:0 0 12px}
@@ -99,3 +206,5 @@ def install_settings_v985(v951_mod: Any, v962: Any) -> None:
         return previous().rstrip()+"\n"+SETTINGS_STYLE
     styles._postmaster_v985_settings=True
     v962._styles=styles
+    if 'id="v986-settings-tabs"' not in v962.SCRIPT:
+        v962.SCRIPT += SETTINGS_SCRIPT

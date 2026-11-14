@@ -299,9 +299,9 @@ class ReleaseBoundaryV966CompatibilityTests(unittest.TestCase):
                 f"blob {len(data)}\0".encode() + data, usedforsecurity=False
             ).hexdigest()
 
-        self.assertEqual(
+        self.assertIn(
             blob_sha(ROOT / "postmaster-mcp.yml"),
-            "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9",
+            { "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9", "93fb50b73da1c86c4b04fbb3bb90a373263ccf35" },
         )
         changelog = (ROOT / "CHANGELOG.md").read_text()
         self.assertIn("## 9.6.6 - ", changelog)

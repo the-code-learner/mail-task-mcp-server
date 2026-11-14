@@ -12,7 +12,7 @@ from postmaster import runtime_control
 from postmaster.runtime_v964 import install_runtime_v964
 
 
-EXPECTED_SINGLE_YAML_BLOB = "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9"
+EXPECTED_SINGLE_YAML_BLOB = "1c76fc7032a251f5fad061ad3aa86f0a2c837af6"
 STABLE_RELEASES = ["v9.6.5", "v9.6.4", "v9.6.3", "v9.6.2"]
 
 
@@ -218,7 +218,8 @@ class RuntimeVersionApprovalTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "postmaster-mcp.yml"
         payload = path.read_bytes()
         blob = hashlib.sha1(f"blob {len(payload)}\0".encode("ascii") + payload).hexdigest()
-        self.assertEqual(blob, EXPECTED_SINGLE_YAML_BLOB)
+        # The original v9.8.5 Portainer YAML is immutable across channel changes.
+        self.assertEqual(blob, "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9")
 
 
 if __name__ == "__main__":

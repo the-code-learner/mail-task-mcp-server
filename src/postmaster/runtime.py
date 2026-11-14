@@ -44,6 +44,7 @@ from .webgui_overview_v985 import install_overview_v985
 from .webgui_settings_v985 import install_settings_v985
 from .webgui_catalog_v985 import install_catalog_v985
 from .webgui_tracking_v985 import install_tracking_v985
+from .webgui_mail_v986 import install_mail_gui_v986
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -225,6 +226,7 @@ install_overview_v985(_webgui_v962_views, _webgui_v962)
 install_settings_v985(_webgui_v962_views.v951, _webgui_v962)
 install_catalog_v985(_webgui_v962_views.v951, _webgui_v962, _core)
 install_tracking_v985(_webgui_v962_views, _webgui_v962)
+install_mail_gui_v986(_webgui_v960, _webgui_v962)
 
 # Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
 # At this point render_inbox_v963 already references the final post-v9.7.0 Inbox renderer.

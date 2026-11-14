@@ -110,9 +110,12 @@ def _release_target(
     op = str(operation or "").strip().lower()
     if op not in RUNTIME_OPERATIONS:
         raise ValueError(f"unsupported runtime version operation: {op or '<empty>'}")
-    versions, release_status = runtime_control.stable_release_tags(force=False)
+    selected_channel=runtime_control.preferred_release_channel()
+    versions, release_status = runtime_control.available_release_tags(
+        channel=selected_channel,force=False,
+    )
     if release_status != "ok" or not versions:
-        raise RuntimeError("stable release discovery is unavailable; retry the preview later")
+        raise RuntimeError("eligible release discovery is unavailable; retry the preview later")
 
     raw_target = str(target_version or "").strip()
     if op == "update-latest":
@@ -124,23 +127,23 @@ def _release_target(
                 raise ValueError("execute requires the exact vX.Y.Z target returned by preview")
             if target != versions[0]:
                 raise ValueError(
-                    "the stable latest release changed after preview; request a new preview and approval"
+                    "the latest eligible release changed after preview; request a new preview and approval"
                 )
         else:
             if raw_target not in {"", "latest"}:
                 raise ValueError("update-latest preview does not accept an explicit version target")
             target = versions[0]
-        requested_selector = "latest"
+        requested_selector = target if "-beta." in target else "latest"
     else:
         if not raw_target:
             raise ValueError(f"{op} requires target_version=vX.Y.Z")
         target = runtime_control.canonical_selector(raw_target)
         if target == "latest":
-            raise ValueError(f"{op} requires an explicit stable vX.Y.Z target")
+            raise ValueError(f"{op} requires an explicit published version target")
         requested_selector = target
 
     if target not in versions:
-        raise ValueError("target version is not a verified stable GitHub release")
+        raise ValueError("target version is not a published GitHub release allowed by the selected update channel")
     return target, requested_selector, versions
 
 
@@ -298,9 +301,14 @@ def install_runtime_v967(
                 }
 
             if op == "update-latest":
+                # Stable can retain the latest-on-restart selector. The
+                # unmodified v9.8.5 bootstrap only auto-discovers stable tags;
+                # beta therefore remains pinned to its numeric transport alias
+                # until the next explicitly approved update.
+                is_beta = "-beta." in target
                 control = runtime_control.write_control(
-                    selector="latest",
-                    restart_ref_once=target,
+                    selector=target if is_beta else "latest",
+                    restart_ref_once=None if is_beta else target,
                     check_updates_once=False,
                 )
             else:

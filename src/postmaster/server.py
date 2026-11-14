@@ -1313,6 +1313,22 @@ def _redir(message: str = "", tab: str = "overview", account_id: str | None = No
     return RedirectResponse(target, status_code=303)
 
 
+def _account_action_redirect(message: str, form: Any, account_id: str | None = None):
+    """Keep native account handlers while returning Settings-tab users to Settings.
+
+    This is a presentation destination flag only, not an authorization choice.
+    CSRF and the existing account mutation remain unchanged.
+    """
+    if str(form.get("return_to") or "").strip() == "settings":
+        params = {
+            "ui_view": "system",
+            "settings_tab": "accounts",
+            "flash": message,
+        }
+        return RedirectResponse("/?" + urlencode(params) + "#system", status_code=303)
+    return _redir(message, "accounts", account_id)
+
+
 def _account_options(accounts: list[dict[str, Any]], selected: str | None) -> str:
     out = ""
     for a in accounts:
@@ -2200,10 +2216,10 @@ async def dashboard_account_save(request: Request):
             make_default=str(form.get("make_default","")) == "1",
             tracking_default=str(form.get("tracking_default","")) == "1",
         )
-        return _redir("Account saved", "accounts", str(result.get("id","")))
+        return _account_action_redirect("Account saved", form, str(result.get("id","")))
     except Exception as exc:
         logger.exception("Account save failed")
-        return _redir(f"{type(exc).__name__}: {exc}", "accounts")
+        return _account_action_redirect(f"{type(exc).__name__}: {exc}", form)
 
 
 async def dashboard_account_test(request: Request):
@@ -2212,7 +2228,7 @@ async def dashboard_account_test(request: Request):
     aid = str(form.get("account_id",""))
     result = _safe_call(mail_client(aid).test_connections)
     msg = "IMAP + SMTP authentication successful" if result.get("ok") and result.get("smtp_login") else result.get("error","Connection test failed")
-    return _redir(msg, "accounts", aid)
+    return _account_action_redirect(msg, form, aid)
 
 
 async def dashboard_account_default(request: Request):
@@ -2220,7 +2236,7 @@ async def dashboard_account_default(request: Request):
     if error: return error
     aid = str(form.get("account_id",""))
     result = _safe_call(account_store().set_default, aid)
-    return _redir("Default account updated" if result.get("id") else result.get("error","Failed"), "accounts", aid)
+    return _account_action_redirect("Default account updated" if result.get("id") else result.get("error","Failed"), form, aid)
 
 
 async def dashboard_account_delete(request: Request):
@@ -2228,7 +2244,7 @@ async def dashboard_account_delete(request: Request):
     if error: return error
     aid = str(form.get("account_id",""))
     result = _safe_call(account_store().delete_account, aid)
-    return _redir("Account deleted" if result.get("ok") else result.get("error","Failed"), "accounts")
+    return _account_action_redirect("Account deleted" if result.get("ok") else result.get("error","Failed"), form)
 
 
 async def dashboard_amp_state(request: Request):

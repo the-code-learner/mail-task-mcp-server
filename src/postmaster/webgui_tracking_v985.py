@@ -95,14 +95,29 @@ def _period_form(request: Request, active: str) -> str:
         start,end,_selected=_period(request)
         date1=start.astimezone(_ZONE).date().isoformat()
         date2=(end.astimezone(_ZONE)-timedelta(days=1)).date().isoformat()
+    # The lazy dashboard submits GET forms with new FormData(form), which does
+    # NOT include the clicked submit button. Period buttons were therefore
+    # silently losing their value and every selection reverted to 7 days.
+    # Explicit period links make navigation and history deterministic.
+    period_base={
+        key:value for key,value in passed.items()
+        if key not in {"ui_view","period","from","to"}
+    }
     buttons="".join(
-        '<button type="submit" name="period" value="'+period+'" class="v985-period'
-        +(" selected" if active==period else "")+'">'+label+'</button>'
+        '<a class="v985-period'+(" selected" if active==period else "")+
+        '" href="'+_e(
+            "/?"+urlencode({
+                **period_base,"ui_view":"tracking","period":period,
+                **({"from":date1,"to":date2} if period=="custom" else {}),
+            })+"#tracking"
+        )+'"'+(' aria-current="page"' if active==period else "")+'>'
+        +label+'</a>'
         for period,label in PERIODS
     )
     return (
         '<form method="get" action="/" class="v985-tracking-periods">'
         '<input type="hidden" name="ui_view" value="tracking">'
+        '<input type="hidden" name="period" value="custom">'
         '<strong>Statistics period</strong>'+hidden+buttons
         +'<label>From <input type="date" name="from" value="'+_e(date1)+'"></label>'
         +'<label>To <input type="date" name="to" value="'+_e(date2)+'"></label>'
@@ -341,8 +356,8 @@ TRACKING_STYLE=r"""
  font-size:11px;font-weight:800;text-decoration:none;white-space:nowrap}
 .v985-tracking-periods{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:10px 0}
 .v985-tracking-periods>strong{color:var(--v970-muted);font-size:11px;margin-right:8px}
-.v985-tracking-periods button{border:1px solid var(--v970-line);border-radius:7px;background:var(--v970-surface);
- color:var(--v970-text);padding:6px 11px}
+.v985-tracking-periods button,.v985-tracking-periods .v985-period{border:1px solid var(--v970-line);border-radius:7px;background:var(--v970-surface);
+ color:var(--v970-text);padding:6px 11px;text-decoration:none;display:inline-flex;align-items:center;min-height:33px}
 .v985-tracking-periods .v985-period.selected{background:#345ec2!important;border-color:#345ec2!important;color:white!important}
 .v985-tracking-periods label{display:flex;gap:4px;align-items:center;font-size:10px}
 .v985-tracking-periods input{padding:5px!important;min-height:30px}

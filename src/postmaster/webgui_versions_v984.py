@@ -1,7 +1,7 @@
 """v9.8.4 release status and guarded version changes in authenticated WebGUI.
 
-Uses the existing v9.6.7 preview/execute MCP backend. Never performs a version
-change without explicit CSRF-verified preview and a separate confirmation.
+Uses the v9.6.9 server-side pending preview/execute backend. Never performs a
+version change without CSRF-verified preview and separate explicit confirmation.
 """
 from __future__ import annotations
 
@@ -37,22 +37,52 @@ def version_summary(base: Any) -> str:
         '<a href="/?ui_view=system#system">Versions & updates</a></div>'
         '<div class="v984-release-grid">'
         f'<div><small>Installed version</small><strong>{_e(current)}</strong></div>'
-        f'<div><small>Latest stable</small><strong>{_e(latest)}</strong></div>'
+        f'<div><small>Latest eligible update</small><strong>{_e(latest)}</strong></div>'
         f'<div><small>Update status</small><strong>{_e(state)}</strong></div>'
         f'<div><small>Requested selector</small><strong>{_e(selector)}</strong></div></div>'
-        f'<p class="small muted">Last successful check: {_e(checked)}. Only published stable releases appear; draft PRs cannot be installed as stable updates.</p>'
+        f'<p class="small muted">Last successful check: {_e(checked)}. '
+        'The selected update channel determines eligible releases. '
+        'Draft PRs are never installable updates.</p>'
         '</section>'
     )
 
 
 def versions_settings(base: Any) -> str:
-    versions, lookup = runtime_control.stable_release_tags()
+    channel = runtime_control.preferred_release_channel()
+    versions, lookup = runtime_control.available_release_tags(channel=channel)
     build = base.build_status()
     running = str(build.get("version") or "unknown") if isinstance(build, dict) else "unknown"
     selector = runtime_control.read_control().get("selector") or str(
         build.get("requested_version") or "latest"
     ) if isinstance(build, dict) else "unknown"
-    options = "".join(f'<option value="{_e(v)}">{_e(v)}</option>' for v in versions)
+    options = "".join(
+        f'<option value="{_e(v)}">{_e(v)}'
+        f'{" · BETA" if "-beta." in v else " · Stable"}</option>'
+        for v in versions
+    )
+    chosen_stable=' selected' if channel=="stable" else ""
+    chosen_beta=' selected' if channel=="stable_beta" else ""
+    bootstrap_note=(
+        '<p class="small muted">Beta uses an immutable numeric transport Git tag '
+        'compatible with the original Portainer YAML. Beta installs stay pinned '
+        'until another explicitly confirmed update.</p>'
+    )
+    pref_form=(
+        '<form method="post" action="/dashboard/versions/channel">'
+        f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
+        '<label>Update channel <select name="release_channel">'
+        f'<option value="stable"{chosen_stable}>Stable only</option>'
+        f'<option value="stable_beta"{chosen_beta}>Stable + Beta</option>'
+        '</select></label>'
+        '<button type="submit">Save update preference</button>'
+        '</form>'
+        '<p class="small muted">Stable only is the default. Beta releases are opt-in '
+        'prereleases and may contain unfinished functionality. Choosing a channel '
+        'changes the eligible updates; it does not restart Postmaster immediately. '
+        'The original bootstrap auto-discovers stable releases only; an installed '
+        'Beta is pinned until you approve another change. Explicit version changes from '
+        'this page still require preview and confirmation.</p>'
+    )
     if not versions:
         selector_control = '<div class="notice">Release discovery unavailable; version selection is disabled.</div>'
     else:
@@ -60,12 +90,12 @@ def versions_settings(base: Any) -> str:
             '<form method="post" action="/dashboard/versions/preview">'
             f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
             '<label>Action <select name="operation">'
-            '<option value="update-latest">Update to latest stable</option>'
+            '<option value="update-latest">Update to latest allowed release</option>'
             '<option value="switch-version">Switch to selected version</option>'
             '<option value="pin-version">Pin selected version</option>'
             '<option value="rollback-version">Roll back to selected version</option>'
             '</select></label>'
-            '<label>Target stable release <select name="target_version">'
+            '<label>Target eligible release <select name="target_version">'
             f'{options}</select></label>'
             '<button class="primary" type="submit">Preview change</button>'
             '</form>'
@@ -74,7 +104,10 @@ def versions_settings(base: Any) -> str:
         '<section class="card wide" id="v984-versions">'
         '<h3>Versions & updates</h3>'
         f'<p>Installed: <strong>{_e(running)}</strong> · Selected runtime: <strong>{_e(selector)}</strong></p>'
-        f'<p class="small muted">Verified release list: {_e(lookup)}. GitHub draft and prerelease versions are excluded.</p>'
+        f'<p class="small muted">Release check: {_e(lookup)}. '
+        'Draft releases are always excluded; Beta is shown only when selected.</p>'
+        f'{pref_form}'
+        f'{bootstrap_note}'
         f'{selector_control}'
         '<p class="small muted">Preview and explicit confirmation are mandatory. '
         'A confirmed change is handled by the existing version selector and process restart mechanism; '
@@ -150,10 +183,19 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 status=400,
             )
         info = dict(result.get("action_preview") or {})
-        token = str(result.get("confirmation_token") or "")
+        # Since v9.6.9, the MCP lifecycle uses a server-side pending preview.
+        # The public preview_id is correlation metadata, NOT an approval bearer
+        # token. The former confirmation_token no longer exists in the runtime.
+        preview_id = str(result.get("preview_id") or "")
         exact_target = str(info.get("target_version_ref") or "")
-        if not token or not exact_target:
-            return _response_page("Missing confirmation state", "Preview cannot be confirmed.", 500)
+        if not preview_id or not exact_target:
+            return _response_page(
+                "Preview unavailable",
+                "<p>The runtime did not provide a complete server-side pending preview. "
+                "No version change has been scheduled.</p>"
+                '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
+                status=400,
+            )
         panel = (
             '<p>The following action changes the selected runtime after a restart.</p>'
             f'<p><b>Operation:</b> {_e(info.get("operation"))}<br>'
@@ -166,7 +208,7 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
             f'<input type="hidden" name="operation" value="{_e(operation)}">'
             f'<input type="hidden" name="target_version" value="{_e(exact_target)}">'
-            f'<input type="hidden" name="confirmation_token" value="{_e(token)}">'
+            f'<input type="hidden" name="preview_id" value="{_e(preview_id)}">'
             '<label><input type="checkbox" name="approved" value="yes" required>'
             'I explicitly approve this exact version change and restart.</label>'
             '<p><button type="submit">Confirm version change</button>'
@@ -182,11 +224,14 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             return PlainTextResponse("Explicit confirmation required", status_code=400)
         operation = str(form.get("operation") or "").strip()
         target = str(form.get("target_version") or "").strip()
-        token = str(form.get("confirmation_token") or "").strip()
-        if not target or not token:
-            return PlainTextResponse("Invalid confirmation state", status_code=400)
+        preview_id = str(form.get("preview_id") or "").strip()
+        if not target or not preview_id:
+            return PlainTextResponse("Invalid or missing server-side preview", status_code=400)
+        # Only explicit approval in this separate, CSRF-checked POST may execute
+        # the exact version the user reviewed. The runtime atomically consumes
+        # and validates the matching pending preview before scheduling restart.
         result = core.runtime_version_change_execute(
-            operation=operation, target_version=target, confirmation_token=token,
+            operation=operation, target_version=target, preview_id=preview_id,
         )
         if not isinstance(result, dict) or not result.get("ok"):
             return _response_page(
@@ -202,7 +247,35 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             'Reconnect and verify the installed build after restart.</p>',
         )
 
+    async def save_channel(req: Request) -> Response:
+        form,error=await base._verified_form(req)
+        if error is not None:
+            return error
+        chosen=str(form.get("release_channel") or "").strip()
+        try:
+            # Never make switching to Stable only silently downgrade an
+            # already running beta on the next ordinary latest-selector boot.
+            current=base.build_status()
+            running=str(current.get("version") or "") if isinstance(current,dict) else ""
+            if chosen=="stable" and "-beta." in running:
+                raise ValueError(
+                    "A Beta runtime is installed. Preview and install a published "
+                    "Stable release before disabling Beta updates."
+                )
+            runtime_control.save_release_channel(chosen)
+        except (ValueError,OSError) as exc:
+            return _response_page(
+                "Update preference not saved",
+                f'<p>{_e(str(exc))}</p>'
+                '<p><a href="/?ui_view=system&settings_tab=versions#system">Back to Settings</a></p>',
+                status=400,
+            )
+        return RedirectResponse(
+            "/?ui_view=system&settings_tab=versions#system",status_code=303,
+        )
+
     i = next((i for i, route in enumerate(app.router.routes) if isinstance(route, Mount)),
              len(app.router.routes))
     app.router.routes.insert(i, Route("/dashboard/versions/preview", preview, methods=["POST"]))
     app.router.routes.insert(i+1, Route("/dashboard/versions/execute", execute, methods=["POST"]))
+    app.router.routes.insert(i+2, Route("/dashboard/versions/channel", save_channel, methods=["POST"]))
