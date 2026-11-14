@@ -21,9 +21,9 @@ class McpCatalogV985Tests(unittest.TestCase):
         self.assertIn("4 MCP commands available",html)
         for name,_ in data:
             self.assertIn(name,html)
-        self.assertIn("Email & calendar",html)
-        self.assertIn("Tracking & analytics",html)
-        self.assertIn("Contacts & authorization",html)
+        self.assertIn("Email &amp; calendar",html)
+        self.assertIn("Tracking &amp; analytics",html)
+        self.assertIn("Contacts &amp; authorization",html)
         self.assertIn("Structured Data",html)
         self.assertIn("data-v985-tool-search",html)
         self.assertIn("MCP Catalog",html)

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
 import json
+import subprocess
+import sys
 import time
 import unittest
 
@@ -104,18 +107,33 @@ class V985BrowserLayoutTests(unittest.TestCase):
 
     def test_actual_production_composed_shell_in_chrome(self):
         """Inspect the exact release-composed shell, not only synthetic CSS fixtures."""
-        from postmaster import runtime as _runtime
-        from postmaster import webgui_v962 as shell
-        from starlette.requests import Request
-
-        request=Request({
-            "type":"http","method":"GET","scheme":"http",
-            "path":"/","query_string":b"ui_view=overview","headers":[],
-        })
-        response=shell._shell(request)
-        html=response.body.decode("utf-8")
-        self.assertEqual(response.headers["x-postmaster-webgui-design"],
-                         "v9.8.5-approved-v5")
+        # All earlier v9 tests mutate WebGUI modules in this process. A fresh
+        # Python interpreter is mandatory to inspect the real production
+        # startup composition rather than an artifact of test order.
+        source=(
+            "import base64\n"
+            "from starlette.requests import Request\n"
+            "from postmaster import runtime, webgui_v962 as shell\n"
+            "req=Request({'type':'http','method':'GET','scheme':'http',"
+            "'path':'/','query_string':b'ui_view=overview','headers':[]})\n"
+            "response=shell._shell(req)\n"
+            "assert response.headers['x-postmaster-webgui-design']=="
+            "'v9.8.5-approved-v5', response.headers['x-postmaster-webgui-design']\n"
+            "print('V985_SHELL_BEGIN')\n"
+            "print(base64.b64encode(response.body).decode('ascii'))\n"
+            "print('V985_SHELL_END')\n"
+        )
+        process=subprocess.run(
+            [sys.executable,"-c",source],capture_output=True,text=True,
+            timeout=45,check=True
+        )
+        stdout=process.stdout
+        self.assertIn('V985_SHELL_BEGIN',stdout)
+        self.assertIn('V985_SHELL_END',stdout)
+        encoded=stdout.split('V985_SHELL_BEGIN\n',1)[1].split(
+            '\nV985_SHELL_END',1
+        )[0].strip()
+        html=base64.b64decode(encoded,validate=True).decode('utf-8')
         self.assertIn('id="v985-production-ui"',html)
         self.assertIn('id="v984-scopebar"',html)
         self.assertIn('data-v985-compose',html)
