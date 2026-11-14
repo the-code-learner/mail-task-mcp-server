@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.11 - 2026-11-14
+
+### Beta: MaxMind GeoLite2 download authentication and actionable error diagnostics
+- Fixes the GeoIP database downloader's overzealous redirect handler: the MaxMind HTTP Basic authorization header is retained only for redirects between explicitly approved official MaxMind download hosts, while it is removed before following the signed Cloudflare R2 storage URL. Unauthorized hosts are still rejected.
+- Download failures now distinguish GeoLite2-City vs GeoLite2-ASN and report the HTTP status with **the failing stage** (MaxMind account/database permissions versus Cloudflare R2 transfer), rather than incorrectly assuming all HTTP 401/403 responses mean a bad key.
+- Safely extracts known machine-readable MaxMind error codes such as `PERMISSION_REQUIRED` when present. Never displays raw error bodies, signed redirect query strings, Account IDs, license keys, Authorization headers or remote responses in the UI.
+- Messages distinguish authorization failures from database permission/subscription, rate limits, service interruptions and signed-link/network filtering.
+- Regression tests cover preserving MaxMind auth over official HTTPS redirects, removing it on R2, rejecting unapproved redirects, 401/403/404/429/503 diagnostics and never exposing signed tokens or secrets.
+- Account ID and license key are still supplied only in the explicitly confirmed Settings → GeoIP action, never persisted. Existing City/ASN databases are protected by atomic validation.
+- Existing beta.10 single-account IMAP Refresh remains available. Beta only; Stable v9.8.8, Portainer YAML, persistent volumes and MCP tool schemas are unchanged.
+
 ## 9.8.9-beta.10 - 2026-11-14
 
 ### Beta: visible IMAP Refresh for a selected email account
