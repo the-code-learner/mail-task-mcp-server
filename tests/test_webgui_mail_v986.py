@@ -196,6 +196,8 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('@media(max-width:760px)',BETA_MAIL_STYLE)
         self.assertIn(':has(.v963-detail) .v989-mail-stream',BETA_MAIL_STYLE)
 
+    # Integration contract: must inspect the *final* runtime renderer, not a
+    # formatter that production HTTP requests might never call.
     def test_actual_composed_runtime_entrypoint_has_beta_mail_client(self):
         # This catches the original regression: runtime.py installed the modern
         # renderer then assigned v960.render_inbox back to raw v9.6.3 HTML.
