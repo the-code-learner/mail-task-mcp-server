@@ -170,7 +170,9 @@ def modern_inbox_markup(html: str, *, selected_account: str = "", query_string: 
             '<details class="v986-mail-filters">'
             '<summary>Advanced mailbox filters</summary>' + form + '</details>'
         )
-    html = _FILTER_PATTERN.sub(collapsible, html, count=1)
+    # The shell provides the account selector, folder navigation and email search.
+    # No second account/mailbox/search toolbar in the mail client.
+    html = _FILTER_PATTERN.sub("", html, count=1)
     html = html.replace('>Aggiorna</button>', '>Refresh</button>')
     html = html.replace("Use Aggiorna for an explicit incremental sync.", "Use Refresh for an explicit incremental sync.")
     html = re.sub(
@@ -192,17 +194,16 @@ def modern_inbox_markup(html: str, *, selected_account: str = "", query_string: 
 
 
 def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
-    """Beta: a real list/reader workspace with unchanged cached-message backend.
+    """Real split view: the safe reader is a sibling of the message list, not a table row.
 
-    The safe reader is moved by the client after the fragment is loaded, not
-    re-rendered or fetched from an untrusted remote sender.
+    This structure is generated server-side so it is correct before any JS runs,
+    including Sent messages, reply actions and the technical details inspector.
     """
     opening = '<div class="scroll"><table class="v960-mail-table v986-mail-list">'
-    if opening not in html or '<div class="v960-pagination">' not in html:
-        # An unknown older template must remain usable, not half-wrapped.
-        return html
-    # Filter shortcuts are real authenticated GET fragment links. Keep account,
-    # mailbox and search scopes, but never carry a selected message into filters.
+    reader = '<div class="v989-reader-source">'
+    pagination = '<div class="v960-pagination">'
+    if opening not in html or reader not in html or pagination not in html:
+        return html  # Never break an unexpected legacy Inbox renderer.
     params = dict(parse_qsl(query_string, keep_blank_values=False))
     for key in ("message_uid", "full_html", "full_html_intent", "compose_mode"):
         params.pop(key, None)
@@ -220,35 +221,33 @@ def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
         '<a data-v960-fragment="inbox" class="' + ("active" if active_unread else "")
         + '" href="' + escape(unread_url, quote=True) + '">Unread</a></nav>'
     )
-    start = (
+    begin = (
         '<div class="v989-mail-workspace" data-v989-mail-workspace>'
         '<div class="v989-mail-stream">'
         '<div class="v989-stream-header"><div><strong>Messages</strong>'
         '<span class="v989-stream-subtitle">Select a message to read</span></div>'
-        '<div class="v989-stream-actions">'
-        '<span class="v989-stream-count">Mailbox</span></div></div>'
+        '<span class="v989-stream-count"></span></div>'
         + tabs +
         '<div class="scroll v989-list-scroll">'
         '<table class="v960-mail-table v986-mail-list">'
     )
-    # Only replace the known mailbox table wrapper, leaving every form and
-    # message UID link under their existing security and rendering contracts.
-    html = html.replace(opening, start, 1)
-    # Insert the new reading pane immediately before the existing pagination.
-    # Reader details can themselves contain nested tables; never split on the
-    # first "</table>" because it could belong to the safe-message inspector.
-    finish = '<div class="v960-pagination">'
-    end = (
-        '</div>'
-        '<section class="v989-reading-pane" aria-label="Message reading pane">'
-        '<div class="v989-reader-empty">'
+    # The original table closes before the separately rendered reader-source;
+    # no regex parsing, nested table extraction, or DOM reparenting is required.
+    html = html.replace(opening, begin, 1)
+    html = html.replace(
+        '</table></div>' + reader,
+        '</table></div><div class="v989-scroll-status" aria-live="polite"></div>'
+        '</div><section class="v989-reading-pane" aria-label="Message reading pane">'
+        + reader, 1,
+    )
+    html = html.replace(
+        '</div>' + pagination,
+        '</div><div class="v989-reader-empty">'
         '<span class="v989-reader-envelope" aria-hidden="true">✉</span>'
         '<h3>Your messages</h3><p>Select a message on the left to read it here.</p>'
         '<p>Remote images remain blocked unless explicitly approved.</p>'
-        '</div></section></div>'
-        '<div class="v960-pagination">'
+        '</div></section></div>' + pagination, 1,
     )
-    html = html.replace(finish, end, 1)
     html = html.replace(
         "Cache-first mailbox view · IMAP remains source of truth · Safe Email is the default.",
         "Your mail, organized in one place.", 1,
