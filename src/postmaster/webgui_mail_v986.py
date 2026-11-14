@@ -59,6 +59,20 @@ def modern_compose_markup(html: str) -> str:
         html = html[:start] + EDITOR + html[finish:]
     else:
         html = html.replace(source, EDITOR, 1)
+    html = html.replace(
+        '<div class="v960-actions">',
+        '<div class="v98919-schedule-box">'
+        '<label>Schedule for <input type="datetime-local" name="scheduled_send_at" '
+        'aria-label="Scheduled email send date and time"></label>'
+        '<input type="hidden" name="scheduled_timezone" value="Europe/Rome">'
+        '<p class="v960-form-note">Local time (Europe/Rome). Scheduling explicitly '
+        'authorizes one automatic send; no further approval when due. '
+        'Tracking must be enabled; suppressed recipients are not eligible. '
+        'For attached files, use persistent file links.</p>'
+        '</div><div class="v960-actions">'
+        '<button type="submit" name="compose_action" value="schedule">Schedule send</button>',
+        1,
+    )
     return html.replace(
         '<summary>Compose inside Inbox</summary>',
         '<summary>Compose email</summary>', 1
@@ -355,6 +369,9 @@ MAIL_STYLE = r"""
 #panel-inbox details.v971-floating-compose>summary{font-size:14px;font-weight:800;padding:11px!important;
  border-radius:9px;background:var(--v970-surface-2)}
 #panel-inbox .v971-floating-compose form{padding:10px 12px 15px}
+#panel-inbox .v98919-schedule-box{padding:11px 13px;margin:10px 0;border:1px solid var(--v970-line);border-radius:9px;background:var(--v970-surface-2)}
+#panel-inbox .v98919-schedule-box label{display:flex;align-items:center;gap:9px;font-size:12px;font-weight:650;flex-wrap:wrap}
+#panel-inbox .v98919-schedule-box input{min-width:220px;color:var(--v970-text);background:var(--v970-surface);border:1px solid var(--v970-line);padding:7px;border-radius:7px}
 #panel-inbox .v971-floating-compose .v951-formgrid{display:grid;
  grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 #panel-inbox .v971-floating-compose .v951-formgrid .wide{grid-column:1/-1}
