@@ -10,6 +10,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from . import release_channels_v986 as channels
 from .confirmation_v967 import (
     CONFIRMATION_TTL_SECONDS,
     PersistentConfirmationTokens,
@@ -25,6 +26,9 @@ _RELEASE_CACHE_TTL_SECONDS = 60.0
 _RELEASE_LOCK = threading.RLock()
 _RELEASE_CACHE: dict[str, Any] = {
     "versions": [],
+    "beta_versions": [],
+    "beta_last_attempt_monotonic": None,
+    "beta_status": "never",
     "last_attempt_monotonic": None,
     "status": "never",
 }
@@ -48,10 +52,7 @@ def canonical_selector(value: str | None) -> str:
     text = str(value or "").strip()
     if text == "latest":
         return text
-    parsed = semver_tuple(text)
-    if parsed is None:
-        raise ValueError("version selector must be latest or a stable vX.Y.Z release")
-    return "v" + ".".join(str(part) for part in parsed)
+    return channels.canonical_tag(text)
 
 
 def parse_stable_release_tags(payload: Any) -> list[str]:
@@ -66,7 +67,7 @@ def parse_stable_release_tags(payload: Any) -> list[str]:
     return [candidates[key] for key in sorted(candidates, reverse=True)]
 
 
-def _fetch_stable_release_tags() -> list[str]:
+def _fetch_release_catalog() -> Any:
     repo = os.getenv("POSTMASTER_REPO", "the-code-learner/mail-task-mcp-server").strip()
     if not _REPO_RE.fullmatch(repo):
         raise RuntimeError("invalid repository identifier")
@@ -78,7 +79,39 @@ def _fetch_stable_release_tags() -> list[str]:
         },
     )
     with urllib.request.urlopen(request, timeout=10) as response:
-        return parse_stable_release_tags(json.load(response))
+        return json.load(response)
+
+
+def _fetch_stable_release_tags() -> list[str]:
+    return parse_stable_release_tags(_fetch_release_catalog())
+
+
+def _fetch_beta_release_tags() -> list[str]:
+    return channels.release_tags(_fetch_release_catalog(),channel=channels.STABLE_AND_BETA)
+
+
+def available_release_tags(*,channel: str=channels.STABLE, force: bool=False) -> tuple[list[str],str]:
+    selected=channels.valid_channel(channel)
+    if selected==channels.STABLE:
+        return stable_release_tags(force=force)
+    now=time.monotonic()
+    with _RELEASE_LOCK:
+        last=_RELEASE_CACHE.get("beta_last_attempt_monotonic")
+        fresh=last is not None and now-float(last)<_RELEASE_CACHE_TTL_SECONDS
+        if force or not fresh:
+            _RELEASE_CACHE["beta_last_attempt_monotonic"]=now
+            try:
+                versions=_fetch_beta_release_tags()
+                if not versions:
+                    raise RuntimeError("no eligible stable or beta releases found")
+                _RELEASE_CACHE["beta_versions"]=versions
+                _RELEASE_CACHE["beta_status"]="ok"
+            except Exception:
+                _RELEASE_CACHE["beta_status"]="error"
+        return (
+            list(_RELEASE_CACHE.get("beta_versions") or []),
+            str(_RELEASE_CACHE.get("beta_status") or "never"),
+        )
 
 
 def stable_release_tags(*, force: bool = False) -> tuple[list[str], str]:
@@ -123,7 +156,16 @@ def read_control(path: Path | None = None) -> dict[str, Any]:
         pass
     if raw.get("check_updates_once") is True:
         result["check_updates_once"] = True
+    try:
+        if "release_channel" in raw:
+            result["release_channel"] = channels.valid_channel(str(raw["release_channel"]))
+    except ValueError:
+        pass
     return result
+
+
+def preferred_release_channel(path: Path | None = None) -> str:
+    return str(read_control(path).get("release_channel") or channels.STABLE)
 
 
 def write_control(
@@ -132,9 +174,17 @@ def write_control(
     restart_ref_once: str | None = None,
     check_updates_once: bool = False,
     path: Path | None = None,
+    release_channel: str | None = None,
 ) -> dict[str, Any]:
     target = path or control_path()
+    previous=read_control(target)
+    selected_channel=(
+        channels.valid_channel(release_channel)
+        if release_channel is not None else previous.get("release_channel")
+    )
     payload: dict[str, Any] = {"selector": canonical_selector(selector)}
+    if selected_channel:
+        payload["release_channel"]=selected_channel
     if restart_ref_once:
         payload["restart_ref_once"] = canonical_selector(restart_ref_once)
     if check_updates_once:
@@ -146,11 +196,26 @@ def write_control(
     return payload
 
 
+def save_release_channel(channel: str, *,path: Path | None=None) -> dict[str,Any]:
+    """Persist an update visibility preference without restarting or changing source."""
+    selected=channels.valid_channel(channel)
+    previous=read_control(path)
+    # Do not silently retain a prerelease pin that would conflict with opting
+    # out of beta: require an explicit version switch first.
+    pinned=str(previous.get("selector") or "latest")
+    if selected==channels.STABLE and not channels.release_is_allowed(pinned,selected) and pinned!="latest":
+        raise ValueError("switch to a stable version before disabling beta updates")
+    return write_control(
+        selector=pinned,
+        restart_ref_once=previous.get("restart_ref_once"),
+        check_updates_once=bool(previous.get("check_updates_once")),
+        path=path,
+        release_channel=selected,
+    )
+
+
 def current_release_tag(version: str | None) -> str:
-    parsed = semver_tuple(version)
-    if parsed is None:
-        raise ValueError("running version is not a stable SemVer release")
-    return "v" + ".".join(str(part) for part in parsed)
+    return channels.canonical_tag(version)
 
 
 def _running_version() -> str:
