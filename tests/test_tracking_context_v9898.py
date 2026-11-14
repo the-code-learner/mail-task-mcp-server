@@ -46,6 +46,7 @@ class TrackingContextV9898(unittest.TestCase):
                 ('a','INBOX','51',51,'<inbox-only@invalid>','2026-11-13');
             """)
 
+    # Exact-commit release guard: a source email link must never guess the account or UID.
     def test_deep_link_finds_exact_source_sent_uid_and_mailbox(self):
         events=[
             {"event_kind":"email_open","account_id":"a","message_id":"<same@invalid>"},
