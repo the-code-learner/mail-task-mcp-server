@@ -14,7 +14,10 @@ from typing import Any
 STABLE="stable"
 STABLE_AND_BETA="stable_beta"
 CHANNELS=frozenset({STABLE,STABLE_AND_BETA})
-_TAG_RE=re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)(?:-beta\.([1-9][0-9]*))?$")
+_TAG_RE=re.compile(
+    r"^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-beta\.([1-9][0-9]*))?$"
+)
 
 
 def valid_channel(value: str | None) -> str:
