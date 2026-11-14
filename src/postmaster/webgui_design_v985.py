@@ -7,7 +7,10 @@ and all 134 MCP tools remain authoritative.
 from __future__ import annotations
 
 from html import escape
+import re
 from typing import Any
+
+from starlette.responses import HTMLResponse
 
 from .webgui_v962_views import VIEWS
 
@@ -373,7 +376,36 @@ def install_webgui_design_v985(v962: Any, v970: Any, version: str) -> None:
     styles._postmaster_v985_styles = True
     v962._styles = styles
     v962._nav = navigation
-    v970._context_bar = lambda: contextbar(version)
+    # The 9.8.4 scope selector already wraps v962._shell. Replace the final
+    # rendered header ONLY, keeping its live selectors inside the approved topbar.
+    # Do not mutate v970._context_bar globally: its legacy contract tests and
+    # independent early-overlays must remain unaffected.
+    previous_shell = v962._shell
+
+    def approved_shell(request: Any) -> HTMLResponse:
+        response = previous_shell(request)
+        if "text/html" not in str(response.headers.get("content-type", "")).lower():
+            return response
+        html = response.body.decode("utf-8")
+        header_match = re.search(r'<header class="v970-contextbar">.*?</header>', html, flags=re.S)
+        if header_match:
+            scope = re.search(
+                r'<div class="v984-scopebar" id="v984-scopebar">.*?</div>',
+                header_match.group(0), flags=re.S,
+            )
+            current = contextbar(version)
+            if scope:
+                current = current.replace(
+                    '<div class="v970-context-actions">',
+                    scope.group(0) + '<div class="v970-context-actions">', 1,
+                )
+            html = html[:header_match.start()] + current + html[header_match.end():]
+        headers = {k:v for k,v in response.headers.items() if k.lower()!="content-length"}
+        headers["X-Postmaster-WebGUI-Design"]="v9.8.5-approved-v5"
+        return HTMLResponse(html, status_code=response.status_code,headers=headers)
+
+    approved_shell._postmaster_v985_shell=True
+    v962._shell=approved_shell
     if 'id="v985-production-ui"' not in v962.SCRIPT:
         v962.SCRIPT += DESIGN_SCRIPT
 
