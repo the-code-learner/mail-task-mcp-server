@@ -70,7 +70,14 @@ class BrowserInteractionV986(unittest.TestCase):
               const checked=form.querySelector('.v986-file-choices input[type="checkbox"]');
               checked.checked=true;
               checked.dispatchEvent(new Event('change',{bubbles:true}));
+              fmt.value='amp';
+              fmt.dispatchEvent(new Event('change',{bubbles:true}));
+              const ampBefore=form.querySelector('textarea[name="body_amp"]').value;
+              editor.querySelector('[data-v986-editor-mode="visual"]').click();
+              editor.querySelector('[data-v986-editor-mode="code"]').click();
+              const ampAfter=form.querySelector('textarea[name="body_amp"]').value;
               return {
+                ampBefore,ampAfter,
                 start,afterSelected:attachments.selectedOptions.length,
                 chosen:attachments.selectedOptions[0]?.value,
                 count:form.querySelector('.v986-attachments summary')?.textContent||'',
@@ -91,7 +98,10 @@ class BrowserInteractionV986(unittest.TestCase):
             self.assertIn("Hello",data["alternate"])
             self.assertIn("Hello",data["coded"])
             self.assertIn("Edited in code",data["afterCode"])
-            self.assertEqual(data["editorFormat"],"html")
+            self.assertEqual(data["editorFormat"],"amp")
+            self.assertIn("<html amp4email>",data["ampBefore"])
+            self.assertIn("<html amp4email>",data["ampAfter"])
+            self.assertEqual(data["ampBefore"],data["ampAfter"])
             self.assertTrue(data["codeVisible"])
             self.assertTrue(data["visualHidden"])
 
