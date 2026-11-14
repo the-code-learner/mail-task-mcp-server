@@ -85,6 +85,7 @@ class AllAccountMailboxesV9897(unittest.TestCase):
     def render(self, query):
         return webgui_v963.render_inbox_v963(self.base,_request(query))
 
+    # Exact-commit CI release gate for the live multi-account renderer.
     def test_all_accounts_inbox_combines_accounts_not_default_only(self):
         html=self.render("ui_view=inbox&mailbox=INBOX")
         self.assertIn("From A",html)
