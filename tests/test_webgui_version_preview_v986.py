@@ -131,7 +131,7 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
             ("update-latest","v9.8.5","pv_demo_6fd25"),
         ])
 
-    # Exact-commit release guard: only a verified running build may trigger dashboard return.
+    # Exact-SHA publication guard: wait >=15s and only redirect on the confirmed target build.
     def test_restart_countdown_never_resubmits_the_update_post(self):
         client,core,base=_client()
         with client:
