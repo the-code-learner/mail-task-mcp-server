@@ -307,6 +307,15 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('min-height:105px!important', BETA_MAIL_STYLE)
         self.assertIn('grid-template-columns:minmax(405px,38%)', BETA_MAIL_STYLE)
 
+    def test_beta5_navigation_changes_folder_without_reusing_old_inbox(self):
+        from postmaster import webgui_v962
+        source=webgui_v962.SCRIPT
+        self.assertIn("const isFolder=a.hasAttribute('data-v985-mailbox')",source)
+        self.assertIn("load(view,u.toString(),true,isFolder || !isNav)",source)
+        self.assertIn("next.dataset.v989LoadedMailbox=",source)
+        self.assertIn("target.setAttribute('aria-busy','true')",source)
+        self.assertIn("target.classList.add('v989-folder-loading')",source)
+
     def test_beta5_list_supports_scroll_loading_and_manual_retry(self):
         self.assertIn('async function more()', MAIL_SCRIPT)
         self.assertIn("moreButton.textContent='Load more'", MAIL_SCRIPT)
