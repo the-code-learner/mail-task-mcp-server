@@ -21,6 +21,9 @@ class _Base:
     def __init__(self, store):
         self.store=store
 
+    def _safe_call(self, fn, *args, **kwargs):
+        return fn(*args, **kwargs)
+
     def list_email_accounts(self):
         return [
             {"id":"a","label":"Account A","email_address":"a@example.invalid",
