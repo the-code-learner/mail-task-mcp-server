@@ -162,7 +162,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
         result=modern_inbox_markup(self._sample_real_folder("Sent"))
         pane=result.split('class="v989-reading-pane"')[1].split('class="v960-pagination"')[0]
         self.assertIn('class="v963-tech"',pane)
-        self.assertIn('class="v963-url-table"',pane)
+        self.assertIn('class="scroll v963-url-table"',pane)
         self.assertIn("max-height:300px",BETA_MAIL_STYLE)
         self.assertIn("overflow-x:auto!important",BETA_MAIL_STYLE)
         self.assertIn("position:static!important",BETA_MAIL_STYLE)
