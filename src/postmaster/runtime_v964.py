@@ -163,6 +163,20 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
                 "version_change_applied": False,
             }
 
+        # The legacy version_control interface cannot bind a resolved beta
+        # update to its exact approved target. Fail closed instead of falling
+        # back to a stable-only "latest" restart with a misleading preview.
+        if runtime_control.preferred_release_channel() == "stable_beta":
+            return {
+                **status,
+                "ok": False,
+                "error": (
+                    "Use runtime_version_change_preview and "
+                    "runtime_version_change_execute for Stable + Beta updates"
+                ),
+                "version_change_applied": False,
+            }
+
         try:
             target = _version_operation_target(op, target_version)
         except ValueError as exc:
