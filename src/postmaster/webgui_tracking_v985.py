@@ -422,6 +422,20 @@ TRACKING_STYLE=r"""
 .v985-tracking-periods button,.v985-tracking-periods .v985-period{border:1px solid var(--v970-line);border-radius:7px;background:var(--v970-surface);
  color:var(--v970-text);padding:6px 11px;text-decoration:none;display:inline-flex;align-items:center;min-height:33px}
 .v985-tracking-periods .v985-period.selected{background:#345ec2!important;border-color:#345ec2!important;color:white!important}
+/* Period loading does not overwrite the previous result until the new
+   request completes. This matters for reports with slow cache aggregation. */
+.v98913-tracking-loading-banner{margin:8px 0 11px;padding:9px 12px;
+ display:flex;align-items:center;gap:12px;border-radius:8px;
+ color:var(--v970-text);background:var(--v970-surface-2);
+ border:1px solid var(--v970-line);font-size:12px}
+.v98913-tracking-loading-banner:before{content:'';width:13px;height:13px;
+ flex:0 0 13px;border:2px solid var(--v970-accent);border-top-color:transparent;
+ border-radius:50%;animation:v98913spin .9s linear infinite}
+@keyframes v98913spin{to{transform:rotate(360deg)}}
+.v98913-tracking-loading-banner button{padding:4px 9px;border-radius:6px}
+.v985-tracking-periods .v985-period.is-pending{outline:2px solid var(--v970-accent);
+ outline-offset:2px;opacity:.82}
+.v98913-tracking-loading .v985-tracking-periods .v985-period{cursor:progress}
 .v985-tracking-periods label{display:flex;gap:4px;align-items:center;font-size:10px}
 .v985-tracking-periods input{padding:5px!important;min-height:30px}
 .v985-tracking-dates{font-size:10px;color:var(--v970-muted);margin:6px 0 18px}
