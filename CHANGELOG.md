@@ -2,6 +2,16 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.6 - 2026-11-14
+
+### Beta: readable email cards and ten-second update return
+- Replaced fragile CSS grid positioning inside message table rows with **normal vertical flex flow**: sender, subject and snippet now occupy separate stacked lines regardless of old inherited table styling. Avatar, unread dot and date are independently positioned and do not push or overlap the text. Applies to Inbox, Sent, Drafts and Spam.
+- Kept the existing protected two-pane safe mail reader, folder transitions and authenticated infinite-scroll loading from beta.5.
+- After the explicitly approved update POST, return a fully styled **Postmaster update countdown page** (10 seconds) that automatically navigates back to the dashboard Settings/Versions view. Includes a no-JavaScript meta-refresh fallback and direct return link.
+- Countdown never retries or repeats the version-change POST, and clearly explains that the installed build must be verified after the container comes back online.
+- Added regression tests checking stacked mail card structure, countdown content, correct target and no duplicate execution.
+- Prerelease only, Stable v9.8.8, canonical Portainer YAML, mailbox data and all 134 MCP tool schemas remain unchanged.
+
 ## 9.8.9-beta.5 - 2026-11-14
 
 ### Beta: correct visible Inbox, Sent, Spam and Drafts layout; more reliable page loading
