@@ -230,8 +230,12 @@ def _event_html(event: dict[str, Any]) -> str:
             info.append("<small>Etichetta: " + escape(label) + "</small>")
     else:
         info.append("<strong>URL di destinazione:</strong>")
-        parts = urlsplit(original)
-        if parts.scheme.lower() in {"http", "https"} and parts.netloc:
+        try:
+            parts = urlsplit(original)
+            clickable = parts.scheme.lower() in {"http", "https"} and bool(parts.netloc)
+        except ValueError:
+            clickable = False
+        if clickable:
             info.append('<a href="' + escape(original, quote=True) +
                         '" target="_blank" rel="noopener noreferrer">' +
                         escape(original) + "</a>")
