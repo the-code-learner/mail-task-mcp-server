@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.14 - 2026-11-14
+
+### Beta: restore received-mail heatmap and statistics for All accounts
+- Fixes a regression in the Tracking Overview that showed **When emails are received** as a blank grid with **Select one email account** whenever the global filter was **All accounts**.
+- Aggregates received-mail dates from the **existing synchronized mailbox caches** of all enabled email accounts. Mailboxes are identified by their actual **received** role, so differing provider Inbox names work; sent messages and disabled accounts are excluded.
+- The combined received-mail metric and hourly/day heatmap now respect the selected statistics period, without starting IMAP sessions or silently choosing a default account.
+- Explicit selection of a single email account preserves the existing per-account live Inbox sample behavior.
+- Displays a clear cache-scoped note, and caps read-only sampled messages at 20,000 with a disclosure if exceeded. No unseen or uncached email is counted.
+- Tests cover enabled/disabled accounts, different Inbox provider names, overlapping UIDs, exclusion of Sent, selected-account filtering, period windows and full Tracking rendering.
+- Beta-only, Stable main v9.8.8, canonical Portainer YAML, persistent mail records and MCP tools unchanged.
+
 ## 9.8.9-beta.13 - 2026-11-14
 
 ### Beta: reliable Tracking period feedback and correct GeoIP availability
