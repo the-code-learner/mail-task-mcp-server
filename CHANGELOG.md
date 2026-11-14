@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.13 - 2026-11-14
+
+### Beta: reliable Tracking period feedback and correct GeoIP availability
+- Tracking statistics can take seconds to aggregate from multiple sources. Switching between 24 hours, 7 days, 28 days, 90 days or a custom date range now immediately displays a visible **Loading [period] statistics…** state, with a spinner, accessible status and clear pending period indicator.
+- The previous report stays visible until the new fragment has loaded; rapid successive selections cancel outdated requests. Failed tracking loads preserve working controls and show a **Retry** button instead of replacing the dashboard with an error fragment.
+- The global fragment loader retains explicit forced reloads for period links and custom-date GET submissions; selection becomes authoritative only when the requested report is returned.
+- GeoIP availability messaging now distinguishes **required free City + ASN** databases from the separate **optional paid ISP** database. If City and ASN are working, it reports them as active and describes optional ISP as additional enrichment rather than falsely claiming all local databases are unavailable.
+- Partial City/ASN installs receive a specific missing-required-database message; absent free databases retain a clear installation recommendation in Settings.
+- Regression tests check period links preserve account/owner filters, async in-flight behavior, error retry, and all four local GeoIP availability combinations.
+- Prerelease only; stable v9.8.8, existing Portainer YAML, user data and 134 MCP tools unchanged.
+
 ## 9.8.9-beta.12 - 2026-11-14
 
 ### Beta: health-aware return following version changes
