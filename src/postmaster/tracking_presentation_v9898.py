@@ -44,7 +44,7 @@ def attach_sent_email_links(base: Any, events: list[dict[str, Any]]) -> None:
                         key = account, str(match["message_id"] or "")
                         if key not in messages:
                             messages[key] = str(match["mailbox"]), str(match["uid"])
-    except (OSError, ValueError, Exception):
+    except Exception:
         # Analytics must remain usable when mail cache is not initialized;
         # never invent links to missing messages.
         return
