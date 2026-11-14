@@ -567,6 +567,14 @@ BETA_MAIL_STYLE = r"""
  #panel-inbox .v989-mail-workspace:has(.v963-detail){height:auto}
  #panel-inbox .v989-reading-pane .v963-detail{padding:16px!important}
 }
+#panel-inbox .v989-list-scroll .v989-account-origin{
+ display:block!important;overflow:hidden!important;text-overflow:ellipsis!important;
+ white-space:nowrap!important;font-size:10px!important;line-height:16px!important;
+ margin-top:2px!important;color:var(--v970-accent)!important;font-weight:600
+}
+#panel-inbox .v989-list-scroll .v987-message:has(.v989-account-origin){
+ min-height:113px!important
+}
 /* Beta.6: remove CSS-grid table-row layout entirely. Grid positioning in
    browser table fragments and competing inherited td rules produced overlapping
    sender/subject text despite the earlier fixed grid tracks. Every card now
@@ -798,6 +806,8 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
  function mailboxKey(url) {
    const u=new URL(url,location.href);
    u.searchParams.delete('message_uid');
+   u.searchParams.delete('message_account_id');
+   u.searchParams.delete('message_mailbox');
    u.searchParams.delete('compose_mode');
    u.searchParams.delete('full_html');
    u.searchParams.delete('full_html_intent');
@@ -851,11 +861,16 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    const source=workspace.querySelector('.v989-reader-source');
    if(!scroller || !tbody || !pane || !source)return;
    // Reader is server-rendered as a sibling, never moved from an invalid tr.
-   const uid=new URL(location.href).searchParams.get('message_uid');
+   const selectedQuery=new URL(location.href).searchParams;
+   const uid=selectedQuery.get('message_uid');
+   const selectedAccount=selectedQuery.get('message_account_id');
+   const selectedMailbox=selectedQuery.get('message_mailbox');
    const rows=[...tbody.querySelectorAll('tr[data-v960-href]')];
    rows.forEach(row=>{
-     const selected=Boolean(uid&&new URL(row.dataset.v960Href,location.href)
-       .searchParams.get('message_uid')===uid);
+     const rowQuery=new URL(row.dataset.v960Href,location.href).searchParams;
+     const selected=Boolean(uid && rowQuery.get('message_uid')===uid &&
+       (!selectedAccount || rowQuery.get('message_account_id')===selectedAccount) &&
+       (!selectedMailbox || rowQuery.get('message_mailbox')===selectedMailbox));
      row.classList.toggle('v989-selected',selected);
      row.setAttribute('aria-selected',String(selected));
    });
@@ -888,7 +903,10 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        const u=new URL(nextLink.href,location.href);
        if(u.origin!==location.origin)throw new Error('Cross-origin page');
        u.pathname='/dashboard/view/inbox';u.searchParams.set('ui_view','inbox');
-       u.searchParams.delete('message_uid');u.searchParams.delete('compose_mode');
+       u.searchParams.delete('message_uid');
+       u.searchParams.delete('message_account_id');
+       u.searchParams.delete('message_mailbox');
+       u.searchParams.delete('compose_mode');
        u.searchParams.delete('full_html');u.searchParams.delete('full_html_intent');
        u.hash='';
        const response=await fetch(u.toString(),{credentials:'same-origin',cache:'no-store',
@@ -900,13 +918,17 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        if(!workspace.isConnected || mailboxKey(location.href)!==key)return;
        const extra=panel.querySelector('.v989-list-scroll tbody');
        const extraRows=[...(extra?.querySelectorAll('tr[data-v960-href]')||[])];
-       const known=new Set([...tbody.querySelectorAll('tr[data-v960-href]')]
-         .map(row=>new URL(row.dataset.v960Href,location.href).searchParams.get('message_uid')));
+       const composite=row=>{
+         const p=new URL(row.dataset.v960Href,location.href).searchParams;
+         return [p.get('message_account_id')||p.get('account_id')||'',
+           p.get('message_mailbox')||p.get('mailbox')||'',p.get('message_uid')||''].join('\u001f');
+       };
+       const known=new Set([...tbody.querySelectorAll('tr[data-v960-href]')].map(composite));
        let added=0;
        for(const item of extraRows){
-         const itemUid=new URL(item.dataset.v960Href,location.href).searchParams.get('message_uid');
-         if(!itemUid||known.has(itemUid))continue;
-         known.add(itemUid);
+         const identity=composite(item);
+         if(!identity.split('\u001f')[2]||known.has(identity))continue;
+         known.add(identity);
          const row=document.importNode(item,true);
          bindMessageRow(row,scroller);
          row.querySelectorAll('.v987-date[data-v987-date]').forEach(normalizeDate);
