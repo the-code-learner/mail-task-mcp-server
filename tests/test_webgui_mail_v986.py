@@ -144,6 +144,16 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertNotIn('message_uid=42',filters)
         self.assertIn('data-v960-fragment="inbox"',filters)
 
+    def test_beta_live_reader_reuses_original_safe_message_element(self):
+        from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
+        self.assertIn('function enhanceBetaInbox(inbox)', MAIL_SCRIPT)
+        self.assertIn("const detail=detailRow.querySelector('.v963-detail')", MAIL_SCRIPT)
+        self.assertIn('if(detail)pane.append(detail)', MAIL_SCRIPT)
+        self.assertIn('detailRow.remove()', MAIL_SCRIPT)
+        self.assertIn('grid-template-columns:minmax(310px,375px)', BETA_MAIL_STYLE)
+        self.assertIn('@media(max-width:760px)', BETA_MAIL_STYLE)
+        self.assertIn(':has(.v963-detail) .v989-mail-stream', BETA_MAIL_STYLE)
+
     def test_beta_uses_cached_snippets_without_fetching_remote_media(self):
         sample = INBOX.replace(
             "<td>Subject</td>",
