@@ -196,6 +196,41 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('@media(max-width:760px)',BETA_MAIL_STYLE)
         self.assertIn(':has(.v963-detail) .v989-mail-stream',BETA_MAIL_STYLE)
 
+    def test_actual_composed_runtime_entrypoint_has_beta_mail_client(self):
+        # This catches the original regression: runtime.py installed the modern
+        # renderer then assigned v960.render_inbox back to raw v9.6.3 HTML.
+        from unittest.mock import patch
+        from starlette.requests import Request
+        from postmaster import runtime
+        html=self._sample_real_folder("Inbox")
+        request=Request({"type":"http","method":"GET","path":"/dashboard/view/inbox",
+                         "query_string":b"ui_view=inbox&account_id=one&mailbox=INBOX"})
+        with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=html):
+            actual=runtime._webgui_v960.render_inbox(object(),request)
+            actual_v951=runtime._webgui_v963.v951.render_inbox(object(),request)
+        for result in (actual,actual_v951):
+            self.assertIn('class="v989-mail-workspace"',result)
+            self.assertIn('class="v989-reading-pane"',result)
+            self.assertIn('class="v989-mail-stream"',result)
+            self.assertIn('class="v989-reader-source"',result)
+            self.assertNotIn('class="v951-toolbar"',result)
+            self.assertIn('data-v960-href=',result)
+
+    def test_composed_renderer_keeps_every_mailbox_including_drafts(self):
+        from unittest.mock import patch
+        from starlette.requests import Request
+        from postmaster import runtime
+        for folder in ("Inbox","Sent","Spam","Drafts","Trash"):
+            with self.subTest(folder=folder):
+                html=self._sample_real_folder(folder)
+                request=Request({"type":"http","method":"GET",
+                                 "path":"/dashboard/view/inbox",
+                                 "query_string":("ui_view=inbox&account_id=one&mailbox="+folder).encode()})
+                with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=html):
+                    response=runtime._webgui_v960.render_inbox(object(),request)
+                self.assertIn('class="v989-reading-pane"',response)
+                self.assertIn('class="v989-mail-workspace"',response)
+
     def test_beta_narrow_list_never_inherits_old_table_minimum_width(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
         self.assertIn("table.v986-mail-list{display:block!important;", BETA_MAIL_STYLE)
