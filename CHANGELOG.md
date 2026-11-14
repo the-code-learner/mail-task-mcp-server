@@ -2,6 +2,20 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.2 - 2026-11-14
+
+### Beta: coherent mail client in every folder
+- Fixed **Inbox, Sent, Spam, Drafts and Trash** to use the same two-column mail workspace inside the shared folder sidebar. The safe message reader now renders as a sibling of the message list instead of inside a table row, preventing the old full-width/full-screen message layout and excessive whitespace.
+- Removed the duplicate account, mailbox, subject, keyword and day-range filter toolbar from the email workspace; global account selection, sidebar folders and the search bar remain in place. Kept contextual All and Unread filters.
+- Added real infinite scrolling to the list pane: reaching the bottom fetches the next **same-origin authenticated cached mailbox page**, appends new message cards without duplicating UIDs, retains list position and preserves per-message navigation; no automatic IMAP sync or remote message content loads.
+- Constrained message content, full text and technical evidence tables to the reading pane with wrapping and independently scrolling diagnostics; the evidence remains accessible and safe-mail blocking is unchanged.
+- Mobile layouts show a focused list/reader view without the legacy fixed full-screen overlay; drafts remain non-sending until an authorized explicit draft/send action.
+- Regression coverage for folder-independent layout, nested technical evidence, safe reader, filter scoping, pagination and infinite-scroll contracts.
+
+### Prerelease boundaries
+- Beta only; stable 9.8.8 and `main` remain unchanged. Installation requires Stable + Beta opt-in and explicit update approval.
+- Existing 134 MCP tools and original Portainer `postmaster-mcp.yml` remain unchanged.
+
 ## 9.8.9-beta.1 - 2026-11-14
 
 ### Beta: familiar three-pane email client
