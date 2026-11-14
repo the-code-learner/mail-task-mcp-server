@@ -166,6 +166,11 @@ MAIL_STYLE = r"""
 #panel-inbox .v963-proxy-card{margin-top:20px!important}
 #panel-inbox details.v971-floating-compose{border:1px solid var(--v970-line)!important;border-radius:11px;
  margin:15px 0!important;box-shadow:none!important;background:var(--v970-surface)}
+/* The sidebar Compose action is canonical; never show a second floating action. */
+#panel-inbox details.v971-floating-compose:not([open]){display:none!important}
+#panel-inbox details.v971-floating-compose[open]{position:relative!important;inset:auto!important;
+ right:auto!important;bottom:auto!important;width:100%!important;max-height:none!important;overflow:visible!important;
+ z-index:auto!important;box-shadow:none!important}
 #panel-inbox details.v971-floating-compose>summary{font-size:14px;font-weight:800;padding:11px!important;
  border-radius:9px;background:var(--v970-surface-2)}
 #panel-inbox .v971-floating-compose form{padding:10px 12px 15px}
