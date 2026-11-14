@@ -811,6 +811,7 @@ class SchedulerEngine:
 
     def pause_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT status,action_type FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
@@ -827,6 +828,7 @@ class SchedulerEngine:
 
     def resume_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
@@ -947,6 +949,7 @@ class SchedulerEngine:
 
     def delete_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
                 "SELECT id, owner_id, project_id, title, action_type, status FROM jobs WHERE id=?",
                 (job_id,),
