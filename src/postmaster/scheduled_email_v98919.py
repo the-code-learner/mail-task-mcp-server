@@ -102,7 +102,8 @@ class ScheduledEmailService:
 
     def schedule(self, *, account_id: str, send_at: str, message: dict[str, Any],
                  timezone_name: str = "Europe/Rome", owner_id: str = "",
-                 project_id: str = "", idempotency_key: str | None = None) -> dict[str, Any]:
+                 project_id: str = "", idempotency_key: str | None = None,
+                 tracking_off_authorized: bool = False) -> dict[str, Any]:
         """Explicit invocation authorizes one exact message, with no later prompt."""
         aid = str(account_id or "").strip()
         if not aid:
@@ -116,10 +117,13 @@ class ScheduledEmailService:
         client._validate_recipients(recipients)
         if client.suppressed_recipients(recipients):
             raise SchedulerError("Suppressed recipients cannot be autonomously scheduled")
-        if frozen["track_opens"] is False or (
-            frozen["track_opens"] is None and not bool(getattr(client.settings, "tracking_default", False))
+        if not tracking_off_authorized and (
+            frozen["track_opens"] is False or (
+                frozen["track_opens"] is None
+                and not bool(getattr(client.settings, "tracking_default", False))
+            )
         ):
-            raise SchedulerError("Tracking OFF requires fresh explicit chat approval; schedule only after that policy is satisfied")
+            raise SchedulerError("Tracking OFF requires fresh explicit chat approval before scheduling")
         key = str(idempotency_key or "").strip() or None
         if key and len(key) > 180:
             raise SchedulerError("idempotency_key is too long")
@@ -129,6 +133,7 @@ class ScheduledEmailService:
         project = project_id or "scheduled-email"
         payload = {"account_id": aid, "message": frozen, "authorized_at_utc": now,
                    "authorization": "explicit_schedule", "idempotency_key": key or job_id,
+                   "tracking_off_authorized": bool(tracking_off_authorized),
                    "send_at": due.isoformat()}
         with self.scheduler._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -220,7 +225,13 @@ class ScheduledEmailService:
         try:
             payload = json.loads(row["payload_json"])
             message = payload["message"]
-            result = self.mail_client(payload["account_id"]).send_email(
+            client = self.mail_client(payload["account_id"])
+            recipients = list(dict.fromkeys(message["to"] + message["cc"] + message["bcc"]))
+            # A newly suppressed recipient must stop a queued send; consent at
+            # scheduling is not permission to ignore subsequent suppression.
+            if client.suppressed_recipients(recipients):
+                raise SchedulerError("Recipient became suppressed before scheduled delivery")
+            result = client.send_email(
                 **message, idempotency_key="scheduled-" + job_id,
             )
             if (not isinstance(result, dict) or result.get("ok") is False
