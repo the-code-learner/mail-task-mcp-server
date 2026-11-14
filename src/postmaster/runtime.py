@@ -244,7 +244,7 @@ def _render_inbox_compat(proxied_base, request):
     return modern_inbox_markup(
         raw_html,
         selected_account=selected_account,
-        query_string=request.url.query,
+        query_string=request.scope.get("query_string", b"").decode("utf-8", "replace"),
     )
 
 
