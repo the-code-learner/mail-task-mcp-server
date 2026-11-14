@@ -196,6 +196,14 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('@media(max-width:760px)',BETA_MAIL_STYLE)
         self.assertIn(':has(.v963-detail) .v989-mail-stream',BETA_MAIL_STYLE)
 
+    def test_beta_narrow_list_never_inherits_old_table_minimum_width(self):
+        from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
+        self.assertIn("table.v986-mail-list{display:block!important;", BETA_MAIL_STYLE)
+        self.assertIn("min-width:0!important;max-width:100%!important", BETA_MAIL_STYLE)
+        self.assertIn("width:auto!important;min-width:0!important", BETA_MAIL_STYLE)
+        self.assertIn("grid-template-columns:minmax(340px,380px)", BETA_MAIL_STYLE)
+        self.assertIn("min-height:540px;height:calc(100dvh - 224px)", BETA_MAIL_STYLE)
+
     def test_beta_uses_cached_snippets_without_fetching_remote_media(self):
         sample = INBOX.replace(
             "<td>Subject</td>",
