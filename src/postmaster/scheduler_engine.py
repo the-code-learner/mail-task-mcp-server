@@ -29,6 +29,8 @@ VALID_JOB_STATUSES = {
     "paused",
     "completed",
     "failed",
+    "sending",
+    "cancelled",
 }
 
 
@@ -748,6 +750,8 @@ class SchedulerEngine:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send":
+                raise SchedulerError("Authorized scheduled email content cannot be edited; cancel and schedule a new message")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs are immutable; create a new job instead")
 
@@ -908,6 +912,8 @@ class SchedulerEngine:
                 row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
                 if not row:
                     raise SchedulerError(f"Unknown job: {job_id}")
+                if row["action_type"] == "scheduled_email_send":
+                    raise SchedulerError("Scheduled email is handled only by its autonomous worker")
                 if row["status"] not in {"scheduled", "waiting_approval"}:
                     raise SchedulerError(
                         f"Task cannot be completed from status {row['status']}"
@@ -935,11 +941,13 @@ class SchedulerEngine:
     def delete_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
             row = conn.execute(
-                "SELECT id, owner_id, project_id, title FROM jobs WHERE id=?",
+                "SELECT id, owner_id, project_id, title, action_type, status FROM jobs WHERE id=?",
                 (job_id,),
             ).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] == "sending":
+                raise SchedulerError("Cannot delete email while SMTP delivery may be in progress")
             self._record(conn, job_id, "deleted", dict(row))
             conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
         return {"ok": True, "deleted_job_id": job_id}
