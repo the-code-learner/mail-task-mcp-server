@@ -62,6 +62,12 @@ class ContactAndPeriodV986Tests(unittest.TestCase):
         self.assertIn('aria-current="page"',html)
         self.assertIn('name="period" value="custom"',html)
         self.assertIn('account_id=primary',html)
+        self.assertIn('data-v985-period="24h" data-v960-fragment="tracking"', html)
+        self.assertIn('data-v985-period="90d" data-v960-fragment="tracking"', html)
+        self.assertIn('period=24h', html)
+        self.assertIn('period=28d', html)
+        self.assertIn('period=7d', html)
+        self.assertNotIn('from=2026-11-01&amp;to=', html.split('data-v985-period="24h"')[1].split('>')[0])
         self.assertNotIn('<button type="submit" name="period"',html)
 
     def test_tracking_custom_date_form_has_explicit_period(self):
