@@ -54,19 +54,18 @@ def _category(row: dict[str, Any]) -> str:
 
 
 def _categories(events: list[dict[str, Any]]) -> list[str]:
-    """Apply the existing click classifier to email clicks as a group."""
+    """Reuse the click classifier without mislabeling sparse aggregates as human."""
     clicks = [dict(row) for row in events if row.get("event_kind") == "email_click"]
-    by_id: dict[int, str] = {}
-    if clicks:
-        for row, classified in zip(clicks, classify_click_events(clicks)):
-            by_id[id(row)] = str(classified.get("provider_classification") or "")
-    categories = []
+    classified = classify_click_events(clicks) if clicks else []
     click_index = 0
+    categories = []
     for event in events:
         if event.get("event_kind") == "email_click":
-            classification = str(classify_click_events([clicks[click_index]])[0].get("provider_classification") or "")
-            # Do not label sparse global telemetry as human: click classifier lacks
-            # fingerprint/link history in the aggregate query, so conservative fallback.
+            classification = str(
+                classified[click_index].get("provider_classification") or ""
+            )
+            # Global tracking rows lack some fingerprint/link context used by
+            # the detailed classifier: only accept strong positive proxy evidence.
             if classification in {"known_email_proxy", "likely_email_provider"}:
                 categories.append("proxy")
             else:
@@ -75,7 +74,6 @@ def _categories(events: list[dict[str, Any]]) -> list[str]:
         else:
             categories.append(_category(event))
     return categories
-
 
 def _coordinate(value: Any, low: float, high: float) -> float | None:
     if value is None or isinstance(value, bool):
