@@ -2,6 +2,18 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.7 - 2026-11-14
+
+### Beta: All accounts means a real combined mail client
+- The global `All accounts` email selector now shows a **single combined view** of cached mail from every enabled account, instead of silently falling back to the default account. The selected mailbox (Inbox, Sent, Drafts, Spam) remains the current category across accounts.
+- Accounts may call special folders differently (e.g. Sent, Sent Items, Junk). Their actual IMAP mailboxes are resolved using cached mailbox **roles**, without assuming the same provider folder name.
+- Added globally ordered, safely parameterized SQL pagination for the aggregate cache; filters, unread status and infinite scrolling operate on the combined result.
+- Every message preserves its account ID, original mailbox and UID in its authenticated reader URL. Identical UIDs in different accounts cannot collide, and safe reader/reply/forward/draft actions use the correct source account.
+- Each combined-list card displays the source account label. Selecting an explicit account restricts the list to that account again.
+- In All accounts mode, manual IMAP refresh is not misdirected to the default account. It instructs the user to select a specific account before refreshing; the combined view remains read-only and cache-backed.
+- Added tests for two accounts sharing UIDs, different Sent/Spam provider folder names, global date sorting and pagination, and safe source-account reader routing.
+- Beta-only source release: Stable `main` v9.8.8 and canonical Portainer YAML unchanged; no automatic IMAP polling, sends, account secrets or tool schema changes.
+
 ## 9.8.9-beta.6 - 2026-11-14
 
 ### Beta: readable email cards and ten-second update return
