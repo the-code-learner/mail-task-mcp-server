@@ -117,7 +117,7 @@ class ScheduledEmailService:
         if client.suppressed_recipients(recipients):
             raise SchedulerError("Suppressed recipients cannot be autonomously scheduled")
         if frozen["track_opens"] is False or (
-            frozen["track_opens"] is None and not bool(client.settings.tracking_default)
+            frozen["track_opens"] is None and not bool(getattr(client.settings, "tracking_default", False))
         ):
             raise SchedulerError("Tracking OFF requires fresh explicit chat approval; schedule only after that policy is satisfied")
         key = str(idempotency_key or "").strip() or None
@@ -125,10 +125,23 @@ class ScheduledEmailService:
             raise SchedulerError("idempotency_key is too long")
         job_id = "job_" + uuid.uuid4().hex[:16]
         now = datetime.now(timezone.utc).isoformat()
+        owner = owner_id or self.scheduler.settings.default_owner_id
+        project = project_id or "scheduled-email"
         payload = {"account_id": aid, "message": frozen, "authorized_at_utc": now,
-                   "authorization": "explicit_schedule", "idempotency_key": key or job_id}
+                   "authorization": "explicit_schedule", "idempotency_key": key or job_id,
+                   "send_at": due.isoformat()}
         with self.scheduler._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            if not project_id:
+                # Dedicated visible project for mail scheduled directly from
+                # the Inbox composer, without requiring preconfigured projects.
+                conn.execute(
+                    "INSERT OR IGNORE INTO projects(id,owner_id,name,description,active,created_at) "
+                    "VALUES (?,?,?,'Autonomous one-time scheduled email sends',1,?)",
+                    (project, owner, "Scheduled email", now),
+                )
+            else:
+                self.scheduler._require_project(conn, owner, project)
             if key:
                 # Re-submitting the same composer form cannot queue a second email.
                 for existing in conn.execute(
@@ -136,7 +149,8 @@ class ScheduledEmailService:
                 ):
                     old = json.loads(existing["payload_json"])
                     if old.get("idempotency_key") == key:
-                        if old.get("message") != frozen or old.get("account_id") != aid:
+                        if (old.get("message") != frozen or old.get("account_id") != aid
+                                or old.get("send_at") != due.isoformat()):
                             raise SchedulerError("Idempotency key already used for a different message")
                         return self.scheduler.get_job(existing["id"])
             conn.execute(
@@ -146,8 +160,7 @@ class ScheduledEmailService:
                  timezone,approval_mode,status,next_run_utc,created_at,updated_at,
                  last_run_utc,last_error)
                 VALUES (?,?,?,?,?,?,NULL,?,'once',? ,?,'automatic','scheduled',?,?,?,NULL,NULL)""",
-                (job_id, owner_id or self.scheduler.settings.default_owner_id,
-                 project_id or "", "Send email: " + frozen["subject"][:180],
+                (job_id, owner, project, "Send email: " + frozen["subject"][:180],
                  "Authorized scheduled email, one attempt only", ACTION,
                  json.dumps(payload, ensure_ascii=False), send_at, timezone_name,
                  due.isoformat(), now, now),
