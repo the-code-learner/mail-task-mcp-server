@@ -2,6 +2,19 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.8 - 2026-11-14
+
+### WebUI version update controls
+- Replaced the technical Preview change and action selector in Settings → Versions & updates with clear latest Stable and latest Beta cards and corresponding Update buttons.
+- Polls the published GitHub release catalogue every 30 seconds while Settings is visible; a shared 30-second server-side cache limits network requests. Shows both Stable and Beta, but Beta installation remains opt-in under the Stable + Beta preference.
+- Update buttons are only enabled when an eligible newer release is verified. The browser rechecks the exact target and obtains a fresh same-origin CSRF token immediately before every update or channel preference submission.
+- Fixed stale CSRF failures after a runtime restart while preserving CSRF enforcement and server-side exact version preview, separate explicit approval and restart. Expired sessions show a helpful return link instead of a raw error.
+- Maintains the original single-YAML Portainer bootstrap, runtime version selector, 134 MCP tool definitions, and production data/credentials.
+
+### Verification
+- Full runtime and browser regression suite passed on PR #58 after rerunning a transient headless-Chrome startup failure; direct Python/application assertions were not implicated by the initial browser infrastructure timeout.
+- Release source update alone does not restart an existing Postmaster instance.
+
 ## 9.8.7 - 2026-11-14
 
 ### Tracking period navigation
