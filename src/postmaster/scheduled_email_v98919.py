@@ -186,7 +186,7 @@ class ScheduledEmailService:
             row = conn.execute("SELECT * FROM jobs WHERE id=? AND action_type=?", (job_id, ACTION)).fetchone()
             if row is None:
                 raise SchedulerError("Unknown scheduled email")
-            if row["status"] != "scheduled":
+            if row["status"] not in {"scheduled", "paused"}:
                 raise SchedulerError("Email is already claimed, sent, failed or cancelled")
             conn.execute("UPDATE jobs SET status='cancelled',next_run_utc=NULL,updated_at=? WHERE id=?",
                          (datetime.now(timezone.utc).isoformat(), job_id))
