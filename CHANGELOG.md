@@ -2,6 +2,16 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.10 - 2026-11-14
+
+### Beta: visible IMAP Refresh for a selected email account
+- For a **specific email account** selected in the global header, the Inbox, Sent, Drafts, Spam and Trash message-list headers now expose a prominent **Refresh mail** button. This submits the existing server-side CSRF-verified `/dashboard/inbox/refresh` action to synchronize the requested mailbox from IMAP, then returns to its updated message list.
+- The original sync form is moved from the legacy header into the message list toolbar, never duplicated; the account ID, exact provider mailbox and CSRF field stay intact.
+- The button displays **Syncing…** and disables repeat submissions while the request is in progress. No background IMAP sync is initiated when navigating between folders.
+- **All accounts** remains a read-only combined cached view with no implicit mass-IMAP sync. Selecting a particular account reveals the refresh action.
+- Tests exercise the final two-pane renderer and the exact sync form for Inbox, Sent, Drafts, Spam and Trash, alongside unchanged All accounts behavior.
+- Beta only. Stable main, canonical Portainer YAML, mail data and MCP tool schemas remain unchanged.
+
 ## 9.8.9-beta.9 - 2026-11-14
 
 ### Beta: install GeoLite2 City and ASN directly in WebUI Settings
