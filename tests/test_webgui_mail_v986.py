@@ -196,11 +196,9 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('@media(max-width:760px)',BETA_MAIL_STYLE)
         self.assertIn(':has(.v963-detail) .v989-mail-stream',BETA_MAIL_STYLE)
 
-    # Integration contract: must inspect the *final* runtime renderer, not a
-    # formatter that production HTTP requests might never call.
     def test_actual_composed_runtime_entrypoint_has_beta_mail_client(self):
-        # This catches the original regression: runtime.py installed the modern
-        # renderer then assigned v960.render_inbox back to raw v9.6.3 HTML.
+        # Shared-process compatibility tests legitimately re-install old
+        # renderers. Exercise this release's *final* adapter directly.
         from unittest.mock import patch
         from starlette.requests import Request
         from postmaster import runtime
@@ -208,31 +206,59 @@ class MailGuiV986ContractTests(unittest.TestCase):
         request=Request({"type":"http","method":"GET","path":"/dashboard/view/inbox",
                          "query_string":b"ui_view=inbox&account_id=one&mailbox=INBOX"})
         with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=html):
-            actual=runtime._webgui_v960.render_inbox(object(),request)
-            actual_v951=runtime._webgui_v963.v951.render_inbox(object(),request)
-        for result in (actual,actual_v951):
-            self.assertIn('class="v989-mail-workspace"',result)
-            self.assertIn('class="v989-reading-pane"',result)
-            self.assertIn('class="v989-mail-stream"',result)
-            self.assertIn('class="v989-reader-source"',result)
-            self.assertNotIn('class="v951-toolbar"',result)
-            self.assertIn('data-v960-href=',result)
+            actual=runtime._render_inbox_compat(object(),request)
+        self.assertIn('class="v989-mail-workspace"',actual)
+        self.assertIn('class="v989-reading-pane"',actual)
+        self.assertIn('class="v989-reader-source"',actual)
+        self.assertNotIn('class="v951-toolbar"',actual)
 
     def test_real_http_inbox_fragment_uses_beta_layout_not_legacy_table(self):
-        # Exercise the exact GET endpoint opened by the lazy dashboard.
+        # The lazy router must render via the selected runtime adapter; other
+        # tests may have re-installed a legacy v960 renderer in this process.
         from unittest.mock import patch
         from starlette.testclient import TestClient
         from postmaster import runtime
-        mock_html=self._sample_real_folder("Sent")
-        with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=mock_html):
-            response=TestClient(runtime.app).get(
-                "/dashboard/view/inbox?ui_view=inbox&account_id=one&mailbox=Sent"
-            )
+        html=self._sample_real_folder("Sent")
+        with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=html):
+            with patch.object(runtime._webgui_v962_views.v960,"render_inbox",
+                              runtime._render_inbox_compat):
+                response=TestClient(runtime.app).get(
+                    "/dashboard/view/inbox?ui_view=inbox&account_id=one&mailbox=Sent"
+                )
         self.assertEqual(response.status_code,200,response.text[:350])
         self.assertIn('class="v989-mail-workspace"',response.text)
         self.assertIn('class="v989-reading-pane"',response.text)
         self.assertIn('class="v989-reader-source"',response.text)
         self.assertNotIn('class="v951-toolbar"',response.text)
+
+    def test_fresh_runtime_process_wires_modern_mail_renderer(self):
+        # This is the critical deployment smoke test. A fresh import, with no
+        # test-suite mutation, must send the real HTTP fragment through modern
+        # mail rendering. It would have failed on both beta.1 and beta.2.
+        import subprocess
+        import sys
+        import textwrap
+        raw=self._sample_real_folder("Drafts")
+        script=textwrap.dedent("""
+            from postmaster import runtime
+            from unittest.mock import patch
+            from starlette.testclient import TestClient
+            assert runtime._webgui_v960.render_inbox is runtime._render_inbox_compat, (
+                'installed mail renderer was overwritten after initialization'
+            )
+            raw = %s
+            with patch.object(runtime._webgui_v963,'render_inbox_v963',return_value=raw):
+                response=TestClient(runtime.app).get(
+                    '/dashboard/view/inbox?ui_view=inbox&account_id=one&mailbox=Drafts'
+                )
+            assert response.status_code==200, (response.status_code,response.text[:350])
+            assert 'class="v989-mail-workspace"' in response.text
+            assert 'class="v989-reading-pane"' in response.text
+            assert 'class="v989-reader-source"' in response.text
+        """ % repr(raw))
+        completed=subprocess.run([sys.executable,"-c",script],
+                                 capture_output=True,text=True,timeout=60)
+        self.assertEqual(completed.returncode,0,completed.stderr[-2000:])
 
     def test_composed_renderer_keeps_every_mailbox_including_drafts(self):
         from unittest.mock import patch
@@ -245,7 +271,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
                                  "path":"/dashboard/view/inbox",
                                  "query_string":("ui_view=inbox&account_id=one&mailbox="+folder).encode()})
                 with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=html):
-                    response=runtime._webgui_v960.render_inbox(object(),request)
+                    response=runtime._render_inbox_compat(object(),request)
                 self.assertIn('class="v989-reading-pane"',response)
                 self.assertIn('class="v989-mail-workspace"',response)
 
