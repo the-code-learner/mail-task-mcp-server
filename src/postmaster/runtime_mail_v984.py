@@ -440,9 +440,29 @@ def install_runtime_mail_v984(
                 return {"ok": False, "error": "Scheduled email service is unavailable"}
             if not account_id:
                 return {"ok": False, "error": "An explicit sender account is required for scheduling"}
+            eff = effective_tracking(
+                track_opens, account_tracking_default=_tracking_default(base, account_id)
+            )
+            if not eff:
+                intent = _send_intent(
+                    "send_email", account_id=_account_id(base, account_id),
+                    to=to, subject=subject, body=body,
+                    body_html=body_html, body_amp=body_amp, cc=cc, bcc=bcc,
+                    attachments=attachments, campaign_id=campaign_id,
+                    idempotency_key=idempotency_key,
+                    extras={"send_at": send_at, "schedule_timezone": schedule_timezone,
+                            "scheduled_delivery": True},
+                )
+                blocked = _guard_tracking_off(
+                    get_approval_store(), operation="send_email", intent=intent,
+                    effective=eff, approval_id=tracking_disable_approval_id,
+                )
+                if blocked:
+                    return blocked
             try:
                 result = service.schedule(
                     account_id=account_id, send_at=send_at, timezone_name=schedule_timezone,
+                    tracking_off_authorized=not eff,
                     idempotency_key=idempotency_key,
                     message={
                         "to": to, "cc": cc or [], "bcc": bcc or [],
