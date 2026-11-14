@@ -33,11 +33,17 @@ class ApprovedDesignV985Tests(unittest.TestCase):
         self.assertNotIn("UI demo",html)
 
     def test_installs_as_last_visual_overlay_without_replacing_renderers(self):
+        from starlette.responses import HTMLResponse
         class FakeV962:
             SCRIPT="<script>existing-safe-lazy-navigation</script>"
             def __init__(self):
                 self._styles=lambda: "/* original css */"
                 self._nav=lambda: "<nav>original</nav>"
+                self._shell=lambda request: HTMLResponse(
+                    '<!doctype html><html><body><div class="shell">'
+                    '<header class="v970-contextbar"><div class="v970-context-actions">'
+                    '</div></header><main>Existing content</main></div></body></html>'
+                )
         fake=FakeV962()
         prior=fake.SCRIPT
         v970=SimpleNamespace(_context_bar=lambda: "Original",
@@ -48,7 +54,8 @@ class ApprovedDesignV985Tests(unittest.TestCase):
         self.assertIn("Approved v5 visual language",css)
         self.assertIn('html[data-v970-theme="dark"]',css)
         self.assertIn('data-v985-compose',fake._nav())
-        self.assertIn('class="v985-topbar"',v970._context_bar())
+        self.assertEqual(v970._context_bar(),"Original")
+        self.assertIn('class="v985-topbar"',fake._shell(None).body.decode("utf-8"))
         self.assertTrue(fake.SCRIPT.startswith(prior))
         self.assertEqual(fake.SCRIPT.count('id="v985-production-ui"'),1)
         install_webgui_design_v985(fake,v970,"9.8.5")

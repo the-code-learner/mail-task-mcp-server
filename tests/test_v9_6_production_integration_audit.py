@@ -200,7 +200,7 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
             self.assertIn(section, html)
         for view in v962.VIEWS:
             self.assertIn(f'data-v962-nav="{view}"', html)
-        self.assertIn('id="v985-scopebar-compat-marker"' if False else 'id="v984-scopebar"', html)
+        self.assertIn('id="v984-scopebar"', html)
         self.assertIn(f"v{project_release_version().removeprefix('v')}", html)
         self.assertIn('id="v985-production-ui"', html)
 

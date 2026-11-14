@@ -419,7 +419,7 @@ def install_webgui_design_v985(v962: Any, v970: Any, version: str) -> None:
         header_match = re.search(r'<header class="v970-contextbar">.*?</header>', html, flags=re.S)
         if header_match:
             scope = re.search(
-                r'<div class="v984-scopebar" id="v984-scopebar">.*?</div>',
+                r'<div class="v984-scopebar" id="v984-scopebar"[^>]*>.*?</div>',
                 header_match.group(0), flags=re.S,
             )
             current = contextbar(version)

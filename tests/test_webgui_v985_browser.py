@@ -65,7 +65,8 @@ class V985BrowserLayoutTests(unittest.TestCase):
                               main=rect('.v970-workspace > main'), mobile=rect('.v970-mobile-nav');
                         if(!a||!main||!side||!mobile)return null;
                         return {
-                          width:innerWidth, headerTop:a.top, headerWidth:a.width, mainWidth:main.width,
+                          width:innerWidth, documentWidth:document.documentElement.clientWidth,
+                          headerTop:a.top, headerWidth:a.width, mainWidth:main.width,
                           mainLeft:main.left, sidebarWidth:side.width,
                           sidebarVisible:getComputedStyle(document.querySelector('.v985-sidebar')).display!=='none',
                           mobileVisible:getComputedStyle(document.querySelector('.v970-mobile-nav')).display!=='none',
@@ -87,7 +88,9 @@ class V985BrowserLayoutTests(unittest.TestCase):
                     self.assertTrue(payload["scopesInHeader"])
                     self.assertTrue(payload["overviewVisible"])
                     self.assertLessEqual(abs(payload["headerTop"]),1)
-                    self.assertLessEqual(abs(payload["headerWidth"]-width),2)
+                    # The vertical scrollbar consumes part of innerWidth on headless Chrome.
+                    self.assertLessEqual(abs(payload["headerWidth"]-payload["documentWidth"]),2)
+                    self.assertLessEqual(width-payload["documentWidth"],17)
                     self.assertLessEqual(payload["overflow"],2)
                     self.assertGreater(payload["mainWidth"],150)
                     if width>560:
