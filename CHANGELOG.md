@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.8 - 2026-11-14
+
+### Beta: human-readable Tracking context and explicit GeoIP status
+- Recent Activity and all tracking-event views now show meaningful **file names**, exact **destination URLs**, and, for tracked email opens/clicks, the **email subject, recipient and click destination** instead of relying only on opaque tracked-link and delivery IDs.
+- When a tracked email Message-ID can be uniquely resolved to an existing cached Sent message, the event provides an **Open email in Sent** action. The account ID, provider-specific Sent mailbox and IMAP UID are verified from the local mailbox cache; ambiguous same-UID messages from other accounts are never linked.
+- Technical identifiers remain available behind a collapsed disclosure; URL display escapes untrusted data and clickable destinations allow only HTTP(S) schemes.
+- Tracking shows whether local City/ASN/ISP **MaxMind MMDB** resources exist and actionable configuration paths. Without them it explicitly reports country-only edge evidence instead of inventing a city or ISP.
+- Existing events can be enriched on read when a local database becomes available, without contacting third-party IP lookup services or rewriting stored evidence. Proxy/network estimates never assert the recipient's location.
+- Added SQL integration and presentation tests for file names, tracked email subjects, exact URLs, safe cached Sent deep links, and absent-source handling.
+- Beta only, no modification to the original Portainer YAML or Stable v9.8.8. No automatic download of copyrighted/licensed GeoIP databases, no changes to tracking collection, secrets or MCP tool schemas.
+
 ## 9.8.9-beta.7 - 2026-11-14
 
 ### Beta: All accounts means a real combined mail client
