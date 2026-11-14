@@ -284,13 +284,14 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         for heading, links in v970.NAV_GROUPS
     )
     v970.VIEW_LABELS["system"] = ("Settings", "Runtime versions and system configuration")
-    previous_styles = v962._styles
-    if not getattr(previous_styles, "_v988_release_styles", False):
-        def styles() -> str:
-            return previous_styles() + "\n" + VERSIONS_STYLE
-        styles._v988_release_styles = True
-        v962._styles = styles
-    if 'id="v988-live-updates"' not in v962.SCRIPT:
+    if hasattr(v962, "_styles"):
+        previous_styles = v962._styles
+        if not getattr(previous_styles, "_v988_release_styles", False):
+            def styles() -> str:
+                return previous_styles() + "\n" + VERSIONS_STYLE
+            styles._v988_release_styles = True
+            v962._styles = styles
+    if hasattr(v962, "SCRIPT") and 'id="v988-live-updates"' not in v962.SCRIPT:
         v962.SCRIPT += VERSIONS_SCRIPT
 
     async def live_status(req: Request) -> Response:
