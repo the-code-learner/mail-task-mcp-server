@@ -504,6 +504,13 @@ BETA_MAIL_STYLE = r"""
  #panel-inbox .v989-mail-workspace{grid-template-columns:minmax(260px,320px) minmax(0,1fr);height:70vh}
  #panel-inbox .v989-reading-pane .v963-detail{padding:15px!important}
 }
+#panel-inbox.v989-folder-loading .v989-mail-workspace{position:relative;pointer-events:none}
+#panel-inbox.v989-folder-loading .v989-mail-workspace::after{
+ content:"Loading mailbox…";position:absolute;inset:0;z-index:8;
+ display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;
+ color:var(--v970-text);background:color-mix(in srgb,var(--v970-surface) 86%,transparent);
+ backdrop-filter:blur(2px)
+}
 /* Beta.5: explicit rows override the old table and 25px grid tracks.
    Sender, subject, and snippet never occupy the same line. */
 @media(min-width:761px){
