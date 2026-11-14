@@ -68,8 +68,10 @@ the corresponding immutable tag and verifies a non-prerelease GitHub release.
 
 **Beta**: on a reviewed, test-verified release branch, set `VERSION` to
 `MAJOR.MINOR.PATCH-beta.N` and add a matching changelog heading.
-Run the **beta application release** workflow manually using the release
-branch and exactly the same version input. The workflow refuses unmatched
+First ensure the **v9 runtime tests** workflow is green for that exact
+beta-branch commit. Then run the **beta application release** workflow manually
+using the release branch and exactly the same version input. Publication is
+blocked if the matching CI run is absent or not successful. The workflow refuses unmatched
 VERSION/changelog data, tags the exact selected commit once, and verifies
 that GitHub publishes it with `isPrerelease=true`. Never retarget an
 existing beta tag; publish a new numbered beta instead.
