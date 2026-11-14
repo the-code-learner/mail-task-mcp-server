@@ -272,9 +272,19 @@ class McpNameCompatibilityV960Tests(unittest.TestCase):
                 - V982_GENERIC_TRACKING_MCP_NAMES
                 - V983_TRACKED_FILE_MCP_NAMES
             )
-            self.assertEqual(len(structured_extensions), 21)
-            self.assertTrue(all(name.startswith("db_") for name in structured_extensions))
-            self.assertEqual(len(actual), 124)
+            db_extensions = {name for name in structured_extensions if name.startswith("db_")}
+            self.assertEqual(len(db_extensions), 21)
+            self.assertEqual(
+                structured_extensions - db_extensions,
+                {
+                    "email_search_status", "search_emails_hybrid",
+                    "get_email_calendar_invites", "send_job_calendar_invite",
+                    "list_tracking_network_events", "get_tracking_network_event",
+                    "list_contacts", "list_incoming_contact_candidates",
+                    "save_contact", "set_contact_ignored",
+                },
+            )
+            self.assertEqual(len(actual), 134)
 
 
 if __name__ == "__main__":

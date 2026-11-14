@@ -6,11 +6,13 @@ import uvicorn
 
 from . import runtime_core as _core
 from . import webgui_projects as _webgui_projects
+from . import webgui_tasks as _webgui_tasks
 from . import webgui_v960 as _webgui_v960
 from . import webgui_v962 as _webgui_v962
 from . import webgui_v962_views as _webgui_v962_views
 from . import webgui_v963 as _webgui_v963
 from . import webgui_v964 as _webgui_v964
+from . import webgui_v970 as _webgui_v970
 from .project_scope_semantics import install_project_scope_semantics
 from .runtime_v946 import install_runtime_v946
 from .runtime_v950 import install_runtime_v950
@@ -27,6 +29,16 @@ from .runtime_v969 import install_runtime_v969_mcp, install_runtime_v969_pre_web
 from .runtime_v980 import install_runtime_v980
 from .runtime_v982 import install_runtime_v982
 from .runtime_v983 import install_runtime_v983
+from .runtime_mail_v984 import install_runtime_mail_v984
+from .runtime_tracking_v984 import install_runtime_tracking_v984
+from .runtime_contacts_v984 import install_runtime_contacts_v984
+from .webgui_files_v984 import install_file_previews_v984
+from .webgui_tracking_v984 import install_tracking_dashboard_v984
+from .webgui_links_v984 import install_tracked_links_webgui_v984
+from .webgui_scopebar_v984 import install_scopebar_webgui_v984
+from .webgui_contacts_v984 import install_contacts_webgui_v984
+from .webgui_versions_v984 import install_versions_webgui_v984
+from .webgui_calendar_v984 import install_week_calendar_v984
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -183,6 +195,22 @@ _v983 = install_runtime_v983(
     store=_v983_store,
 )
 runtime_status = _v983["runtime_status"]
+# v9.8.4 ports the non-WhatsApp email/calendar/search features from the 9.9 RC
+# and makes the enriched tracking history visible through the authenticated MCP
+# control plane, without owner/project access partitioning.
+_v984_mail = install_runtime_mail_v984(_base, _core, runtime_status)
+runtime_status = _v984_mail["runtime_status"]
+_v984_network = install_runtime_tracking_v984(_base, _core, store=_v983_store)
+runtime_status = _v984_network["runtime_status"]
+_v984_contacts = install_runtime_contacts_v984(_base, _core)
+runtime_status = _v984_contacts["runtime_status"]
+install_file_previews_v984(app, _base)
+install_tracking_dashboard_v984(_webgui_v962_views)
+install_tracked_links_webgui_v984(app, _base, _core)
+install_scopebar_webgui_v984(app, _base, _webgui_v962, _webgui_v970)
+install_contacts_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
+install_versions_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
+install_week_calendar_v984(_webgui_tasks)
 # The lazy shell originates in v9.6.2 but must identify the release that is actually loaded.
 # VERSION is local release metadata, so this does not add a network lookup to WebGUI rendering.
 install_webgui_release_identity(_webgui_v962, project_release_version())

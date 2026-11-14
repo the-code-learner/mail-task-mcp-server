@@ -1,3 +1,10 @@
+> **v9.8.4 update:** The 30-day retention description below applies to older releases.
+> Starting in v9.8.4, raw IP and offline GeoIP/ASN/ISP enrichment have no automatic
+> expiry and are available to authenticated instance-global MCP tracking detail tools
+> and the WebGUI, but never to public tracking callbacks. Read
+> [v9.8.4 network tracking privacy](V984_TRACKING_NETWORK_PRIVACY.md).
+>
+
 # Sensitive tracking telemetry and WebGUI visibility
 
 This post-v9.7.0 workstream extends the existing open/click analytics without changing the public MCP tracking command names or response schemas.

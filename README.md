@@ -502,11 +502,23 @@ revoke_tracked_link
 
 The creation/read tools intentionally return the complete opaque `tracked_url`, allowing an MCP client or LLM to use it in any user-authorized context. A tracked file URL does not expose the private `file_id`: it serves canonical local FileStore bytes only after verifying the exact original `file_id + SHA-256 + created_at` incarnation. Delete + recreate of the same ID therefore leaves the old URL invalid.
 
-Generic links reuse the existing `/t/c/*` callback path but remain separate from email campaign/delivery tracking. Revocation requires explicit confirmation, preserves history and makes the public URL return `404`. Raw source IP addresses are not persisted.
+Generic links reuse the existing `/t/c/*` callback path but remain separate from email campaign/delivery tracking. Revocation requires explicit confirmation, preserves history and makes the public URL return `404`. From v9.8.4, validated raw IP and optional offline GeoIP/ASN/ISP details are persisted without automatic expiry; authenticated MCP and WebGUI queries may access them, but public callbacks never return them.
 
 See [docs/GENERIC_TRACKED_LINKS.md](docs/GENERIC_TRACKED_LINKS.md) for scope, privacy, Stored File semantics, callback and deployment details.
 
 ---
+
+# v9.8.4: network tracking, Contacts and WebGUI
+
+The new tracking layer persists raw IP addresses and event metadata for email opens/clicks, generic tracked URLs and tracked-file requests. Optional locally provided City/ASN/ISP databases enrich location/provider estimates without contacting external APIs. Proxy and scanner requests are not evidence of a human opening or recipient location.
+
+Tracking has no automatic expiry and is accessible through authenticated global MCP tools `list_tracking_network_events` and `get_tracking_network_event` and the WebGUI. Account/owner/project parameters remain organizational filters rather than access permissions. The runtime has 134 MCP tools in v9.8.4.
+
+The English WebGUI provides selectable 24-hour / 7-day / 28-day / 90-day / custom tracking periods, three heatmaps and an activity trend; tracked URL/file management; Contacts with Inbox review, Sent suggestions and recipient/domain authorization; header context selectors; FileStore previews; monthly/weekly Activities calendars; and version preview/confirmation.
+
+WhatsApp work remains in the separate v9.9.0 draft. Existing /t/c/* callback paths and legacy mail semantics are preserved. A stable source release does not activate production or modify Portainer.
+
+See [v9.8.4 tracking privacy and setup](docs/V984_TRACKING_NETWORK_PRIVACY.md) for offline MMDB provisioning, raw-IP storage and operator erasure responsibilities.
 
 # Security model
 

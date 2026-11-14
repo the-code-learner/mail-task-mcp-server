@@ -2,6 +2,26 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.4 - 2026-11-14
+
+### New / improved
+- Ported four non-WhatsApp features from PR #48: email_search_status, search_emails_hybrid, get_email_calendar_invites and send_job_calendar_invite. Calendar invitation sending reuses the existing SMTP and recipient-policy pipeline.
+- Added six MCP tools: list_tracking_network_events, get_tracking_network_event, list_contacts, list_incoming_contact_candidates, save_contact and set_contact_ignored. Total composed MCP surface: 134 tools (previously 124).
+- Email open/click, generic URL-click and tracked Stored File request events now persist raw validated IPv4/IPv6 addresses, timestamps and client data. Optional locally provisioned GeoIP City/ASN/ISP MMDB files add estimated region, city, coordinates, network ASN, provider and confidence without remote lookup.
+- Tracking histories have no automatic expiry. Explicit administrative erasure remains possible, and pre-upgrade IP/GeoIP information already discarded cannot be reconstructed.
+- The authenticated MCP client has instance-global access to all network event details, with optional account/owner/project and event, recipient, country, city, ASN, provider, domain, time and chronology filters. Organizational scopes do not create MCP access boundaries.
+- The English WebGUI adds 24 hours / 7 days / 28 days / 90 days / Custom tracking periods, sent/received/tracking-event hour heatmaps, an activity trend, raw IP/event detail views and tracked URL/file creation, listing and revocation using the existing MCP operations.
+- Added persistent Contacts including Inbox and Sent suggestions, add/ignore/restore and global recipient/domain authorization under Contacts. Saving a contact never authorizes outbound sending.
+- Added organization context selectors in the WebGUI header, safe inline Stored File previews with separate Download, navigable weekly and monthly Activities calendars and release status/preview/confirmation in Overview and Settings.
+- Retained an approved English UI prototype as a design reference while live WebGUI pages use real stores and existing lazy-fragment compatibility contracts.
+
+### Compatibility / privacy / deployment
+- Email clean-Sent, BCC, idempotency, tracking tokens, confirmation and stored-file incarnation checks remain compatible with v9.8.3. WhatsApp functionality stays in the separate draft v9.9.0.
+- GeoIP City/ASN/ISP requires optional MMDBs in /data and identifies the network requester, often a proxy or scanner, not necessarily the human recipient or exact recipient location. A file request is not proof of a human download.
+- Inbox heatmaps are bounded IMAP samples and Tracking event previews are bounded to 500 events; full tracking history is available through paginated MCP queries.
+- Public tracking callbacks never disclose raw IP. Raw IP plus indefinite retention requires appropriate privacy/security and erasure controls; see docs/V984_TRACKING_NETWORK_PRIVACY.md.
+- postmaster-mcp.yml is unchanged. This is a source release only: publishing does not restart production, activate Portainer or change Cloudflare configuration.
+
 ## 9.8.3 - 2026-11-05
 
 ### Added / changed

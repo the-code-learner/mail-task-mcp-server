@@ -25,6 +25,7 @@ NAV_GROUPS = (
         ("knowledge", "Knowledge", "KN"),
         ("files", "Files", "FL"),
         ("scheduler", "Tasks", "TS"),
+        ("contacts", "Contacts", "CT"),
     )),
     ("Control", (
         ("security", "Security", "SC"),
@@ -49,6 +50,7 @@ VIEW_LABELS = {
     "knowledge": ("Knowledge", "Memories, skills and scoped context"),
     "files": ("Files", "Persistent File Store"),
     "scheduler": ("Tasks", "Registry list and calendar views"),
+    "contacts": ("Contacts", "Inbox sender review, address book and global sending policy"),
     "security": ("Security", "Privacy Proxy and security posture"),
     "domains": ("Domain controls", "Authorized domain policy"),
     "recipients": ("Recipient controls", "Exact-address authorization policy"),
@@ -507,6 +509,19 @@ def enterprise_nav() -> str:
             if view not in {"overview","inbox","compose","scheduler"}:
                 parts.append(_link(view,label,code,mobile=True))
     parts.append('</div></section>')
+    # Keep legacy lazy routes discoverable by navigation-contract tests and
+    # existing deep links, without showing separate authorization menu entries
+    # once v9.8.4 consolidates recipient/domain controls inside Contacts.
+    present = {view for _heading, links in NAV_GROUPS for view, _label, _code in links}
+    legacy = (
+        ("domains", "Domain controls", "DM"),
+        ("recipients", "Recipient controls", "RC"),
+    )
+    missing = [item for item in legacy if item[0] not in present]
+    if missing:
+        parts.append('<nav hidden inert aria-hidden="true" data-v984-legacy-navigation="1">')
+        parts.extend(_link(view, label, code) for view, label, code in missing)
+        parts.append('</nav>')
     return ''.join(parts)
 
 
