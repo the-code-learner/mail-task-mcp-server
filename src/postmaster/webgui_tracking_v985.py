@@ -20,6 +20,8 @@ from .webgui_tracking_v984 import (
 )
 from .webgui_links_v984 import render_tracked_links_v984
 from .webgui_v962_views import _panel
+from .tracking_presentation_v9898 import attach_sent_email_links
+from .tracking_geoip_v984 import geoip_status
 
 
 EVENT_TYPES=(
@@ -218,6 +220,7 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     except Exception as exc:
         events,truncated=[],False
         errors.append("Tracking event query unavailable: "+type(exc).__name__)
+    attach_sent_email_links(base,events)
     try:sent,sent_truncated=_sent(base,account,start,finish)
     except Exception as exc:
         sent,sent_truncated=[],False
@@ -329,6 +332,23 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     base_params={k:v for k,v in request.query_params.items() if k!="tracking_tab"}
     base_params.update(ui_view="tracking",tracking_tab="links")
     new_link_url="/?"+urlencode(base_params)+"#tracking"
+    geo=geoip_status()
+    missing=[name for name,key in (("City","city_database_available"),
+                                   ("ASN","asn_database_available"),
+                                   ("ISP","isp_database_available")) if not geo[key]]
+    geo_hint=(
+        '<div class="v9898-geo-notice"><strong>GeoIP: local databases unavailable</strong>'
+        '<p>Country may come from the edge network, but city, ASN and operator '
+        'cannot be reliably estimated without local MaxMind databases. '
+        'Provision GeoLite2-City.mmdb and GeoLite2-ASN.mmdb under /data '
+        '(and optional GeoIP2-ISP.mmdb, subject to its license), or configure '
+        'POSTMASTER_GEOIP_CITY_DB / POSTMASTER_GEOIP_ASN_DB / POSTMASTER_GEOIP_ISP_DB. '
+        'No external IP lookup is performed. Proxy locations are not recipients.</p>'
+        '<small>Missing: '+_e(', '.join(missing))+'</small></div>'
+    ) if missing else (
+        '<div class="v9898-geo-notice"><strong>GeoIP: local databases active</strong>'
+        '<p>Network information is an estimate and may identify proxies or scanners.</p></div>'
+    )
     notice=''.join('<p>'+_e(w)+'</p>' for w in warnings)
     html=(
         '<div class="v985-tracking">'
@@ -340,7 +360,7 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         +'<p class="v985-tracking-dates">'+_e(
             f'{start.astimezone(_ZONE):%d %b %Y %H:%M} – {finish.astimezone(_ZONE):%d %b %Y %H:%M} Europe/Rome'
         )+'</p>'
-        +_tabs(request,tab)+_advanced_filters(request)+content
+        +_tabs(request,tab)+_advanced_filters(request)+geo_hint+content
         +'<div class="v985-tracking-disclaimer">'+notice+'</div>'
         '</div>'
     )
@@ -348,6 +368,23 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
 
 
 TRACKING_STYLE=r"""
+.v9898-geo-notice{border:1px solid var(--v970-line);border-radius:9px;
+ padding:11px 14px;margin:11px 0 14px;background:var(--v970-surface);
+ color:var(--v970-text);font-size:12px}
+.v9898-geo-notice strong{display:block;font-size:12px;margin-bottom:4px}
+.v9898-geo-notice p{margin:4px 0 7px;line-height:1.55;color:var(--v970-muted)}
+.v9898-geo-notice small{font-size:10px;color:var(--v970-muted)}
+.v984-event .v9898-event-context{grid-column:1/-1;
+ border-bottom:1px solid var(--v970-line);padding-bottom:10px;
+ display:flex;flex-direction:column;gap:4px}
+.v984-event .v9898-event-context strong{font-size:13px}
+.v984-event .v9898-event-context a{color:#9fc2ff;
+ text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.v984-event .v9898-event-context small{font-size:11px;color:var(--v970-muted)}
+.v984-event .v9898-rawids{grid-column:1/-1}
+.v984-event .v9898-rawids summary{cursor:pointer;font-size:10px;
+ color:var(--v970-muted)}
+
 .v985-tracking{max-width:1600px;margin:auto}
 .v985-tracking-head{display:flex;justify-content:space-between;gap:15px;align-items:center;margin:5px 0 18px}
 .v985-tracking-head h2{font-size:22px;margin:0;letter-spacing:-.5px}
