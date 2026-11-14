@@ -1,0 +1,71 @@
+name: approved v9.8.9 beta.10 publication
+
+# Beta-specific, one-shot publisher. This file lives ONLY on the Beta branch;
+# stable main and the canonical manual beta release workflow are unchanged.
+on:
+  push:
+    branches:
+      - beta/v9.8.9-beta.10-account-refresh
+    paths:
+      - tests/test_webgui_mail_v986.py
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  release-on-green:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Wait for the exact Beta commit to pass v9 runtime tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BETA_TAG: v9.8.9-beta.10
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$BETA_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "The Beta has already been published; no action is needed."
+            exit 0
+          fi
+          for attempt in $(seq 1 70); do
+            gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/v9-runtime-tests.yml/runs?head_sha=$GITHUB_SHA&per_page=100" > /tmp/beta-checks.json
+            result="$(python - <<'PY'
+          import json,os
+          data=json.load(open('/tmp/beta-checks.json',encoding='utf-8'))
+          items=[r for r in data.get('workflow_runs',[]) if r.get('head_sha')==os.environ['GITHUB_SHA']]
+          if any(r.get('conclusion')=='success' for r in items):
+              print('success')
+          elif items and all(r.get('status')=='completed' for r in items):
+              print('failed')
+          else:
+              print('pending')
+          PY
+          )"
+            if [ "$result" = success ]; then
+              echo "CI passed for $GITHUB_SHA"
+              exit 0
+            fi
+            if [ "$result" = failed ]; then
+              echo "Refusing Beta publication because tests failed" >&2
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "No green CI for the exact commit: publication denied" >&2
+          exit 1
+
+      - name: Dispatch the existing, independently gated Beta-release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v9.8.9-beta.10 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Already published, skip dispatch."
+            exit 0
+          fi
+          gh workflow run beta-release.yml --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" -f version="9.8.9-beta.10"
+          echo "The original immutable-tag, exact-commit gated beta workflow was dispatched."
