@@ -45,7 +45,7 @@ MORE_VIEWS = (
     ("suppressions", "Suppressions", "SP"),
     ("security", "Security", "SC"),
     ("amp", "AMP", "AM"),
-    ("structured-data", "Structured data", "DB"),
+    ("data", "Structured Data", "DB"),
     ("domains", "Domain authorization (legacy)", "DM"),
     ("recipients", "Recipient authorization (legacy)", "RC"),
     ("compose", "Compose (legacy)", "CP"),
