@@ -2,6 +2,26 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.7 - 2026-11-14
+
+### Tracking period navigation
+- Fixed Statistics period chips (24 hours, 7 days, 28 days, 90 days and Custom) to route explicitly through the authenticated live Tracking fragment loader, preserving the selected period in the URL and active state after refresh.
+- Retained the independent owner, project and account filters, and the custom date range Apply form.
+
+### Modern mailbox experience
+- Changed the cached Inbox/Sent message listing from a dense table presentation into responsive mail-style rows with sender initials avatars, sender name and address, clear subject hierarchy, unread state and date.
+- Preserved original mailbox cache queries, mailbox and account scopes, message UID navigation, safe message reader, draft/reply/SMTP authorization, and opt-in attachments.
+
+### Faster, safer WebUI navigation
+- Added bounded 12-second same-origin in-memory prefetch for dashboard navigation targets on hover/focus, with no persistent storage or third-party email resource requests.
+- Added visibility-aware 90-second refresh of displayed Inbox and Tracking fragments, suspended while editing forms, composing drafts or viewing message details. No automatic email sends or mailbox mutations.
+- Added regression checks for period URL values, transformed mail-message markup, unread indicators and preserved reader links.
+- Full GitHub Actions runtime/browser regression suite passed for PR #56.
+
+### Compatibility
+- No changes to the original `postmaster-mcp.yml` Portainer bootstrap, MCP tool catalog (134 tools), persistent data, credentials or Cloudflare configuration.
+- A published GitHub release does not itself restart an installed Postmaster instance.
+
 ## 9.8.6 - 2026-11-14
 
 ### Stable and Beta update channels
