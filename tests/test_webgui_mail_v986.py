@@ -298,6 +298,30 @@ class MailGuiV986ContractTests(unittest.TestCase):
                 self.assertIn('class="v989-reading-pane"',response)
                 self.assertIn('class="v989-mail-workspace"',response)
 
+    def test_beta6_mail_cards_are_vertical_flow_not_grid_tracks(self):
+        from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
+        css=BETA_MAIL_STYLE.split("/* Beta.6:")[1]
+        self.assertIn('display:flex!important;flex-flow:column nowrap!important',css)
+        self.assertIn('grid-template-columns:none!important',css)
+        self.assertIn('grid-template-rows:none!important',css)
+        self.assertIn('td.v987-identity{',css)
+        self.assertIn('order:0!important',css)
+        self.assertIn('td.v987-subject{',css)
+        self.assertIn('order:1!important',css)
+        self.assertIn('position:absolute!important;top:14px!important;right:15px!important',css)
+        self.assertIn('td.v987-indicator{',css)
+        self.assertIn('padding:14px 75px 13px 62px!important',css)
+
+    def test_beta6_mail_cards_keep_real_sender_subject_snippet_markup(self):
+        example=self._sample_real_folder("Drafts")
+        result=modern_inbox_markup(example)
+        self.assertIn('class="v987-identity"',result)
+        self.assertIn('class="v987-subject"',result)
+        self.assertIn('class="v989-preview"',modern_inbox_markup(
+            example.replace('<td>Subject</td>',
+                            '<td>Subject<small class="v989-snippet-source">Body excerpt</small></td>')))
+        self.assertLess(result.index('class="v987-identity"'),result.index('class="v987-subject"'))
+
     def test_beta5_message_rows_have_nonoverlapping_sender_subject_and_preview(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
         self.assertIn('grid-template-rows:36px 22px minmax(18px,auto)!important', BETA_MAIL_STYLE)
