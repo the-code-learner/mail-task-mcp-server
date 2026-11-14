@@ -15,7 +15,7 @@ from postmaster.scheduled_email_v98919 import ScheduledEmailService
 
 class Client:
     def __init__(self):
-        self.settings = SimpleNamespace(tracking_default=True)
+        self.settings = SimpleNamespace(tracking_default=True, email_address="sender@example.org")
         self.sent = []
         self.blocked = []
         self.error = None
@@ -57,6 +57,25 @@ class ScheduledEmailTests(unittest.TestCase):
         with self.registry._connect() as conn:
             conn.execute("UPDATE jobs SET next_run_utc=? WHERE id=?",
                          ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(), job_id))
+
+    def test_sender_identity_change_fails_safely(self):
+        job = self.schedule()
+        self.due(job["id"])
+        self.client.settings.email_address = "different@example.org"
+        self.service.process_once()
+        self.assertEqual(self.registry.get_job(job["id"])["status"], "failed")
+        self.assertFalse(self.client.sent)
+
+    def test_composer_markup_has_scheduling_form_fields(self):
+        from postmaster.webgui_mail_v986 import modern_compose_markup, EDITOR
+        from postmaster.webgui_v960 import _compose_panel
+        from unittest.mock import MagicMock
+        base = MagicMock()
+        base._csrf_value.return_value = "csrf-demo"
+        html = modern_compose_markup(_compose_panel(base, [], None))
+        self.assertIn('name="scheduled_send_at"', html)
+        self.assertIn('name="compose_action" value="schedule"', html)
+        self.assertIn('name="scheduled_timezone"', html)
 
     def test_scheduling_is_not_sending_and_job_is_visible(self):
         job = self.schedule()
