@@ -218,12 +218,11 @@ def _latest_open_event_id(analytics: Any, *, delivery_id: str, opened_at: str) -
 
 
 def install_tracking_telemetry_v971(base: Any, core: Any) -> None:
-    """Persist sensitive network telemetry in a private, short-lived sidecar.
+    """Persist sensitive network telemetry with no automatic expiration in v9.8.4.
 
-    Visibility contract:
-    - existing MCP/public tracking rows stay unchanged and never gain raw source IP fields;
-    - sensitive rows are account-scoped and consumed only by authenticated WebGUI rendering;
-    - retention removes the sidecar after 30 days while historical aggregate/fingerprint data stays.
+    Public callbacks never disclose raw IP. Authenticated MCP global detail
+    tools and WebGUI can inspect it; historical legacy MCP event schemas stay
+    unchanged. Only explicitly invoked administrative deletion may purge rows.
     """
     analytics = base.analytics_store()
     links = core.link_store()
@@ -533,7 +532,7 @@ def account_tracking_overlay(analytics: Any, *, account_id: str) -> str:
 <div id="v971-tracking-overlay" class="v971-tracking-overlay" role="dialog" aria-modal="true" aria-labelledby="v971-tracking-title">
 <section class="v971-tracking-sheet">
 <div class="v971-tracking-head"><div><h3 id="v971-tracking-title">Recent tracking activity</h3><p class="small muted">Selected account only. Classification and geolocation are estimates, never proof.</p></div><a class="v971-tracking-close" href="#inbox" aria-label="Close tracking">×</a></div>
-<div class="v971-sensitive-note"><strong>Sensitive telemetry policy.</strong> Raw source IP and the network-derived geography estimate are retained for {SENSITIVE_RETENTION_DAYS} days, visible only on the authenticated account-scoped WebGUI surface, and never added to legacy MCP tracking responses. Logs must not include these values.</div>
+<div class="v971-sensitive-note"><strong>Sensitive telemetry policy.</strong> Raw source IP and network-derived GeoIP/ASN metadata are retained without automatic expiry until explicitly deleted. They are accessible via authenticated WebGUI and the instance-global MCP tracking detail tools, never public tracking callbacks. A network location may identify a proxy or scanner rather than the recipient. Logs must not include these values.</div>
 {_events_table(rows)}
 </section></div>
 """
