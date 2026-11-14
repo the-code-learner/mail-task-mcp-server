@@ -6,6 +6,7 @@ version change without CSRF-verified preview and separate explicit confirmation.
 from __future__ import annotations
 
 from html import escape
+import os
 from datetime import UTC, datetime
 import threading
 import time
@@ -82,7 +83,14 @@ def _release_snapshot(base: Any) -> dict[str, Any]:
     build = base.build_status()
     running = str(build.get("version") or "unknown") if isinstance(build, dict) else "unknown"
     selected = runtime_control.preferred_release_channel()
+    wanted = str(runtime_control.read_control().get("selector") or "latest")
+    active_ref = "v" + running.removeprefix("v") if running != "unknown" else "unknown"
+    mismatch = wanted != "latest" and wanted != active_ref
+    bootstrap_supported = os.getenv("POSTMASTER_BOOTSTRAP_CONTROL_V2", "").lower() == "true"
     return {
+        "selected_target": wanted,
+        "activation_mismatch": mismatch,
+        "bootstrap_control_supported": bootstrap_supported,
         "ok": True, "current_version": running, "release_channel": selected,
         "stable": stable, "beta": beta,
         "stable_update": channels.newer_than(stable, running) is True,
@@ -121,6 +129,15 @@ def versions_settings(base: Any) -> str:
     return (
         '<section class="card wide" id="v984-versions" data-v988-updates>'
         '<h3>Updates</h3>'
+        '<p class="small muted" data-v9894-activation '
+        + ('style="display:block"' if data["activation_mismatch"] else 'style="display:none"') + '>'
+        + (('Update not active: running ' + _e(data["current_version"])
+            + ', selected ' + _e(data["selected_target"])
+            + ('. The Portainer bootstrap may not support WebUI/MCP updates. '
+               'Update the stack command before retrying.'
+               if not data["bootstrap_control_supported"]
+               else '. Waiting for a completed container bootstrap.'))
+           if data["activation_mismatch"] else '') + '</p>'
         f'<p>Installed: <strong data-v988-current>{_e(data["current_version"])}</strong>'
         f' · Runtime: <strong>{_e(selector)}</strong></p>'
         '<p class="small muted">Postmaster checks the latest Stable and Beta '
@@ -184,6 +201,17 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
       current=data;last=Date.now();
       const live=root();if(!live)return data;
       live.querySelector('[data-v988-current]').textContent=data.current_version;
+      const activation=live.querySelector('[data-v9894-activation]');
+      if(activation){
+        activation.style.display=data.activation_mismatch?'block':'none';
+        activation.textContent=data.activation_mismatch
+          ? 'Update not active: running '+data.current_version+
+            ', selected '+data.selected_target+
+            (!data.bootstrap_control_supported
+              ? '. The Portainer bootstrap may not support WebUI/MCP updates. Update the stack command before retrying.'
+              : '. Waiting for a completed container bootstrap.')
+          : '';
+      }
       live.querySelector('[data-v988-check]').textContent='Last check: '+(data.checked_at||'Never')+' · '+data.check_status;
       for(const kind of ['stable','beta']) {
         const value=data[kind]||'';
