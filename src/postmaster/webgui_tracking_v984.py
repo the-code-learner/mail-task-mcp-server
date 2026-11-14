@@ -234,6 +234,12 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
     heat += _heatmap([str(e.get("observed_at") or "") for e in events],
                      "When tracking events occur", note="Opens, email clicks, URL clicks and file downloads.")
     rows = "".join(_event_html(row) for row in events[:120])
+    from .webgui_links_v984 import render_tracked_links_v984
+    try:
+        tracked_links_panel = render_tracked_links_v984(base, core, request)
+    except Exception:
+        tracked_links_panel = '<section class="v984-panel"><h3>Tracked URLs & files</h3><p>Link controls temporarily unavailable.</p></section>'
+
     style = """<style>
 .v984-tracking{--a:#345ec2;font:13px system-ui,sans-serif}
 .v984-tracking .v984-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:9px}
@@ -280,6 +286,7 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
 <section class="v984-panel"><h3>Tracking event timeline</h3>
 <p class="v984-hint">Expand any event to inspect the raw IP and recorded network details. Proxy IPs are not recipient location.</p>
 {rows or '<p>No enriched tracking events in the selected period.</p>'}</section>
+{tracked_links_panel}
 </div>'''
     return _panel("tracking", html)
 
