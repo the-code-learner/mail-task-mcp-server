@@ -68,6 +68,62 @@ def _heatmap(values: list[str], label: str, *, note: str = "") -> str:
     return f'<section class="v984-panel"><h3>{head}</h3><div class="v984-heatwrap"><div class="v984-grid"><span></span>{cells}</div></div>{warning}</section>'
 
 
+def _activity_trend(events: list[dict[str, Any]], since: datetime, until: datetime) -> str:
+    """Bounded observed-event trend, not inferred human reads or delivered rates."""
+    duration = max(1.0, (until - since).total_seconds())
+    days = duration / 86400.0
+    buckets = 24 if days <= 1.1 else (7 if days <= 7.1 else (28 if days <= 28.1 else 13))
+    counts: list[dict[str, int]] = [
+        {"opens": 0, "clicks": 0, "files": 0} for _ in range(buckets)
+    ]
+    for item in events:
+        when = _time(str(item.get("observed_at") or ""))
+        if when is None or not (since <= when < until):
+            continue
+        index = int(((when - since).total_seconds() / duration) * buckets)
+        index = max(0, min(buckets-1, index))
+        kind = str(item.get("event_kind") or "")
+        if kind == "email_open":
+            key = "opens"
+        elif kind in {"email_click", "tracked_url_click"}:
+            key = "clicks"
+        elif kind == "tracked_file_download":
+            key = "files"
+        else:
+            continue
+        counts[index][key] += 1
+    peak = max((sum(row.values()) for row in counts),default=0) or 1
+    parts = []
+    for i, row in enumerate(counts):
+        label_date = since + (until-since) * ((i+0.5)/buckets)
+        label = label_date.astimezone(_ZONE).strftime(
+            "%H:%M" if days <= 1.1 else ("%d %b" if days <= 28.1 else "%b %d")
+        )
+        total = sum(row.values())
+        height = max(2, int(78*total/peak)) if total else 2
+        bars = ''.join(
+            f'<span class="v984-trend-{key}" style="height:{round(100*value/max(1,total))}%"></span>'
+            for key,value in row.items() if value
+        )
+        title = f"{label}: {row['opens']} opens, {row['clicks']} clicks, {row['files']} file requests"
+        caption = f'<small>{escape(label)}</small>' if i % max(1,buckets//7)==0 else '<small> </small>'
+        parts.append(
+            f'<div class="v984-trend-column" title="{escape(title,quote=True)}">'
+            f'<div class="v984-trend-bars" style="height:{height}px">{bars}</div>{caption}</div>'
+        )
+    return (
+        '<section class="v984-panel v984-trend"><h3>Tracking activity over time</h3>'
+        '<p class="v984-hint">Observed event requests in the selected period; sampled at '
+        '500 events per page. Opens are not proof of a human read.</p>'
+        '<div class="v984-trend-columns">'+''.join(parts)+'</div>'
+        '<div class="v984-trend-legend">'
+        '<span><i class="v984-trend-opens"></i> Email opens</span>'
+        '<span><i class="v984-trend-clicks"></i> Link clicks</span>'
+        '<span><i class="v984-trend-files"></i> File requests</span>'
+        '</div></section>'
+    )
+
+
 def _received(base: Any, account_id: str, since: datetime, until: datetime) -> tuple[list[str], str]:
     if not account_id:
         return [], "Select one email account to load received mail dates."
@@ -233,6 +289,7 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
     heat += _heatmap(received, "When emails are received", note=received_note)
     heat += _heatmap([str(e.get("observed_at") or "") for e in events],
                      "When tracking events occur", note="Opens, email clicks, URL clicks and file downloads.")
+    trend_html = _activity_trend(events, since, until)
     rows = "".join(_event_html(row) for row in events[:120])
     from .webgui_links_v984 import render_tracked_links_v984
     try:
@@ -262,6 +319,16 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
 .v984-tracking .v984-l3{background:#53b395}.v984-tracking .v984-l4{background:#218268}
 .v984-tracking .v984-heatwrap{overflow:auto}
 .v984-tracking .v984-hint{font-size:11px;color:var(--muted)}
+.v984-tracking .v984-trend-columns{display:flex;gap:5px;align-items:end;height:106px;border-bottom:1px solid var(--line)}
+.v984-tracking .v984-trend-column{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:end;align-items:center;height:100%}
+.v984-tracking .v984-trend-bars{display:flex;flex-direction:column;width:min(100%,24px);min-height:2px;border-radius:3px 3px 0 0;overflow:hidden;background:var(--card2)}
+.v984-tracking .v984-trend-bars span{display:block;width:100%}
+.v984-tracking .v984-trend-column small{font-size:9px;color:var(--muted);height:18px;text-align:center;white-space:nowrap}
+.v984-tracking .v984-trend-opens{background:#4f91cc}.v984-tracking .v984-trend-clicks{background:#5caf91}
+.v984-tracking .v984-trend-files{background:#d19e5f}
+.v984-tracking .v984-trend-legend{display:flex;flex-wrap:wrap;gap:15px;margin-top:10px;font-size:11px;color:var(--muted)}
+.v984-tracking .v984-trend-legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:4px}
+
 .v984-tracking .v984-event{border:1px solid var(--line);border-radius:7px;padding:9px;margin:7px 0}
 .v984-tracking .v984-event summary{display:flex;gap:12px;flex-wrap:wrap;cursor:pointer}
 .v984-tracking .v984-event time{color:var(--muted)}
@@ -283,6 +350,7 @@ def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
 <p class="v984-hint">{escape(label)} · {escape(warning)}</p>
 <div class="v984-stats">{cards}</div>
 {heat}
+{trend_html}
 <section class="v984-panel"><h3>Tracking event timeline</h3>
 <p class="v984-hint">Expand any event to inspect the raw IP and recorded network details. Proxy IPs are not recipient location.</p>
 {rows or '<p>No enriched tracking events in the selected period.</p>'}</section>
