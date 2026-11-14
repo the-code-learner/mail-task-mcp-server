@@ -303,6 +303,15 @@ def task_fragment(base: Any, request: Request) -> str:
             actions += f'''<form method="post" action="/dashboard/job/resume"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button class="ok" type="submit">Resume</button></form>'''
         elif status == "scheduled" or (not autonomous and status != "completed"):
             actions += f'''<form method="post" action="/dashboard/job/pause"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button type="submit">Pause</button></form>'''
+        if autonomous and status in {"scheduled", "paused"}:
+            actions += (
+                '<form method="post" action="/dashboard/scheduled-email/cancel">'
+                '<input type="hidden" name="csrf" value="' +
+                escape(base._csrf_value(), quote=True) + '">'
+                '<input type="hidden" name="job_id" value="' +
+                escape(raw_id, quote=True) + '">'
+                '<button type="submit">Cancel scheduled email</button></form>'
+            )
         title = project_label_html(str(job.get("title") or ""), pid)
         scope = project_label_html(project_names.get(pid or "", pid or "global"), pid, compact=True)
         rows.append(
