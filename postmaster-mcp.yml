@@ -145,9 +145,9 @@ services:
           )"; then
             CONTROL_REQUESTED="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '1p')"
             CONTROL_RESTART_REF="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '2p')"
-            CONTROL_CHECK_ONCE="$(printf '%s\n' "$CONTROL_VALUES" | sed -n '3p')"
-            CONTROL_CHANNEL="$(printf '%s\n' "$CONTROL_VALUES" | sed -n '4p')"
-            if [ -n "$CONTROL_REQUESTED" ]; then
+            CONTROL_CHECK_ONCE="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '3p')"
+            CONTROL_CHANNEL="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '4p')"
+            if [ -n "$$CONTROL_REQUESTED" ]; then
               REQUESTED="$$CONTROL_REQUESTED"
             fi
             if [ "$$CONTROL_CHECK_ONCE" = "true" ]; then
@@ -178,7 +178,7 @@ services:
 
           if [ -z "$$REF" ]; then
             export REPO CONTROL_CHANNEL
-            if REF="$(python - <<'PY'
+            if REF="$$(python - <<'PY'
         import json
         import os
         import re
