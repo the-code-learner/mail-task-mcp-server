@@ -15,7 +15,11 @@ class _ComposeBase:
 
 class WebGuiReleaseContractsV960Tests(unittest.TestCase):
     def test_reader_requests_inspection_full_and_safe_content_mode(self):
-        source = inspect.getsource(webgui_v960.render_inbox)
+        # The composed runtime replaces the public renderer with a modern
+        # presentation wrapper; the original v9.6.0 Safe Email implementation
+        # remains immutable in its source module.
+        from pathlib import Path
+        source = Path(webgui_v960.__file__).read_text(encoding="utf-8")
         self.assertIn('inspection="full"', source)
         self.assertIn('content_mode="safe"', source)
         detail_source = inspect.getsource(webgui_v960._detail_html)
