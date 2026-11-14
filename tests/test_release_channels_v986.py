@@ -21,7 +21,7 @@ from starlette.testclient import TestClient
 from postmaster import runtime_control, update_status
 from postmaster.release_channels_v986 import (
     STABLE,STABLE_AND_BETA,canonical_tag,newer_than,parse_release_tag,
-    release_is_allowed,release_tags,
+    release_is_allowed,release_tags,bootstrap_transport_tag,
 )
 from postmaster.runtime_v967 import _release_target
 from postmaster.webgui_versions_v984 import (
@@ -186,7 +186,7 @@ class SettingsPreferenceTests(unittest.TestCase):
                 self.assertEqual(runtime_control.read_control()["selector"],"latest")
                 self.assertFalse(runtime_control.read_control().get("restart_ref_once"))
 
-    def test_outdated_portainer_bootstrap_rejects_beta_preference(self):
+    def test_original_portainer_bootstrap_accepts_beta_preference(self):
         with tempfile.TemporaryDirectory() as td:
             path=str(Path(td)/"control.json")
             with patch.dict(os.environ,{
@@ -195,12 +195,25 @@ class SettingsPreferenceTests(unittest.TestCase):
             }):
                 client,base=_client()
                 with client:
-                    bad=client.post("/dashboard/versions/channel",data={
+                    response=client.post("/dashboard/versions/channel",data={
                         "csrf":base._csrf_value(),"release_channel":"stable_beta",
-                    })
-                self.assertEqual(bad.status_code,400)
-                self.assertIn("updated v9.8.6 Portainer",bad.text)
-                self.assertFalse(Path(path).exists())
+                    },follow_redirects=False)
+                self.assertEqual(response.status_code,303)
+                self.assertEqual(runtime_control.preferred_release_channel(),STABLE_AND_BETA)
+
+    def test_beta_transport_control_round_trip_is_numeric_and_persistent(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=Path(td)/"control.json"
+            runtime_control.save_release_channel("stable_beta",path=path)
+            saved=runtime_control.write_control(selector="v9.8.7-beta.2",path=path)
+            self.assertEqual(saved["selector"],bootstrap_transport_tag("v9.8.7-beta.2"))
+            self.assertEqual(saved["beta_target"],"v9.8.7-beta.2")
+            self.assertEqual(runtime_control.read_control(path)["selector"],"v9.8.7-beta.2")
+            self.assertRegex(saved["selector"],r"^v[0-9]+\\.[0-9]+\\.[0-9]+$")
+            with self.assertRaisesRegex(ValueError,"stable version"):
+                runtime_control.save_release_channel("stable",path=path)
+            runtime_control.write_control(selector="v9.8.6",path=path)
+            self.assertNotIn("beta_target",json.loads(path.read_text()))
 
     def test_default_preference_stable_without_explicit_save(self):
         with tempfile.TemporaryDirectory() as td:
@@ -214,68 +227,40 @@ class SettingsPreferenceTests(unittest.TestCase):
 
 
 class BootstrapContracts(unittest.TestCase):
-    def test_single_yaml_bootstrap_reads_channel_and_never_selects_beta_by_default(self):
+    def test_original_yaml_contract_remains_unchanged_and_numeric_only(self):
         yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
-        self.assertIn('CONTROL_CHANNEL="stable"',yaml)
-        self.assertIn('payload.get("release_channel") or "stable"',yaml)
-        self.assertIn('channel == "stable_beta" and beta.fullmatch(ref)',yaml)
-        self.assertIn('if is_beta and channel != "stable_beta":',yaml)
-        self.assertIn('order += (0 if is_beta else 1',yaml)
-        self.assertIn('release.get("prerelease") is True',yaml)
         self.assertIn('POSTMASTER_VERSION: latest',yaml)
-        self.assertIn('POSTMASTER_BOOTSTRAP_BETA_SUPPORTED: "true"',yaml)
         self.assertIn('mcp_data:/data',yaml)
+        self.assertIn('stable = re.compile(r"v[0-9]+',yaml)
+        self.assertNotIn("POSTMASTER_BOOTSTRAP_BETA_SUPPORTED",yaml)
+        self.assertNotIn('CONTROL_CHANNEL=',yaml)
+        alias=bootstrap_transport_tag("v9.8.7-beta.2")
+        self.assertRegex(alias,r"^v[0-9]+\\.[0-9]+\\.[0-9]+$")
+        self.assertEqual(alias,"v999999999.9.8000007000002")
+        self.assertNotEqual(bootstrap_transport_tag("v9.8.7-beta.1"),alias)
+        self.assertEqual(bootstrap_transport_tag("v9.8.7"),"v9.8.7")
 
-    def test_embedded_bootstrap_python_resolves_real_stable_and_beta_order(self):
+    def test_embedded_original_bootstrap_control_reader_accepts_alias(self):
         yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
         found=re.search(
-            r'if REF="\$\$\(python - <<\x27PY\x27\n(?P<body>.*?)\n        PY',
+            r'if CONTROL_VALUES="\\$\\$\\(python - <<\\x27PY\\x27\\n(?P<body>.*?)\\n        PY',
             yaml,re.S,
         )
-        self.assertIsNotNone(found,"embedded release resolver missing")
+        self.assertIsNotNone(found)
         source=textwrap.dedent(found.group("body"))
-        compile(source,"<portainer release resolver>","exec")
-        def resolve(channel):
-            result=io.StringIO()
-            payload=json.dumps(RELEASES).encode()
-            with patch.dict(os.environ,{"REPO":"the-code-learner/mail-task-mcp-server",
-                                        "CONTROL_CHANNEL":channel}),\
-                 patch("urllib.request.urlopen",return_value=io.BytesIO(payload)),\
-                 redirect_stdout(result):
-                exec(compile(source,"<portainer release resolver>","exec"),{})
-            return result.getvalue().strip()
-        self.assertEqual(resolve("stable"),"v9.8.6")
-        self.assertEqual(resolve("stable_beta"),"v9.8.7-beta.1")
-
-    def test_embedded_bootstrap_control_reader_validates_opt_in(self):
-        yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
-        found=re.search(
-            r'if CONTROL_VALUES="\$\$\(python - <<\x27PY\x27\n(?P<body>.*?)\n        PY',
-            yaml,re.S,
-        )
-        self.assertIsNotNone(found,"embedded runtime preference reader missing")
-        source=textwrap.dedent(found.group("body"))
-        compile(source,"<portainer release preference>","exec")
         def read(payload):
             with tempfile.TemporaryDirectory() as td:
                 path=Path(td)/"state.json"
                 path.write_text(json.dumps(payload),encoding="utf-8")
                 result=io.StringIO()
                 with patch.dict(os.environ,{"CONTROL_FILE":str(path)}),redirect_stdout(result):
-                    exec(compile(source,"<portainer release preference>","exec"),{})
+                    exec(compile(source,"<original bootstrap preference>","exec"),{})
                 return result.getvalue().splitlines()
-        self.assertEqual(
-            read({"selector":"latest"}),
-            ["latest","","false","stable"],
-        )
-        self.assertEqual(
-            read({"selector":"latest","release_channel":"stable_beta",
-                  "restart_ref_once":"v9.8.6-beta.1","check_updates_once":True}),
-            ["latest","v9.8.6-beta.1","true","stable_beta"],
-        )
-        with self.assertRaisesRegex(RuntimeError,"invalid one-shot restart ref"):
-            read({"selector":"latest","release_channel":"stable",
-                  "restart_ref_once":"v9.8.6-beta.1"})
+        alias=bootstrap_transport_tag("v9.8.7-beta.1")
+        self.assertEqual(read({"selector":alias,"release_channel":"stable_beta"}),
+                         [alias,"","false"])
+        with self.assertRaisesRegex(RuntimeError,"invalid runtime control selector"):
+            read({"selector":"v9.8.7-beta.1"})
 
     def test_workflows_do_not_publish_beta_as_stable(self):
         root=Path(__file__).resolve().parents[1]/".github"/"workflows"
