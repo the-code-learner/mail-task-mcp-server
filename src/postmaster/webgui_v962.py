@@ -154,6 +154,33 @@ SCRIPT = r'''
     const controller = new AbortController(); controllers.set(view, controller);
     const generation = (generations.get(view) || 0) + 1; generations.set(view, generation);
     const started = performance.now();
+    // Tracking reports can take several seconds to aggregate. Announce
+    // pending requests immediately instead of leaving period chips inert.
+    // The previously selected period remains authoritative until new data
+    // actually arrive; a fast second click cancels the first request.
+    const trackingPending = view==='tracking' && target.dataset.v962Loaded==='1';
+    if(trackingPending){
+      target.setAttribute('aria-busy','true');
+      target.classList.add('v98913-tracking-loading');
+      let banner=target.querySelector('[data-v98913-tracking-loading]');
+      if(!banner){
+        banner=document.createElement('div');
+        banner.dataset.v98913TrackingLoading='1';
+        banner.className='v98913-tracking-loading-banner';
+        banner.setAttribute('role','status');
+        banner.setAttribute('aria-live','polite');
+        const head=target.querySelector('.v985-tracking-periods');
+        if(head)head.insertAdjacentElement('afterend',banner);
+        else target.prepend(banner);
+      }
+      const chosen=new URL(url,location.href).searchParams.get('period')||'7d';
+      const descriptions={'24h':'24 hours','7d':'7 days','28d':'28 days',
+        '90d':'90 days',custom:'custom date range'};
+      banner.textContent='Loading '+(descriptions[chosen]||chosen)+' statistics…';
+      target.querySelectorAll('a[data-v985-period]').forEach(a=>{
+        a.classList.toggle('is-pending',a.dataset.v985Period===chosen);
+      });
+    }
     const loadingFolder = view==='inbox' && target.dataset.v962Loaded === '1' &&
       new URL(url,location.href).searchParams.get('mailbox') !==
       target.dataset.v989LoadedMailbox;
@@ -193,6 +220,24 @@ SCRIPT = r'''
       if (push) history.pushState({v962:view},'',url);
     } catch (err) {
       if (err && err.name === 'AbortError') return;
+      // Preserve previously loaded Tracking statistics and allow a retry.
+      // Replacing the fragment with a bare error loses the period controls.
+      if(view==='tracking' && trackingPending){
+        target.removeAttribute('aria-busy');
+        target.classList.remove('v98913-tracking-loading');
+        target.querySelectorAll('a[data-v985-period]').forEach(a=>
+          a.classList.remove('is-pending'));
+        const banner=target.querySelector('[data-v98913-tracking-loading]');
+        if(banner){
+          banner.textContent='Could not load the selected period. ';
+          const retry=document.createElement('button');
+          retry.type='button';
+          retry.textContent='Retry';
+          retry.addEventListener('click',()=>load(view,url,false,true));
+          banner.appendChild(retry);
+        }
+        return;
+      }
       target.classList.remove('v989-folder-loading');
       target.removeAttribute('aria-busy');
       target.innerHTML='<div class="flash">Could not load this dashboard fragment. <button type="button" data-v962-retry>Retry</button></div>';
