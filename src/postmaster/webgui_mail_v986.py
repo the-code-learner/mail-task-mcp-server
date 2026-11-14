@@ -83,7 +83,7 @@ _SELECTED_MAILBOX = re.compile(
 )
 
 
-def modern_inbox_markup(html: str) -> str:
+def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
     if 'id="panel-inbox"' not in html:
         return html
     role = _SELECTED_MAILBOX.search(html)
@@ -102,6 +102,23 @@ def modern_inbox_markup(html: str) -> str:
         )
     # The header already has an account selector and the sidebar has mailbox
     # navigation. Keep their selected values in GET filters, without duplicates.
+    # Sender selection remains available only when no global account was chosen.
+    if selected_account:
+        def sender_with_global_account(match: re.Match[str]) -> str:
+            choices = match.group(1)
+            selected = _SELECTED_PATTERN.search(choices)
+            if not selected or selected.group(1) != escape(selected_account,quote=True):
+                return match.group(0)
+            return (
+                '<input type="hidden" name="account_id" value="'
+                + escape(selected_account,quote=True) + '">'
+                '<div class="v986-sender-context">Sending with the email account selected '
+                'in the global header.</div>'
+            )
+        html = re.sub(
+            r'<label>Sender account <select name="account_id">(.*?)</select></label>',
+            sender_with_global_account,html,count=1,flags=re.S,
+        )
     def collapsible(m: re.Match[str]) -> str:
         form = _SELECT_PATTERN.sub(hidden_select, m.group(1))
         return (
@@ -179,6 +196,8 @@ MAIL_STYLE = r"""
 #panel-inbox .v971-floating-compose .v951-formgrid .wide{grid-column:1/-1}
 #panel-inbox .v971-floating-compose .v951-formgrid>label{font-size:11px;display:flex;
  flex-direction:column;gap:5px}
+#panel-inbox .v986-sender-context{padding:9px 12px;font-size:11px;color:var(--v970-muted);
+ border:1px solid var(--v970-line);border-radius:8px;background:var(--v970-surface-2)}
 #panel-inbox .v971-floating-compose .v951-formgrid>label input,
 #panel-inbox .v971-floating-compose .v951-formgrid>label select{
  min-height:36px!important;border:1px solid var(--v970-line)}
@@ -421,7 +440,8 @@ def install_mail_gui_v986(v960: Any, shell: Any) -> None:
     def compose(*args: Any, **kwargs: Any) -> str:
         return modern_compose_markup(original_compose(*args,**kwargs))
     def inbox(base: Any, request: Request) -> str:
-        return modern_inbox_markup(original_inbox(base,request))
+        selected = str(request.query_params.get("account_id") or request.query_params.get("account") or "").strip()
+        return modern_inbox_markup(original_inbox(base,request),selected_account=selected)
     v960._compose_panel = compose
     v960.render_inbox = inbox
     setattr(v960,"_v986_mail_installed",True)
