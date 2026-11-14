@@ -252,24 +252,36 @@ def global_tracking_network_events(
           SELECT 'email_open' AS event_kind,s.event_id,s.observed_at,
              s.account_id,'' AS owner_id,NULL AS project_id,o.recipient,s.delivery_id,
              '' AS tracked_link_id,'' AS label,'email' AS target_type,
-             o.user_agent,o.browser,o.os,o.client_source,o.metadata_confidence,{geo},'' AS destination_host
+             o.user_agent,o.browser,o.os,o.client_source,o.metadata_confidence,{geo},'' AS destination_host,
+             cam.subject AS email_subject,d.message_id AS message_id,
+             '' AS original_url,'' AS anchor_text,'' AS download_filename
           FROM tracking_sensitive_telemetry s
           JOIN tracking_opens o ON s.event_kind='open' AND o.id=s.event_id
+          LEFT JOIN tracking_deliveries d ON d.id=o.delivery_id
+          LEFT JOIN tracking_campaigns cam ON cam.id=o.campaign_id
           WHERE s.event_kind='open'
           UNION ALL
           SELECT 'email_click',s.event_id,s.observed_at,
              s.account_id,'' AS owner_id,NULL AS project_id,c.recipient,s.delivery_id,
              c.link_id,'' AS label,'email' AS target_type,
-             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{geo},'' AS destination_host
+             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{geo},'' AS destination_host,
+             cam.subject AS email_subject,COALESCE(NULLIF(lk.message_id,''),d.message_id) AS message_id,
+             lk.original_url AS original_url,lk.anchor_text AS anchor_text,'' AS download_filename
           FROM tracking_sensitive_telemetry s
           JOIN tracking_clicks c ON s.event_kind='click' AND c.id=s.event_id
+          LEFT JOIN tracking_deliveries d ON d.id=c.delivery_id
+          LEFT JOIN tracking_campaigns cam ON cam.id=c.campaign_id
+          LEFT JOIN tracking_links lk ON lk.id=c.link_occurrence_id
           WHERE s.event_kind='click'
           UNION ALL
           SELECT CASE WHEN l.target_type='stored_file' THEN 'tracked_file_download' ELSE 'tracked_url_click' END,
              n.event_id,n.observed_at,
              '' AS account_id,n.owner_id,n.project_id,'' AS recipient,'' AS delivery_id,
              n.tracked_link_id,l.label,l.target_type,
-             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{generic_geo},l.destination_host
+             c.user_agent,c.browser,c.os,c.client_source,c.metadata_confidence,{generic_geo},l.destination_host,
+             '' AS email_subject,'' AS message_id,
+             CASE WHEN l.target_type='stored_file' THEN '' ELSE l.destination_url END AS original_url,
+             '' AS anchor_text,l.download_filename AS download_filename
           FROM generic_tracking_network_v984 n
           JOIN generic_tracking_clicks c ON c.id=n.event_id
           JOIN generic_tracking_links l ON l.id=n.tracked_link_id
@@ -313,6 +325,23 @@ def global_tracking_network_events(
         direction = "ASC" if str(sort).lower() == "asc" else "DESC"
         sql = f"SELECT * FROM ({union}){where} ORDER BY observed_at {direction},event_id {direction} LIMIT ? OFFSET ?"
         rows = [dict(x) for x in conn.execute(sql, (*params, bounded, skip)).fetchall()]
+    # Older stored events were captured before a local MMDB was provisioned.
+    # Render useful GeoIP estimates from local databases when available,
+    # without calling external IP APIs or mutating retained evidence.
+    status = geoip_status()
+    if status["city_database_available"] or status["asn_database_available"] or status["isp_database_available"]:
+        for event in rows:
+            if (not event.get("geo_city") or not event.get("geo_asn") or
+                    not event.get("geo_isp")) and event.get("source_ip"):
+                fresh = enrich_ip(
+                    str(event.get("source_ip") or ""),
+                    str(event.get("geo_country_code") or ""),
+                )
+                for key in ("geo_country_code","geo_region","geo_city","geo_postal_code",
+                            "geo_latitude","geo_longitude","geo_accuracy_km","geo_asn",
+                            "geo_isp","geo_organization","geo_label","geo_source","geo_confidence"):
+                    if fresh.get(key) and not event.get(key):
+                        event[key] = fresh[key]
     return {
         "ok": True, "events": rows, "returned": len(rows), "offset": skip,
         "retention": "no_automatic_expiry",
