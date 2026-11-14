@@ -72,6 +72,7 @@ class GeoIPSettingsTests(unittest.TestCase):
         }):
             self.assertEqual(str(_target("GeoLite2-City")),td+"/my-city.mmdb")
 
+    # Exact-SHA release check: MaxMind auth stays official and R2 never gets secrets.
     def test_maxmind_same_host_redirect_preserves_auth_but_r2_strips_it(self):
         from urllib.request import Request
         req=Request(
