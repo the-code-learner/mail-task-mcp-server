@@ -213,10 +213,12 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
             Path(runtime.__file__).resolve().parent / "webgui_v962_views.py"
         ).read_text(encoding="utf-8")
         renderer_index = runtime_source.rindex(
-            "_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963"
+            "_webgui_v960.render_inbox = _render_inbox_compat"
         )
         self.assertGreater(renderer_index, runtime_source.index("install_webgui_v964(app, _base)"))
         self.assertIn("return v960.render_inbox(proxy, request)", views_source)
+        self.assertIn("return modern_inbox_markup(", runtime_source)
+        self.assertIn("_webgui_v963.render_inbox_v963(proxied_base, request)", runtime_source)
         self.assertTrue(callable(v963.render_inbox_v963))
 
         route_by_path = {
