@@ -111,11 +111,6 @@ def _release_target(
     if op not in RUNTIME_OPERATIONS:
         raise ValueError(f"unsupported runtime version operation: {op or '<empty>'}")
     selected_channel=runtime_control.preferred_release_channel()
-    if selected_channel=="stable_beta" and not runtime_control.beta_bootstrap_supported():
-        raise RuntimeError(
-            "Beta requires the updated versioned Portainer stack YAML. "
-            "Install the channel-aware bootstrap before requesting a beta version change."
-        )
     versions, release_status = runtime_control.available_release_tags(
         channel=selected_channel,force=False,
     )
@@ -306,9 +301,14 @@ def install_runtime_v967(
                 }
 
             if op == "update-latest":
+                # Stable can retain the latest-on-restart selector. The
+                # unmodified v9.8.5 bootstrap only auto-discovers stable tags;
+                # beta therefore remains pinned to its numeric transport alias
+                # until the next explicitly approved update.
+                is_beta = "-beta." in target
                 control = runtime_control.write_control(
-                    selector="latest",
-                    restart_ref_once=target,
+                    selector=target if is_beta else "latest",
+                    restart_ref_once=None if is_beta else target,
                     check_updates_once=False,
                 )
             else:
