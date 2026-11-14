@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from . import webgui_v951 as v951
 from .webgui_versions_v984 import versions_settings
+from .webgui_geoip_v9899 import geoip_settings_panel
 from .webgui_v962_views import _panel
 
 
@@ -69,7 +70,7 @@ def render_settings_v985(base: Any, request: Request) -> str:
         account_panel,
     )
     current = str(request.query_params.get("settings_tab") or "versions").strip()
-    if current not in {"versions","accounts","services","diagnostics"}:
+    if current not in {"versions","accounts","services","diagnostics","geoip"}:
         current = "versions"
     def tab(name: str, label: str) -> str:
         active = name == current
@@ -95,6 +96,7 @@ def render_settings_v985(base: Any, request: Request) -> str:
         +tab("versions","Versions &amp; updates")
         +tab("accounts","Email accounts")
         +tab("services","Manage services")
+        +tab("geoip","GeoIP databases")
         +tab("diagnostics","Diagnostics")
         +'</div>'
         '<div'+pane_attrs("versions")+'>'+version+'</div>'
@@ -109,6 +111,7 @@ def render_settings_v985(base: Any, request: Request) -> str:
         '<section class="v985-settings-card" id="v985-settings-other">'
         '<h3>Services &amp; permissions</h3><div class="v985-settings-shortcuts">'
         +shortcuts+'</div></section></div>'
+        '<div'+pane_attrs("geoip")+'>'+geoip_settings_panel(base,request)+'</div>'
         '<div'+pane_attrs("diagnostics")+'>'
         '<section class="v985-settings-card" id="v985-settings-diagnostics">'
         '<h3>Detailed service status</h3><p class="small muted">'
