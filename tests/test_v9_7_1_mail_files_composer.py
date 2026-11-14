@@ -106,10 +106,11 @@ class ComposedRuntimeMailIaV971Tests(unittest.TestCase):
         tracking = source.index("install_tracking_webgui_v971")
         mail = source.index("install_mail_files_composer_v971(app")
         confirm = source.index("install_compose_confirmation_v971(_webgui_v964)")
-        compat = source.rindex("_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963")
+        compat = source.rindex("_webgui_v960.render_inbox = _render_inbox_compat")
         self.assertLess(tracking, mail)
         self.assertLess(mail, confirm)
         self.assertLess(confirm, compat)
+        self.assertIn("return modern_inbox_markup(", source)
 
     def test_composed_runtime_hides_top_level_compose_tracking_and_preserves_routes(self):
         import postmaster.runtime as runtime
