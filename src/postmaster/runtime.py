@@ -46,6 +46,7 @@ from .webgui_geoip_v9899 import install_geoip_settings
 from .webgui_catalog_v985 import install_catalog_v985
 from .webgui_tracking_v985 import install_tracking_v985
 from .webgui_mail_v986 import install_mail_gui_v986, modern_inbox_markup
+from .scheduled_email_integration_v98919 import install_scheduled_email_runtime_v98919
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -254,6 +255,9 @@ def _render_inbox_compat(proxied_base, request):
 _webgui_v960.render_inbox = _render_inbox_compat
 _webgui_v963.v951.render_inbox = _render_inbox_compat
 
+
+# One explicitly authorized autonomous task type. Other scheduler tasks remain passive.
+_scheduled_email = install_scheduled_email_runtime_v98919(app, _base)
 
 link_store = _core.link_store
 
