@@ -131,7 +131,7 @@ def render_world_map(events: list[dict[str, Any]], *, truncated: bool = False) -
             '<circle class="pm-map-marker" tabindex="0" role="button"'
             ' data-category="' + kind + '" data-detail="' + escape(detail, quote=True) + '"'
             ' cx="' + f"{cx:.2f}" + '" cy="' + f"{cy:.2f}" + '"'
-            ' r="' + f"{radius:.1f}" + '" fill="' + COLORS[kind] + '">'
+            ' r="' + f"{radius:.1f}" + '" data-base-radius="' + f"{radius:.1f}" + '" fill="' + COLORS[kind] + '">'
             '<title>' + escape(detail) + '</title></circle>'
         )
     controls = "".join(
@@ -176,10 +176,18 @@ WORLD_MAP_STYLE = """
 .pm-map-zoom button{background:var(--v970-surface-2);border:1px solid var(--v970-line);border-radius:6px;padding:5px 10px;color:var(--v970-text);cursor:pointer}
 .pm-map-viewport{position:relative;background:#111e30;overflow:hidden;min-height:210px}
 .pm-map-svg{display:block;width:100%;height:auto;min-height:210px;touch-action:pan-y}
-.pm-map-marker{cursor:pointer;stroke:#e9f4ff;stroke-width:1.15;vector-effect:non-scaling-stroke;opacity:.87}
-.pm-map-marker:hover,.pm-map-marker:focus{stroke:#fff;stroke-width:3;opacity:1;outline:none}
+.pm-map-marker{cursor:pointer;stroke:#e9f4ff;stroke-width:.85;vector-effect:non-scaling-stroke;opacity:.72}
+.pm-map-marker[data-category="human"]{fill:#2baf7f}
+.pm-map-marker[data-category="proxy"]{fill:#e8aa47}
+.pm-map-marker[data-category="scanner"]{fill:#a57be6}
+.pm-map-marker[data-category="other"]{fill:#8092a8}
+.pm-map-marker:hover,.pm-map-marker:focus{stroke:#fff;stroke-width:1.6;opacity:1;outline:none}
+.pm-map-marker.pm-map-selected{opacity:1;stroke:#fff;stroke-width:1.8}
+.pm-map-overlap{display:flex;flex-direction:column;gap:5px;max-height:240px;overflow:auto;margin-top:5px}
+.pm-map-overlap button{cursor:pointer;text-align:left;border:1px solid #435d7b;border-radius:5px;color:#f3f7fd;background:#20364e;padding:6px 8px;font-size:11px}
+.pm-map-overlap button:focus-visible{outline:2px solid #fff;outline-offset:2px}
 .pm-map-marker.pm-map-hidden{display:none}
-.pm-map-tooltip{position:absolute;left:12px;bottom:12px;max-width:min(85%,430px);padding:8px 11px;border:1px solid #6d829b;border-radius:8px;background:#101b2e;color:#f3f7fd;font-size:12px;pointer-events:none}
+.pm-map-tooltip{position:absolute;left:12px;bottom:12px;max-width:min(85%,430px);padding:8px 11px;border:1px solid #6d829b;border-radius:8px;background:#101b2e;color:#f3f7fd;font-size:12px;pointer-events:auto;z-index:2}
 .pm-map-tooltip[hidden]{display:none}
 .pm-map-filters{display:flex;flex-wrap:wrap;gap:7px;padding:10px 13px}
 .pm-map-filter{display:inline-flex;align-items:center;gap:6px;padding:7px 9px;background:var(--v970-surface-2);border:1px solid var(--v970-line);border-radius:7px;font-size:11px;color:var(--v970-text);cursor:pointer}
@@ -201,8 +209,38 @@ document.addEventListener('click', function(event) {
   const zoom = event.target.closest('[data-map-zoom]');
   const popup = root.querySelector('.pm-map-tooltip');
   if (marker) {
-    popup.textContent = marker.getAttribute('data-detail') || '';
-    popup.hidden = false;
+    const box=marker.getBoundingClientRect();
+    const cx=(box.left+box.right)/2, cy=(box.top+box.bottom)/2;
+    const near=Array.from(root.querySelectorAll('.pm-map-marker:not(.pm-map-hidden)'))
+      .filter(node=>{
+        const r=node.getBoundingClientRect();
+        return Math.hypot((r.left+r.right)/2-cx,(r.top+r.bottom)/2-cy)<=18;
+      }).slice(0,15);
+    root.querySelectorAll('.pm-map-selected').forEach(node=>node.classList.remove('pm-map-selected'));
+    marker.classList.add('pm-map-selected');
+    popup.replaceChildren();
+    if(near.length<=1){
+      popup.textContent=marker.dataset.detail||'';
+    }else{
+      const heading=document.createElement('strong');
+      heading.textContent=near.length+' nearby locations — select one';
+      popup.appendChild(heading);
+      const chooser=document.createElement('div');
+      chooser.className='pm-map-overlap';
+      near.forEach((node,i)=>{
+        const button=document.createElement('button');
+        button.type='button';
+        button.textContent=(i+1)+'. '+(node.dataset.detail||'Location');
+        button.addEventListener('click',()=>{
+          root.querySelectorAll('.pm-map-selected').forEach(n=>n.classList.remove('pm-map-selected'));
+          node.classList.add('pm-map-selected');
+          popup.replaceChildren(document.createTextNode(node.dataset.detail||''));
+        });
+        chooser.appendChild(button);
+      });
+      popup.appendChild(chooser);
+    }
+    popup.hidden=false;
   } else if (filter) {
     const enabled = filter.getAttribute('aria-pressed') !== 'true';
     filter.setAttribute('aria-pressed', String(enabled));
@@ -220,6 +258,12 @@ document.addEventListener('click', function(event) {
     let left = factor ? Math.max(0,Math.min(1000-width,parts[0]+(parts[2]-width)/2)) : 0;
     let top = factor ? Math.max(0,Math.min(500-height,parts[1]+(parts[3]-height)/2)) : 0;
     svg.setAttribute('viewBox', [left,top,width,height].join(' '));
+    // Compensate for viewBox magnification while preserving event-count sizes.
+    const scale=Math.pow(width/1000,.85);
+    root.querySelectorAll('.pm-map-marker').forEach(node=>{
+      const base=Number(node.dataset.baseRadius)||3;
+      node.setAttribute('r',String(Math.max(1.2,base*scale)));
+    });
     popup.hidden = true;
   } else if (!event.target.closest('.pm-map-tooltip')) {
     popup.hidden = true;
