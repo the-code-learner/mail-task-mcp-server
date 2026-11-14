@@ -105,7 +105,7 @@ def _period_form(request: Request, active: str) -> str:
     }
     buttons="".join(
         '<a class="v985-period'+(" selected" if active==period else "")+
-        '" href="'+_e(
+        '" data-v985-period="'+period+'" data-v960-fragment="tracking" href="'+_e(
             "/?"+urlencode({
                 **period_base,"ui_view":"tracking","period":period,
                 **({"from":date1,"to":date2} if period=="custom" else {}),
