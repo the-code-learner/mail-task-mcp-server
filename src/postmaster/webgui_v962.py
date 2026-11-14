@@ -135,7 +135,26 @@ SCRIPT = r'''
       row.onkeydown=ev=>{if((ev.key==='Enter'||ev.key===' ')&&!ev.target.closest('a,button,input,form,select,textarea')){ev.preventDefault();go();}};
     });
     root.querySelectorAll('form[data-v960-send]').forEach(form => {
-      if (!form.dataset.v962SendBound) { form.dataset.v962SendBound='1'; form.addEventListener('submit',()=>form.querySelectorAll('button[type="submit"]').forEach(b=>b.disabled=true)); }
+      if (!form.dataset.v962SendBound) {
+        form.dataset.v962SendBound='1';
+        form.addEventListener('submit',event=>{
+          // Preserve clicked Send / Save draft / Schedule send action before
+          // disabling submit buttons. Disabled submitters are omitted by
+          // browser form-data construction after submit listeners run.
+          const submitter=event.submitter;
+          if(submitter?.name==='compose_action'){
+            let hidden=form.querySelector('input[data-v98919-submit-action]');
+            if(!hidden){
+              hidden=document.createElement('input');hidden.type='hidden';
+              hidden.name='compose_action';hidden.dataset.v98919SubmitAction='1';
+              form.appendChild(hidden);
+            }
+            hidden.value=submitter.value;
+            submitter.removeAttribute('name');
+          }
+          form.querySelectorAll('button[type="submit"]').forEach(b=>b.disabled=true);
+        });
+      }
     });
   }
   function bindAll(root=document) { bindDetails(root); bindProjectSlug(root); bindReader(root); }
