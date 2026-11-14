@@ -208,6 +208,29 @@ def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
     pagination = '<div class="v960-pagination">'
     if opening not in html or reader not in html or pagination not in html:
         return html  # Never break an unexpected legacy Inbox renderer.
+    # The legacy server renders a real, CSRF-verified IMAP sync form only for
+    # a specific account. Move it to the message-list header where the user
+    # expects the mailbox Refresh action. All accounts intentionally has no
+    # such form and remains cache-only (no implicit multi-account sync).
+    sync_match = re.search(
+        r'<form method="post" action="/dashboard/inbox/refresh">.*?</form>',
+        html, flags=re.S,
+    )
+    sync_form = ""
+    if sync_match:
+        sync_form = sync_match.group(0).replace(
+            '<button class="primary" type="submit">Refresh</button>',
+            '<button class="primary v98910-sync" type="submit" '
+            'aria-label="Fetch new messages from the selected email account">'
+            '↻ Refresh mail</button>',
+        )
+        sync_form = sync_form.replace(
+            '<button class="primary" type="submit">Aggiorna</button>',
+            '<button class="primary v98910-sync" type="submit" '
+            'aria-label="Fetch new messages from the selected email account">'
+            '↻ Refresh mail</button>',
+        )
+        html = html[:sync_match.start()] + html[sync_match.end():]
     params = dict(parse_qsl(query_string, keep_blank_values=False))
     for key in ("message_uid", "full_html", "full_html_intent", "compose_mode"):
         params.pop(key, None)
@@ -230,7 +253,8 @@ def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
         '<div class="v989-mail-stream">'
         '<div class="v989-stream-header"><div><strong>Messages</strong>'
         '<span class="v989-stream-subtitle">Select a message to read</span></div>'
-        '<span class="v989-stream-count"></span></div>'
+        '<div class="v98910-stream-actions"><span class="v989-stream-count"></span>'
+        + sync_form + '</div></div>'
         + tabs +
         '<div class="scroll v989-list-scroll">'
         '<table class="v960-mail-table v986-mail-list">'
@@ -578,6 +602,20 @@ BETA_MAIL_STYLE = r"""
 }
 #panel-inbox .v989-list-scroll .v987-message:has(.v989-account-origin){
  min-height:113px!important
+}
+/* Beta.10: explicit per-account IMAP refresh in mailbox list heading.
+   No refresh form is rendered for All accounts (cache-only aggregate view). */
+#panel-inbox .v98910-stream-actions{display:flex;align-items:center;
+ justify-content:flex-end;gap:9px;flex-wrap:wrap;min-width:0}
+#panel-inbox .v98910-stream-actions form{margin:0!important;display:flex;align-items:center}
+#panel-inbox .v98910-stream-actions .v98910-sync{display:inline-flex!important;
+ align-items:center;justify-content:center;white-space:nowrap;
+ padding:7px 11px!important;font-size:12px!important;min-height:32px;
+ border-radius:8px!important;cursor:pointer!important}
+#panel-inbox .v98910-stream-actions .v98910-sync:disabled{opacity:.62;cursor:progress!important}
+@media(max-width:760px){
+ #panel-inbox .v98910-stream-actions{flex-wrap:wrap}
+ #panel-inbox .v98910-stream-actions .v98910-sync{padding:6px 8px!important;font-size:11px!important}
 }
 /* Beta.6: remove CSS-grid table-row layout entirely. Grid positioning in
    browser table fragments and competing inherited td rules produced overlapping
@@ -976,6 +1014,12 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    enhanceBetaInbox(inbox);
  }
  document.addEventListener('submit',ev=>{
+   const sync=ev.target.closest?.('form[action="/dashboard/inbox/refresh"]');
+   if(sync){
+     const button=sync.querySelector('button[type=submit]');
+     if(button?.disabled){ev.preventDefault();return;}
+     if(button){button.disabled=true;button.textContent='↻ Syncing…';}
+   }
    const editor=ev.target.querySelector?.('[data-v986-editor]');
    if(editor)states.get(editor)?.save();
  },true);
