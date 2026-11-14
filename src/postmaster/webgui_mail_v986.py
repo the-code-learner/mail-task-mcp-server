@@ -193,7 +193,8 @@ def beta_mailbox_layout(html: str) -> str:
     re-rendered or fetched from an untrusted remote sender.
     """
     opening = '<div class="scroll"><table class="v960-mail-table v986-mail-list">'
-    if opening not in html:
+    if opening not in html or '<div class="v960-pagination">' not in html:
+        # An unknown older template must remain usable, not half-wrapped.
         return html
     # A single clear toolbar replaces the feeling of a report/table.
     start = (
