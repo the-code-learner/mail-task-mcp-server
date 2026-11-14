@@ -287,6 +287,9 @@ class BootstrapContracts(unittest.TestCase):
         self.assertIn("workflow_dispatch:",beta)
         self.assertIn("gh release create",beta)
         self.assertIn("--prerelease",beta)
+        self.assertIn("Require green v9 runtime tests for this exact beta commit",beta)
+        self.assertIn("v9-runtime-tests.yml/runs?head_sha=$GITHUB_SHA",beta)
+        self.assertIn('run.get("conclusion")=="success"',beta)
         self.assertIn('data["isPrerelease"] is True',beta)
         self.assertIn("VERSION mismatch",beta)
 
