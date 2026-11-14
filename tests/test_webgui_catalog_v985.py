@@ -48,7 +48,7 @@ class McpCatalogV985Tests(unittest.TestCase):
         self.assertIn('id="v985-mcp-catalog-filter"',v962.SCRIPT)
         install_catalog_v985(v951,v962,core)
         self.assertEqual(v962.SCRIPT.count('id="v985-mcp-catalog-filter"'),1)
-        self.assertEqual(v962._styles().count(".v985-catalog-head"),1)
+        self.assertEqual(v962._styles().count(".v985-catalog .v985-catalog-head{"),1)
 
     def test_missing_registry_is_not_misrepresented_as_success(self):
         with self.assertRaises(RuntimeError):
