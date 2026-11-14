@@ -42,6 +42,7 @@ from .webgui_calendar_v984 import install_week_calendar_v984
 from .webgui_design_v985 import install_webgui_design_v985
 from .webgui_overview_v985 import install_overview_v985
 from .webgui_settings_v985 import install_settings_v985
+from .webgui_geoip_v9899 import install_geoip_settings
 from .webgui_catalog_v985 import install_catalog_v985
 from .webgui_tracking_v985 import install_tracking_v985
 from .webgui_mail_v986 import install_mail_gui_v986, modern_inbox_markup
@@ -224,6 +225,8 @@ install_webgui_release_identity(_webgui_v962, project_release_version())
 install_webgui_design_v985(_webgui_v962, _webgui_v970, project_release_version())
 install_overview_v985(_webgui_v962_views, _webgui_v962)
 install_settings_v985(_webgui_v962_views.v951, _webgui_v962)
+# Explicit, CSRF-protected MaxMind database downloads do not require YAML changes.
+install_geoip_settings(app, _base, _webgui_v962)
 install_catalog_v985(_webgui_v962_views.v951, _webgui_v962, _core)
 install_tracking_v985(_webgui_v962_views, _webgui_v962)
 install_mail_gui_v986(_webgui_v960, _webgui_v962)
