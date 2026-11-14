@@ -3,7 +3,7 @@ name: beta.19 validated release dispatch
 on:
   push:
     branches:
-      - beta/v9.8.9-beta.19-map-fallback
+      - beta/v9.8.9-beta.19-scheduled-email
 
 permissions:
   contents: read
@@ -29,7 +29,7 @@ jobs:
         run: |
           set -eu
           for attempt in $(seq 1 50); do
-            CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.19-map-fallback" --jq '.object.sha')"
+            CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.19-scheduled-email" --jq '.object.sha')"
             if [ "$CURRENT" != "$GITHUB_SHA" ]; then
               echo "Branch advanced; this run must not publish an outdated commit."
               exit 0
@@ -67,12 +67,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -eu
-          CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.19-map-fallback" --jq '.object.sha')"
+          CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.19-scheduled-email" --jq '.object.sha')"
           test "$CURRENT" = "$GITHUB_SHA"
           if gh release view v9.8.9-beta.19 >/dev/null 2>&1; then
             echo "Already released"
             exit 0
           fi
           gh workflow run beta-release.yml \
-            --ref beta/v9.8.9-beta.19-map-fallback \
+            --ref beta/v9.8.9-beta.19-scheduled-email \
             -f version=9.8.9-beta.19
