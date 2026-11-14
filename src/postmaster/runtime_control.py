@@ -182,11 +182,18 @@ def write_control(
         channels.valid_channel(release_channel)
         if release_channel is not None else previous.get("release_channel")
     )
-    payload: dict[str, Any] = {"selector": canonical_selector(selector)}
+    normalized_selector=canonical_selector(selector)
+    normalized_ref=canonical_selector(restart_ref_once) if restart_ref_once else None
+    effective_channel=str(selected_channel or channels.STABLE)
+    if normalized_selector!="latest" and not channels.release_is_allowed(normalized_selector,effective_channel):
+        raise ValueError("prerelease selector requires an explicit Stable + Beta opt-in")
+    if normalized_ref and not channels.release_is_allowed(normalized_ref,effective_channel):
+        raise ValueError("prerelease restart target requires Stable + Beta opt-in")
+    payload: dict[str, Any] = {"selector": normalized_selector}
     if selected_channel:
         payload["release_channel"]=selected_channel
-    if restart_ref_once:
-        payload["restart_ref_once"] = canonical_selector(restart_ref_once)
+    if normalized_ref:
+        payload["restart_ref_once"] = normalized_ref
     if check_updates_once:
         payload["check_updates_once"] = True
     target.parent.mkdir(parents=True, exist_ok=True)
