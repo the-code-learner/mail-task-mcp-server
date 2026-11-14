@@ -154,6 +154,13 @@ SCRIPT = r'''
     const controller = new AbortController(); controllers.set(view, controller);
     const generation = (generations.get(view) || 0) + 1; generations.set(view, generation);
     const started = performance.now();
+    const loadingFolder = view==='inbox' && target.dataset.v962Loaded === '1' &&
+      new URL(url,location.href).searchParams.get('mailbox') !==
+      target.dataset.v989LoadedMailbox;
+    if(loadingFolder){
+      target.setAttribute('aria-busy','true');
+      target.classList.add('v989-folder-loading');
+    }
     try {
       const endpoint=fragmentUrl(view,url);
       const prefetched=safeToWarm(view,url) ? warmCache.get(endpoint) : null;
@@ -174,6 +181,10 @@ SCRIPT = r'''
       // Preserve the v9.6.1 active-fragment invariant during replacement.
       if (target.classList.contains('active')) next.classList.add('active');
       next.dataset.v962Loaded='1';
+      if(view==='inbox'){
+        next.dataset.v989LoadedMailbox=new URL(url,location.href).searchParams.get('mailbox')||'INBOX';
+      }
+      next.removeAttribute('aria-busy');
       const line=document.createElement('div'); line.className='v962-perfline';
       line.textContent='Fragment ' + (performance.now()-started).toFixed(1) + ' ms' + (timing ? ' · ' + timing : '');
       next.insertBefore(line,next.firstChild);
@@ -182,6 +193,8 @@ SCRIPT = r'''
       if (push) history.pushState({v962:view},'',url);
     } catch (err) {
       if (err && err.name === 'AbortError') return;
+      target.classList.remove('v989-folder-loading');
+      target.removeAttribute('aria-busy');
       target.innerHTML='<div class="flash">Could not load this dashboard fragment. <button type="button" data-v962-retry>Retry</button></div>';
       const retry=target.querySelector('[data-v962-retry]'); if(retry) retry.onclick=()=>load(view,url,false,true);
     } finally {
@@ -208,8 +221,13 @@ SCRIPT = r'''
     const explicit = a.hasAttribute('data-v962-nav') || a.hasAttribute('data-v960-fragment') || views.has((u.hash||'').slice(1));
     if (!explicit) return;
     ev.preventDefault();
-    const isNav=a.hasAttribute('data-v962-nav');
-    load(view,u.toString(),true,!isNav);
+    // Folder links are *not* normal view navigation. All four mail folders
+    // share "inbox", but each must fetch its own mailbox fragment. Previously
+    // isNav=true skipped loading because panel-inbox was already marked loaded,
+    // changing only the URL/active tab while leaving stale Inbox/Sent messages.
+    const isFolder=a.hasAttribute('data-v985-mailbox');
+    const isNav=a.hasAttribute('data-v962-nav') && !isFolder;
+    load(view,u.toString(),true,isFolder || !isNav);
   });
 
   document.addEventListener('submit', ev => {
