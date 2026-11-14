@@ -24,6 +24,7 @@ def attach_sent_email_links(base: Any, events: list[dict[str, Any]]) -> None:
         store = base.mailbox_cache_store()
         with store._connect() as conn:
             messages: dict[tuple[str, str], tuple[str, str]] = {}
+            ambiguous: set[tuple[str, str]] = set()
             # All query arguments are parameters; constrain to cached Sent
             # roles so a reply from Inbox cannot be linked accidentally.
             accounts = sorted({account for account, _ in requests})
@@ -42,8 +43,11 @@ def attach_sent_email_links(base: Any, events: list[dict[str, Any]]) -> None:
                     ).fetchall()
                     for match in matches:
                         key = account, str(match["message_id"] or "")
+                        candidate = str(match["mailbox"]), str(match["uid"])
                         if key not in messages:
-                            messages[key] = str(match["mailbox"]), str(match["uid"])
+                            messages[key] = candidate
+                        elif messages[key] != candidate:
+                            ambiguous.add(key)
     except Exception:
         # Analytics must remain usable when mail cache is not initialized;
         # never invent links to missing messages.
@@ -51,7 +55,9 @@ def attach_sent_email_links(base: Any, events: list[dict[str, Any]]) -> None:
     for row in events:
         key = (str(row.get("account_id") or "").strip(),
                str(row.get("message_id") or "").strip())
-        if key not in messages:
+        if key not in messages or key in ambiguous:
+            # More than one cached Sent copy has this Message-ID: do not
+            # arbitrarily open the wrong message.
             continue
         mailbox, uid = messages[key]
         args = {
