@@ -156,7 +156,7 @@ class ScheduledEmailTests(unittest.TestCase):
     def test_generic_completion_and_editing_rejected(self):
         job = self.schedule()
         with self.assertRaises(SchedulerError):
-            self.registry.update_job(job["id"], title="Changed")
+            self.registry.update_job(job_id=job["id"], title="Changed")
         self.due(job["id"])
         with self.assertRaises(SchedulerError):
             self.registry.complete_job(job["id"])
