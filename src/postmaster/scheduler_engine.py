@@ -257,11 +257,14 @@ class SchedulerEngine:
             profile_count = conn.execute(
                 "SELECT COUNT(*) FROM execution_profiles WHERE enabled=1"
             ).fetchone()[0]
+        email_service = getattr(self, "autonomous_scheduled_email_service_v98919", None)
         return {
             "ok": True,
-            "mode": "task_registry_only",
-            "registry_only": True,
-            "autonomous_execution": False,
+            "mode": "autonomous_scheduled_email_only" if email_service else "task_registry_only",
+            "registry_only": not bool(email_service),
+            "autonomous_execution": bool(email_service),
+            "autonomous_action_types": ["scheduled_email_send"] if email_service else [],
+            "autonomous_worker_alive": bool(email_service and email_service.status()["worker_alive"]),
             "db_path": self.settings.db_path,
             "worker_alive": False,
             "owners": owner_count,
@@ -808,9 +811,11 @@ class SchedulerEngine:
 
     def pause_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            row = conn.execute("SELECT status,action_type FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] != "scheduled":
+                raise SchedulerError("Email already claimed or terminal; cannot pause")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs cannot be paused")
             conn.execute(
@@ -825,6 +830,8 @@ class SchedulerEngine:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] != "paused":
+                raise SchedulerError("Only a paused unsent email can be resumed")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs cannot be resumed")
             next_run = self._next_run(
