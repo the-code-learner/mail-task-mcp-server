@@ -2,6 +2,24 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.5 - 2026-11-14
+
+### Corrected production WebUI
+- Fixed the v9.8.4 release discrepancy: the approved fully English WebUI v5 is now the actual production shell and active live views, rather than only a saved nonfunctional HTML prototype.
+- Replaced the old v970 operational navigation with the approved light/dark top-header design and Mail / Analytics / Organization / Administration sidebar. Owner, project and email-account selectors sit in the header and remain organizational filters, never MCP permissions.
+- Mail navigation exposes Inbox, Sent, Drafts and Spam using existing provider-resolved special folder links; the Compose action opens the established Inbox composer instead of a duplicate email-sending system.
+- Replaced the old diagnostic-heavy Overview with live installed/available stable version cards, time-scoped tracking event counts, unread email sample, stored files, tracked links and working quick-access navigation. No mock emails, owners, projects or tracking metrics are served by this production page.
+- Replaced the v9.8.4 Tracking presentation with the approved Overview / All events / Email / URL links / File links tabs, shared 24-hour / 7-day / 28-day / 90-day / Custom range, recent activity, observed performance, three day/hour heatmaps, timeline, real URL/file link manager and expandable raw-IP/GeoIP/ASN/ISP event details.
+- Fixed independent organizational tracking filters: selecting an email account together with an owner/project no longer accidentally excludes both email and generic URL/file events. Event data remains accessible through global authenticated MCP.
+- Reorganized Settings so actual version preview/confirmation is primary; existing service diagnostics remain available under an expandable section. MCP Catalog now lists the live 134 registered tools with search, instead of relying on the legacy partial capability inventory.
+- Kept the actual monthly/weekly Activities calendars, Contacts review and global recipient/domain authorizations, secure FileStore previews and explicit downloads, backward-compatible lazy fragments, CSRF and mail/tracking route handling.
+
+### Validation and compatibility
+- Added production-shell browser tests at desktop/tablet/mobile sizes, including a clean-process bootstrap with isolated, temporary SQLite/key storage and a check that the approved design response marker is unique. The tests verify all existing lazy view routes stay reachable.
+- The runtime regression suite passes **542 tests**, including real composed-shell and responsive Chrome checks; no existing MCP commands are added, removed or changed (134 total).
+- This is a **source/UI-only corrective release** on top of v9.8.4; no database migration, new public callback route, Portainer YAML or Cloudflare configuration changes. The existing `postmaster-mcp.yml` continues to use the selected stable source version; publishing alone does not restart or directly deploy an instance.
+- v9.9.0 WhatsApp work remains separate and unshipped.
+
 ## 9.8.4 - 2026-11-14
 
 ### New / improved

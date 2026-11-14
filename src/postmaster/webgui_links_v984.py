@@ -57,7 +57,7 @@ def _form_field(label: str, name: str, *, required: bool = True,
     )
 
 
-def render_tracked_links_v984(base: Any, core: Any, request: Request) -> str:
+def render_tracked_links_v984(base: Any, core: Any, request: Request, *, target_filter: str | None = None) -> str:
     selected_owner = str(request.query_params.get("owner_id") or "").strip()
     selected_project = str(request.query_params.get("project_id") or "").strip()
     all_owners = owners(base)
@@ -81,6 +81,11 @@ def render_tracked_links_v984(base: Any, core: Any, request: Request) -> str:
         except Exception:
             errors.append(oid)
     results.sort(key=lambda x: (str(x.get("created_at") or ""), str(x.get("id") or "")), reverse=True)
+    if target_filter in {"url", "stored_file"}:
+        results = [
+            row for row in results
+            if (str(row.get("target_type") or "url") == target_filter)
+        ]
     results = results[:300]
     csrf = str(base._csrf_value())
     owner_choices = owner_options(all_owners, selected_owner or (owner_ids[0] if owner_ids else ""))

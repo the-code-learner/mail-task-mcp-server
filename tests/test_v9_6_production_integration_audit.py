@@ -193,10 +193,16 @@ class RealMcpSchemaRegressionTests(unittest.TestCase):
         html = response.body.decode("utf-8")
         self.assertIn('id="v962-lazy-dashboard"', html)
         self.assertIn("/dashboard/view/", html)
-        self.assertIn("Operate", html)
-        self.assertIn("Organize", html)
-        self.assertIn("Control", html)
-        self.assertIn(f"WebGUI v{project_release_version().removeprefix('v')} · lazy fragments", html)
+        # v9.8.5 replaces the legacy Operate/Organize/Control layout with
+        # the explicitly approved, fully English v5 navigation. Retain every
+        # existing live lazy view and the exact installed release identity.
+        for section in ("Mail", "Analytics", "Organization", "Administration"):
+            self.assertIn(section, html)
+        for view in v962.VIEWS:
+            self.assertIn(f'data-v962-nav="{view}"', html)
+        self.assertIn('id="v984-scopebar"', html)
+        self.assertIn(f"v{project_release_version().removeprefix('v')}", html)
+        self.assertIn('id="v985-production-ui"', html)
 
         # Other tests legitimately re-install the v9.6.1 renderer in this shared process.
         # Verify production composition from runtime source instead of a contaminated module global:

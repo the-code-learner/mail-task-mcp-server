@@ -508,6 +508,18 @@ See [docs/GENERIC_TRACKED_LINKS.md](docs/GENERIC_TRACKED_LINKS.md) for scope, pr
 
 ---
 
+# v9.8.5: Approved production WebUI
+
+v9.8.5 corrects a visual release error in v9.8.4: the approved English v5 design was previously only a standalone prototype, while users still saw the legacy navigation and system dashboard. The corrected **production** WebUI now mounts that information architecture on the real Postmaster runtime, never on demo records.
+
+Features include a full-width top header with a genuine mailbox search; organization-only Owner / Project / Email account selectors; Mail / Analytics / Organization / Administration navigation; actual Inbox composition; live Overview release and inventory cards; Tracking with 24-hour, 7/28/90-day and Custom ranges, five view tabs, three activity heatmaps, observed metrics and raw network event details; real Contacts; File Store previews; true Activities calendar; version controls and an MCP Catalog based on all 134 registered commands.
+
+The repair preserves all 134 MCP tools, existing security and authorization behavior, provider-specific mailbox folders, CSRF, and the versioned single-YAML Portainer deployment. No change is made to `postmaster-mcp.yml`. The corrective release is source-only; a server using the `latest` selector can activate it through its usual approved update/restart flow.
+
+See [CHANGELOG.md](CHANGELOG.md) for release validation and scope.
+
+---
+
 # v9.8.4: network tracking, Contacts and WebGUI
 
 The new tracking layer persists raw IP addresses and event metadata for email opens/clicks, generic tracked URLs and tracked-file requests. Optional locally provided City/ASN/ISP databases enrich location/provider estimates without contacting external APIs. Proxy and scanner requests are not evidence of a human opening or recipient location.
