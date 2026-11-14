@@ -44,34 +44,69 @@ def render_settings_v985(base: Any, request: Request) -> str:
         +status_card("Scheduler",base.scheduler().status)
     )
     html=(
-        '<div class="v985-settings">'
+        '<div class="v985-settings" data-v986-settings>'
         '<div class="v985-pagehead"><div><h2>Settings</h2>'
         '<p>Release management, accounts, privacy and system configuration</p></div></div>'
-        '<div class="v985-settings-tabs" aria-label="Settings categories">'
-        '<a class="current" href="#v984-versions">Versions & updates</a>'
-        '<a href="#v985-settings-other">Manage services</a>'
-        '<a href="#v985-settings-diagnostics">Diagnostics</a>'
+        '<div class="v985-settings-tabs" role="tablist" aria-label="Settings categories">'
+        '<button type="button" role="tab" id="v986-settings-tab-versions" '
+        'data-v986-settings-tab="versions" aria-controls="v986-settings-pane-versions" '
+        'aria-selected="true" class="current">Versions &amp; updates</button>'
+        '<button type="button" role="tab" id="v986-settings-tab-services" '
+        'data-v986-settings-tab="services" aria-controls="v986-settings-pane-services" '
+        'aria-selected="false">Manage services</button>'
+        '<button type="button" role="tab" id="v986-settings-tab-diagnostics" '
+        'data-v986-settings-tab="diagnostics" aria-controls="v986-settings-pane-diagnostics" '
+        'aria-selected="false">Diagnostics</button>'
         '</div>'
-        +version
-        +'<section class="v985-settings-card" id="v985-settings-other">'
-        '<h3>Services & permissions</h3><div class="v985-settings-shortcuts">'
-        +shortcuts
-        +'</div></section>'
-        +'<details class="v985-settings-card" id="v985-settings-diagnostics">'
-        '<summary>Detailed service status</summary><p class="small muted">'
-        'Live subsystem snapshots; expand individual sections for diagnostic details.</p>'
-        '<div class="v985-settings-diagnostics">'+diagnostics+'</div></details>'
+        '<div role="tabpanel" id="v986-settings-pane-versions" '
+        'aria-labelledby="v986-settings-tab-versions" data-v986-settings-pane="versions">'
+        +version+'</div>'
+        '<div role="tabpanel" id="v986-settings-pane-services" hidden '
+        'aria-labelledby="v986-settings-tab-services" data-v986-settings-pane="services">'
+        '<section class="v985-settings-card" id="v985-settings-other">'
+        '<h3>Services &amp; permissions</h3><div class="v985-settings-shortcuts">'
+        +shortcuts+'</div></section></div>'
+        '<div role="tabpanel" id="v986-settings-pane-diagnostics" hidden '
+        'aria-labelledby="v986-settings-tab-diagnostics" data-v986-settings-pane="diagnostics">'
+        '<section class="v985-settings-card" id="v985-settings-diagnostics">'
+        '<h3>Detailed service status</h3><p class="small muted">'
+        'Live subsystem snapshots; each section can be inspected independently.</p>'
+        '<div class="v985-settings-diagnostics">'+diagnostics+'</div></section></div>'
         '</div>'
     )
     return _panel("system",html)
 
 
+
+SETTINGS_SCRIPT = r"""
+<script id="v986-settings-tabs">
+(() => {
+  // Event delegation survives replacement of lazy settings fragments.
+  document.addEventListener('click', event => {
+    const button = event.target.closest('button[data-v986-settings-tab]');
+    if (!button) return;
+    const root = button.closest('[data-v986-settings]');
+    if (!root) return;
+    const chosen = button.dataset.v986SettingsTab;
+    root.querySelectorAll('[data-v986-settings-pane]').forEach(pane => {
+      pane.hidden = pane.dataset.v986SettingsPane !== chosen;
+    });
+    root.querySelectorAll('button[data-v986-settings-tab]').forEach(tab => {
+      const selected = tab.dataset.v986SettingsTab === chosen;
+      tab.classList.toggle('current', selected);
+      tab.setAttribute('aria-selected', String(selected));
+    });
+  });
+})();
+</script>"""
+
 SETTINGS_STYLE = r"""
 .v985-settings{max-width:1380px;margin:auto}
 .v985-settings-tabs{display:flex;flex-wrap:wrap;gap:7px;border-bottom:1px solid var(--v970-line);margin:15px 0}
-.v985-settings-tabs a{color:var(--v970-muted);padding:10px 13px;text-decoration:none;font-size:12px;
- border-bottom:2px solid transparent}
-.v985-settings-tabs a.current,.v985-settings-tabs a:hover{color:var(--v970-accent);border-bottom-color:var(--v970-accent)}
+.v985-settings-tabs button{color:var(--v970-muted)!important;padding:10px 13px!important;text-decoration:none;font-size:12px;
+ border:0!important;border-bottom:2px solid transparent!important;background:transparent!important;border-radius:0!important}
+.v985-settings-tabs button.current,.v985-settings-tabs button:hover{color:var(--v970-accent)!important;border-bottom-color:var(--v970-accent)!important}
+.v985-settings [data-v986-settings-pane][hidden]{display:none!important}
 .v985-settings .card.wide,.v985-settings-card{border:1px solid var(--v970-line)!important;
  background:var(--v970-surface)!important;border-radius:10px!important;padding:18px!important;margin:14px 0!important}
 .v985-settings h3{font-size:16px;margin:0 0 12px}
@@ -99,3 +134,5 @@ def install_settings_v985(v951_mod: Any, v962: Any) -> None:
         return previous().rstrip()+"\n"+SETTINGS_STYLE
     styles._postmaster_v985_settings=True
     v962._styles=styles
+    if 'id="v986-settings-tabs"' not in v962.SCRIPT:
+        v962.SCRIPT += SETTINGS_SCRIPT
