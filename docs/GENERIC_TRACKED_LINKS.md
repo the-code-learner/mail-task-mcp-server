@@ -1,3 +1,11 @@
+> **v9.8.4 update:** Earlier raw-IP non-persistence statements below describe
+> v9.8.3 behavior. Starting in v9.8.4, validated raw IP and optional offline
+> GeoIP/ASN/ISP details persist without automatic expiration in an additive
+> private network sidecar linked to generic click events. Public callbacks do
+> not return raw IP; authenticated global MCP and WebGUI can read it.
+> See [v9.8.4 network tracking privacy](V984_TRACKING_NETWORK_PRIVACY.md).
+>
+
 # Generic tracked links (v9.8.3)
 
 Postmaster v9.8.2 exposed click redirects as generic MCP resources. v9.8.3 extends the same surface so a generic tracked link may target either an HTTP/HTTPS destination or an existing private Postmaster Stored File `file_id`, independent from email delivery.
