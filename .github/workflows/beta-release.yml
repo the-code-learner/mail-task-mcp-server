@@ -51,8 +51,13 @@ jobs:
           Path("/tmp/postmaster-beta-notes.md").write_text(
               m.group(0).strip()+"\n",encoding="utf-8",
           )
+          import sys
+          sys.path.insert(0, str(Path("src").resolve()))
+          from postmaster.release_channels_v986 import bootstrap_transport_tag
+          transport = bootstrap_transport_tag("v" + requested)
           with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as fh:
               fh.write(f"RELEASE_TAG=v{requested}\n")
+              fh.write(f"TRANSPORT_TAG={transport}\\n")
           PY
 
       - name: Require green v9 runtime tests for this exact beta commit
@@ -78,7 +83,7 @@ jobs:
           print("Verified successful v9 runtime tests for",sha)
           PY
 
-      - name: Create immutable beta tag and prerelease
+      - name: Create immutable beta and numeric transport tags and prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -92,6 +97,16 @@ jobs:
           else
             git tag "$RELEASE_TAG" "$GITHUB_SHA"
             git push origin "$RELEASE_TAG"
+          fi
+
+          ALIAS_SHA="$(git ls-remote origin "refs/tags/$TRANSPORT_TAG" | awk '{print $1}')"
+          if [ -n "$ALIAS_SHA" ] && [ "$ALIAS_SHA" != "$GITHUB_SHA" ]; then
+            echo "ERROR: immutable beta transport tag already points to another commit" >&2
+            exit 1
+          fi
+          if [ -z "$ALIAS_SHA" ]; then
+            git tag "$TRANSPORT_TAG" "$GITHUB_SHA"
+            git push origin "$TRANSPORT_TAG"
           fi
 
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
