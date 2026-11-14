@@ -333,22 +333,48 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     base_params.update(ui_view="tracking",tracking_tab="links")
     new_link_url="/?"+urlencode(base_params)+"#tracking"
     geo=geoip_status()
-    missing=[name for name,key in (("City","city_database_available"),
-                                   ("ASN","asn_database_available"),
-                                   ("ISP","isp_database_available")) if not geo[key]]
-    geo_hint=(
-        '<div class="v9898-geo-notice"><strong>GeoIP: local databases unavailable</strong>'
-        '<p>Country may come from the edge network, but city, ASN and operator '
-        'cannot be reliably estimated without local MaxMind databases. '
-        'Provision GeoLite2-City.mmdb and GeoLite2-ASN.mmdb under /data '
-        '(and optional GeoIP2-ISP.mmdb, subject to its license), or configure '
-        'POSTMASTER_GEOIP_CITY_DB / POSTMASTER_GEOIP_ASN_DB / POSTMASTER_GEOIP_ISP_DB. '
-        'No external IP lookup is performed. Proxy locations are not recipients.</p>'
-        '<small>Missing: '+_e(', '.join(missing))+'</small></div>'
-    ) if missing else (
-        '<div class="v9898-geo-notice"><strong>GeoIP: local databases active</strong>'
-        '<p>Network information is an estimate and may identify proxies or scanners.</p></div>'
-    )
+    has_city=bool(geo.get("city_database_available"))
+    has_asn=bool(geo.get("asn_database_available"))
+    has_isp=bool(geo.get("isp_database_available"))
+    # ISP is a separate paid edition, not a prerequisite for functional
+    # GeoLite2 City + ASN. A single missing optional DB must never trigger
+    # "local databases unavailable" while tracking displays city and ASN.
+    if has_city and has_asn:
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="ready">'
+            '<strong>GeoIP: City and ASN databases active</strong>'
+            '<p>City, region and autonomous-system organization are estimated '
+            'from local MaxMind databases. Network location may identify a '
+            'proxy or scanner, not the email recipient.</p>'
+            + ('<small>Optional ISP database not installed; City and ASN '
+               'geolocation remain available.</small>' if not has_isp else
+               '<small>Optional ISP database active.</small>')
+            + '</div>'
+        )
+    elif has_city or has_asn:
+        missing_required=[
+            name for name,present in (("City",has_city),("ASN",has_asn))
+            if not present
+        ]
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="partial">'
+            '<strong>GeoIP: local databases partially installed</strong>'
+            '<p>Some network location information is available. '
+            'Install the missing free GeoLite2 database from Settings → '
+            'GeoIP databases to enable both City and ASN estimates.</p>'
+            '<small>Missing required: '+_e(', '.join(missing_required))+'</small>'
+            '</div>'
+        )
+    else:
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="missing">'
+            '<strong>GeoIP: free City and ASN databases not installed</strong>'
+            '<p>Only the country signalled by the network may be available. '
+            'Install GeoLite2-City and GeoLite2-ASN using Settings → '
+            'GeoIP databases; no external IP lookups are performed. '
+            'A proxy location is not necessarily the recipient location.</p>'
+            '</div>'
+        )
     notice=''.join('<p>'+_e(w)+'</p>' for w in warnings)
     html=(
         '<div class="v985-tracking">'
