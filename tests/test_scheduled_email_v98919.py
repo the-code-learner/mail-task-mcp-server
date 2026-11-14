@@ -107,6 +107,14 @@ class ScheduledEmailTests(unittest.TestCase):
             self.service.schedule(account_id="sender", send_at=self.future,
                                   message=modified, idempotency_key="compose-idempotency")
 
+    def test_mcp_retries_without_idempotency_key_do_not_duplicate(self):
+        a = self.service.schedule(account_id="sender", send_at=self.future,
+                                  message=self.message)
+        b = self.service.schedule(account_id="sender", send_at=self.future,
+                                  message=self.message)
+        self.assertEqual(a["id"], b["id"])
+        self.assertEqual(len(self.registry.list_jobs()), 1)
+
     def test_worker_race_claim_is_atomic(self):
         job = self.schedule()
         self.due(job["id"])
