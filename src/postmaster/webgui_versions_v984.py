@@ -284,11 +284,34 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         for heading, links in v970.NAV_GROUPS
     )
     v970.VIEW_LABELS["system"] = ("Settings", "Runtime versions and system configuration")
+    previous_styles = v962._styles
+    if not getattr(previous_styles, "_v988_release_styles", False):
+        def styles() -> str:
+            return previous_styles() + "\n" + VERSIONS_STYLE
+        styles._v988_release_styles = True
+        v962._styles = styles
+    if 'id="v988-live-updates"' not in v962.SCRIPT:
+        v962.SCRIPT += VERSIONS_SCRIPT
+
+    async def live_status(req: Request) -> Response:
+        data = _release_snapshot(base)
+        data["csrf"] = base._csrf_value()
+        return JSONResponse(data, headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "no-referrer",
+        })
 
     async def preview(req: Request) -> Response:
         form, error = await base._verified_form(req)
         if error is not None:
-            return error
+            return _response_page(
+                "Session expired",
+                '<p>Your update page has an outdated security token. '
+                'Return to Settings and retry.</p>'
+                '<p><a href="/?ui_view=system&settings_tab=versions#system">'
+                'Back to Updates</a></p>', status=403,
+            )
         operation = str(form.get("operation") or "").strip()
         target = str(form.get("target_version") or "").strip()
         if operation not in {"update-latest", "switch-version", "pin-version", "rollback-version"}:
@@ -299,7 +322,7 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         )
         if not isinstance(result, dict) or not result.get("ok"):
             return _response_page(
-                "Version change preview failed",
+                "Unable to prepare update",
                 f'<p>{_e(result.get("error") if isinstance(result,dict) else "Unknown error")}</p>'
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
@@ -312,14 +335,14 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         exact_target = str(info.get("target_version_ref") or "")
         if not preview_id or not exact_target:
             return _response_page(
-                "Preview unavailable",
+                "Update unavailable",
                 "<p>The runtime did not provide a complete server-side pending preview. "
                 "No version change has been scheduled.</p>"
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
             )
         panel = (
-            '<p>The following action changes the selected runtime after a restart.</p>'
+            '<p>Postmaster will install this version and restart after your confirmation.</p>'
             f'<p><b>Operation:</b> {_e(info.get("operation"))}<br>'
             f'<b>Current:</b> {_e(info.get("current_version"))}<br>'
             f'<b>Build:</b> {_e(info.get("current_build"))}<br>'
@@ -332,11 +355,11 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             f'<input type="hidden" name="target_version" value="{_e(exact_target)}">'
             f'<input type="hidden" name="preview_id" value="{_e(preview_id)}">'
             '<label><input type="checkbox" name="approved" value="yes" required>'
-            'I explicitly approve this exact version change and restart.</label>'
-            '<p><button type="submit">Confirm version change</button>'
+            'I approve this update and restart.</label>'
+            '<p><button type="submit">Confirm update &amp; restart</button>'
             ' <a href="/?ui_view=system#system">Cancel</a></p></form>'
         )
-        return _response_page("Confirm version change", panel)
+        return _response_page("Confirm update and restart", panel)
 
     async def execute(req: Request) -> Response:
         form, error = await base._verified_form(req)
@@ -401,3 +424,4 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
     app.router.routes.insert(i, Route("/dashboard/versions/preview", preview, methods=["POST"]))
     app.router.routes.insert(i+1, Route("/dashboard/versions/execute", execute, methods=["POST"]))
     app.router.routes.insert(i+2, Route("/dashboard/versions/channel", save_channel, methods=["POST"]))
+    app.router.routes.insert(i+3, Route("/dashboard/versions/status", live_status, methods=["GET"]))
