@@ -131,6 +131,7 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
             ("update-latest","v9.8.5","pv_demo_6fd25"),
         ])
 
+    # Exact-commit release guard: the update result is a timed dashboard return.
     def test_restart_countdown_never_resubmits_the_update_post(self):
         client,core,base=_client()
         with client:
