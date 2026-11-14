@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from html import escape, unescape
 import re
+from urllib.parse import parse_qsl, urlencode
 from typing import Any
 from starlette.requests import Request
 
@@ -127,7 +128,7 @@ def _mail_message_card(match: re.Match[str]) -> str:
     )
 
 
-def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
+def modern_inbox_markup(html: str, *, selected_account: str = "", query_string: str = "") -> str:
     if 'id="panel-inbox"' not in html:
         return html
     role = _SELECTED_MAILBOX.search(html)
@@ -187,10 +188,10 @@ def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
     # Preserve the original table, row navigation and inline safe reader while
     # displaying a modern mail-list layout (no extra IMAP calls or guessed snippets).
     html = _MAIL_ROW.sub(_mail_message_card, html)
-    return beta_mailbox_layout(html)
+    return beta_mailbox_layout(html, query_string=query_string)
 
 
-def beta_mailbox_layout(html: str) -> str:
+def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
     """Beta: a real list/reader workspace with unchanged cached-message backend.
 
     The safe reader is moved by the client after the fragment is loaded, not
@@ -200,7 +201,25 @@ def beta_mailbox_layout(html: str) -> str:
     if opening not in html or '<div class="v960-pagination">' not in html:
         # An unknown older template must remain usable, not half-wrapped.
         return html
-    # A single clear toolbar replaces the feeling of a report/table.
+    # Filter shortcuts are real authenticated GET fragment links. Keep account,
+    # mailbox and search scopes, but never carry a selected message into filters.
+    params = dict(parse_qsl(query_string, keep_blank_values=False))
+    for key in ("message_uid", "full_html", "full_html_intent", "compose_mode"):
+        params.pop(key, None)
+    params["ui_view"] = "inbox"
+    active_unread = params.get("unread_only") == "1"
+    all_params = dict(params)
+    all_params.pop("unread_only", None)
+    unread_params = dict(all_params, unread_only="1")
+    all_url = "/?" + urlencode(all_params) + "#inbox"
+    unread_url = "/?" + urlencode(unread_params) + "#inbox"
+    tabs = (
+        '<nav class="v989-list-filters" aria-label="Message list filters">'
+        '<a data-v960-fragment="inbox" class="' + ("" if active_unread else "active")
+        + '" href="' + escape(all_url, quote=True) + '">All</a>'
+        '<a data-v960-fragment="inbox" class="' + ("active" if active_unread else "")
+        + '" href="' + escape(unread_url, quote=True) + '">Unread</a></nav>'
+    )
     start = (
         '<div class="v989-mail-workspace" data-v989-mail-workspace>'
         '<div class="v989-mail-stream">'
@@ -208,6 +227,7 @@ def beta_mailbox_layout(html: str) -> str:
         '<span class="v989-stream-subtitle">Select a message to read</span></div>'
         '<div class="v989-stream-actions">'
         '<span class="v989-stream-count">Mailbox</span></div></div>'
+        + tabs +
         '<div class="scroll v989-list-scroll">'
         '<table class="v960-mail-table v986-mail-list">'
     )
@@ -229,6 +249,10 @@ def beta_mailbox_layout(html: str) -> str:
         '<div class="v960-pagination">'
     )
     html = html.replace(finish, end, 1)
+    html = html.replace(
+        "Cache-first mailbox view · IMAP remains source of truth · Safe Email is the default.",
+        "Your mail, organized in one place.", 1,
+    )
     return html
 
 
@@ -371,6 +395,15 @@ BETA_MAIL_STYLE = r"""
 #panel-inbox .v989-stream-header strong{font-size:16px;font-weight:800}
 #panel-inbox .v989-stream-subtitle{display:block;font-size:11px;color:var(--v970-muted);margin-top:4px}
 #panel-inbox .v989-stream-count{font-size:11px;color:var(--v970-muted)}
+#panel-inbox .v989-list-filters{display:flex;gap:5px;padding:8px 14px;
+ border-bottom:1px solid var(--v970-line)}
+#panel-inbox .v989-list-filters a{display:inline-flex;align-items:center;
+ padding:6px 11px;border-radius:16px;font-size:12px;text-decoration:none;
+ color:var(--v970-muted);border:1px solid transparent}
+#panel-inbox .v989-list-filters a.active{background:var(--v970-accent-soft);
+ color:var(--v970-accent);font-weight:750}
+#panel-inbox .v989-list-filters a:hover{border-color:var(--v970-line)}
+#panel-inbox .v962-perfline{display:none}
 #panel-inbox .v989-list-scroll{border:0!important;border-radius:0!important;min-height:0;
  flex:1;overflow-y:auto!important;overflow-x:hidden!important}
 #panel-inbox .v989-list-scroll table.v986-mail-list{display:block!important;border:0!important}
@@ -673,7 +706,7 @@ def install_mail_gui_v986(v960: Any, shell: Any) -> None:
         return modern_compose_markup(original_compose(*args,**kwargs))
     def inbox(base: Any, request: Request) -> str:
         selected = str(request.query_params.get("account_id") or request.query_params.get("account") or "").strip()
-        return modern_inbox_markup(original_inbox(base,request),selected_account=selected)
+        return modern_inbox_markup(original_inbox(base,request),selected_account=selected,query_string=request.url.query)
     v960._compose_panel = compose
     v960.render_inbox = inbox
     setattr(v960,"_v986_mail_installed",True)
