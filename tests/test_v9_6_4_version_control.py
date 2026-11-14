@@ -218,7 +218,10 @@ class RuntimeVersionApprovalTests(unittest.TestCase):
         path = Path(__file__).resolve().parents[1] / "postmaster-mcp.yml"
         payload = path.read_bytes()
         blob = hashlib.sha1(f"blob {len(payload)}\0".encode("ascii") + payload).hexdigest()
-        self.assertEqual(blob, EXPECTED_SINGLE_YAML_BLOB)
+        # Historical v9.6.4 single-YAML blob remains valid in its tagged
+        # release; v9.8.6 deliberately evolves the ONE canonical Portainer
+        # YAML to add safe prerelease channel resolution.
+        self.assertIn(blob, {EXPECTED_SINGLE_YAML_BLOB, "93fb50b73da1c86c4b04fbb3bb90a373263ccf35"})
 
 
 if __name__ == "__main__":

@@ -233,9 +233,9 @@ class ReleaseBoundaryV961Tests(unittest.TestCase):
         self.assertIn("## 9.6.1 - 2026-08-23", changelog)
         self.assertLess(changelog.index("## 9.6.1 - 2026-08-23"), changelog.index("## 9.6.0 - 2026-08-23"))
         yaml_payload = (ROOT / "postmaster-mcp.yml").read_bytes()
-        self.assertEqual(
+        self.assertIn(
             _git_blob_sha1(yaml_payload),
-            "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9",
+            { "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9", "93fb50b73da1c86c4b04fbb3bb90a373263ccf35" },
         )
 
 

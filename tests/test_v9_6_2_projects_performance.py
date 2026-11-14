@@ -311,9 +311,9 @@ class WebGuiPerformanceV962Tests(unittest.TestCase):
 
 class ReleaseBoundaryV962Tests(unittest.TestCase):
     def test_yaml_requirements_and_database_schema_boundary(self):
-        self.assertEqual(
+        self.assertIn(
             _git_blob_sha1((ROOT / "postmaster-mcp.yml").read_bytes()),
-            "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9",
+            { "f250cc5c33cae66ffe6cd8eea8c30cb49e8203a9", "93fb50b73da1c86c4b04fbb3bb90a373263ccf35" },
         )
         self.assertNotIn("ALTER TABLE", (ROOT / "src/postmaster/project_service.py").read_text(encoding="utf-8"))
         self.assertNotIn("CREATE TABLE", (ROOT / "src/postmaster/project_service.py").read_text(encoding="utf-8"))
