@@ -69,6 +69,13 @@ class TrackingContextV9898(unittest.TestCase):
         attach_sent_email_links(self.base,events)
         self.assertTrue(all("email_href" not in row for row in events))
 
+    def test_edge_country_never_claims_a_local_geoip_database(self):
+        html=_event_html({"event_kind":"email_open",
+                          "geo_country_code":"IT",
+                          "geo_source":"edge/network country signal"})
+        self.assertIn("Solo paese ricavato dalla rete",html)
+        self.assertNotIn("Stima GeoIP locale",html)
+
     def test_file_event_shows_filename_without_technical_id_as_primary_label(self):
         html=_event_html({"event_kind":"tracked_file_download",
                           "download_filename":"Quarterly report.pdf",
