@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 
@@ -123,10 +125,31 @@ class V985BrowserLayoutTests(unittest.TestCase):
             "print(base64.b64encode(response.body).decode('ascii'))\n"
             "print('V985_SHELL_END')\n"
         )
-        process=subprocess.run(
-            [sys.executable,"-c",source],capture_output=True,text=True,
-            timeout=45,check=False
-        )
+        # The CI runner intentionally has no writable /data. A fresh Postmaster
+        # instance needs isolated real SQLite/secret storage just as a container
+        # needs its mounted volume. Never reuse production locations or secrets.
+        with tempfile.TemporaryDirectory(prefix="postmaster-v985-browser-") as td:
+            env=dict(os.environ)
+            paths={
+                "CONTEXT_DB_PATH":"knowledge.db",
+                "SCHEDULER_DB_PATH":"scheduler.db",
+                "MAIL_ACCOUNTS_DB_PATH":"mail_accounts.db",
+                "MAIL_ACCOUNTS_KEY_PATH":"mail_accounts.key",
+                "FILE_STORE_DB_PATH":"files.db",
+                "FILE_STORE_ROOT":"files",
+                "EMAIL_ANALYTICS_DB_PATH":"email_analytics.db",
+                "EMAIL_ANALYTICS_KEY_PATH":"email_analytics.key",
+                "POSTMASTER_STRUCTURED_DATA_DB":"structured.db",
+                "POSTMASTER_CONTACTS_DB":"contacts.db",
+                "POSTMASTER_MCP_CONFIRMATION_KEY_PATH":"confirmation.key",
+                "POSTMASTER_MCP_CONFIRMATION_DB_PATH":"confirmation.db",
+                "POSTMASTER_RUNTIME_CONTROL_PATH":"control.json",
+            }
+            env.update({key:os.path.join(td,path) for key,path in paths.items()})
+            process=subprocess.run(
+                [sys.executable,"-c",source],capture_output=True,text=True,
+                timeout=45,check=False,env=env
+            )
         if process.returncode:
             from test_webgui_v970 import _redact_diagnostic_text
             diagnostic=_redact_diagnostic_text(process.stderr[-1400:])
