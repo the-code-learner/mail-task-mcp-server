@@ -254,7 +254,7 @@ def _event_html(event: dict[str, Any]) -> str:
     source = str(event.get("geo_source") or "unavailable")
     status = (
         "Solo paese ricavato dalla rete; città/operatore non determinati"
-        if source in {"edge country", "unavailable"} else
+        if "local" not in source.lower() and "mmdb" not in source.lower() else
         "Stima GeoIP locale, possibile proxy o scanner"
     )
     return f'''<details class="v984-event">
