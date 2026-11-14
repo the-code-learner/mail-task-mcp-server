@@ -112,6 +112,38 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn("Unread message", result)
         self.assertIn('data-v960-href=', result)
 
+    def test_beta_three_pane_markup_preserves_safe_mailbox_contract(self):
+        sample = INBOX.replace("</section>",
+            '<div class="v960-pagination"><span></span>'
+            '<span class="small muted">Page 1 · 1 cached result(s)</span></div>'
+            '</section>')
+        result = modern_inbox_markup(sample)
+        self.assertIn('class="v989-mail-workspace"', result)
+        self.assertIn('class="v989-mail-stream"', result)
+        self.assertIn('class="v989-reading-pane"', result)
+        self.assertIn('data-v960-href=', result)
+        self.assertIn('class="v987-avatar"', result)
+        self.assertIn('class="v960-pagination"', result)
+        self.assertEqual(result.count('v989-mail-workspace'), 2) # class and data attribute
+        self.assertLess(result.index('v989-mail-stream'),result.index('v989-reading-pane'))
+        self.assertIn('Remote images remain blocked',result)
+
+    def test_beta_uses_cached_snippets_without_fetching_remote_media(self):
+        sample = INBOX.replace(
+            "<td>Subject</td>",
+            '<td>Subject<small class="v989-snippet-source">First line of message</small></td>'
+        )
+        result = modern_inbox_markup(sample)
+        self.assertIn('class="v989-preview"',result)
+        self.assertIn('First line of message',result)
+        self.assertNotIn('v989-snippet-source',result)
+        self.assertNotIn("fetch(",result)
+
+    def test_unknown_mail_template_remains_safe_without_half_wrapped_workspace(self):
+        result=modern_inbox_markup(INBOX)
+        self.assertNotIn('class="v989-mail-workspace"',result)
+        self.assertIn('data-v960-href=',result)
+
     def test_compose_refuses_partial_markup_transformations(self):
         html='<form><textarea name="body_html"></textarea></form>'
         self.assertEqual(modern_compose_markup(html),html)
