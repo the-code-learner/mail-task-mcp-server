@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.18 - 2026-11-15
+
+### Rich tracking classification and country-level map fallback
+- Uses the tracking provider classification for clicks and the existing detailed open-classification rules for tracked opens. Google image-proxy requests more than 60 seconds after delivery remain identified as likely human via proxy, without presenting a proxy location as the recipient.
+- Retrieves matching sent timestamps in one bounded local query when needed; no external API or location lookup is performed.
+- Keeps coherent, valid observed GeoIP positions. If country coordinates are inconsistent or absent, uses a country-level representative position from a bundled Natural Earth public-domain dataset, with deterministic small category/event-type offsets.
+- Preserves markers rather than discarding BE/NL proxy events because their provider coordinates appear in the United States. Discloses which points were approximately placed by country and counts truly unlocated records separately.
+- Keeps the beta.17 zoom-scaled markers, overlaps chooser and all previous beta features, tests and guarded version pinning.
+- Regression tests cover stable country placement, inconsistent BE/US coordinates, missing-country behavior and the detailed human-via-proxy timing classification.
+- Portainer single-YAML deployment unchanged.
+
 ## 9.8.9-beta.17 - 2026-11-14
 
 ### Refinements to self-hosted geographical tracking map
