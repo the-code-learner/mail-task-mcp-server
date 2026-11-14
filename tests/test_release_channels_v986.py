@@ -54,7 +54,8 @@ class ReleasePolicyTests(unittest.TestCase):
     def test_unpublished_or_inconsistent_tags_cannot_enter_channel(self):
         self.assertFalse(release_is_allowed("v9.8.6-beta.1","stable"))
         self.assertTrue(release_is_allowed("v9.8.6-beta.1","stable_beta"))
-        self.assertEqual(canonical_tag("9.8.6-beta.02"),"v9.8.6-beta.2")
+        with self.assertRaises(ValueError):
+            canonical_tag("9.8.6-beta.02")
         for invalid in ("", "main", "v9.8.6-rc.1","v9.8.6-beta.0","v9.8.6-beta.latest"):
             self.assertIsNone(parse_release_tag(invalid))
 
