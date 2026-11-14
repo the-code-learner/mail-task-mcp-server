@@ -417,8 +417,10 @@ def install_runtime_mail_v984(
         force_send: bool = False,
         confirm_suppressed_recipients: list[str] | None = None,
         tracking_disable_approval_id: str | None = None,
+        send_at: str | None = None,
+        schedule_timezone: str = "Europe/Rome",
     ):
-        """WRITE ACTION. Send email through the existing outbound pipeline.
+        """WRITE ACTION. Send now, or explicitly schedule this exact email for autonomous delivery.
 
         Generated subjects should prefer ASCII text/punctuation when practical; never silently rewrite
         Unicode explicitly supplied by the user. Prefer a Postmaster Stored File/signed storage link over
@@ -429,6 +431,37 @@ def install_runtime_mail_v984(
         one-use tracking_disable preview id; retry only after that approval with tracking_disable_approval_id.
         Suppressed-recipient approval remains a separate exact per-send boundary.
         """
+        if send_at:
+            # Scheduling itself is the explicit authorization; no second
+            # approval is requested when the worker reaches the due time.
+            # This path never invokes SMTP while the task is being created.
+            service = getattr(base, "scheduled_email_service_v98919", None)
+            if service is None:
+                return {"ok": False, "error": "Scheduled email service is unavailable"}
+            if not account_id:
+                return {"ok": False, "error": "An explicit sender account is required for scheduling"}
+            try:
+                result = service.schedule(
+                    account_id=account_id, send_at=send_at, timezone_name=schedule_timezone,
+                    idempotency_key=idempotency_key,
+                    message={
+                        "to": to, "cc": cc or [], "bcc": bcc or [],
+                        "subject": subject, "body": body, "body_html": body_html,
+                        "body_amp": body_amp, "attachments": attachments,
+                        "track_opens": track_opens, "campaign_id": campaign_id,
+                        "newsletter_mode": newsletter_mode,
+                        "unsubscribe_url": unsubscribe_url,
+                        "unsubscribe_email": unsubscribe_email,
+                        "one_click_unsubscribe": one_click_unsubscribe,
+                        "automatic_unsubscribe": automatic_unsubscribe,
+                        "dsn_notify_success": dsn_notify_success,
+                    },
+                )
+                return {"ok": True, "scheduled": True, "job_id": result["id"],
+                        "next_run_utc": result["next_run_utc"], "status": result["status"],
+                        "message": "Email authorized and scheduled; no further approval at send time"}
+            except Exception as exc:
+                return {"ok": False, "error": str(exc)}
         aid = _account_id(base, account_id)
         eff = effective_tracking(track_opens, account_tracking_default=_tracking_default(base, account_id))
         extras = {
