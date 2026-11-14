@@ -46,6 +46,10 @@ def _reader(path: str):
 
 def _database(env_name: str, filename: str):
     path = os.getenv(env_name, f"/data/{filename}").strip()
+    # Do not cache a "missing" result. An administrator may place MMDB files
+    # on the persistent volume after startup, without restarting Postmaster.
+    if not path or not Path(path).is_file():
+        return None
     return _reader(path)
 
 
