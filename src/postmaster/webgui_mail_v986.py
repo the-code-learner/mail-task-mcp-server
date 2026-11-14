@@ -444,13 +444,19 @@ BETA_MAIL_STYLE = r"""
 #panel-inbox .v962-perfline{display:none}
 #panel-inbox .v989-list-scroll{border:0!important;border-radius:0!important;min-height:0;
  flex:1;overflow-y:auto!important;overflow-x:hidden!important}
-#panel-inbox .v989-list-scroll table.v986-mail-list{display:block!important;border:0!important}
-#panel-inbox .v989-list-scroll .v986-mail-list tbody{display:block!important}
+#panel-inbox .v989-list-scroll table.v986-mail-list{display:block!important;
+ width:100%!important;min-width:0!important;max-width:100%!important;
+ border:0!important;table-layout:auto!important}
+#panel-inbox .v989-list-scroll table.v986-mail-list thead{display:none!important}
+#panel-inbox .v989-list-scroll .v986-mail-list tbody{display:block!important;
+ width:100%!important;min-width:0!important}
 #panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{display:grid!important;
  grid-template-columns:8px 36px minmax(0,1fr) 66px!important;grid-template-rows:25px auto;
  min-height:90px!important;gap:0 7px!important;padding:13px 13px 12px!important;
  align-items:start;border-bottom:1px solid var(--v970-line)!important}
-#panel-inbox .v989-list-scroll .v987-message td{padding:0!important;line-height:1.45}
+#panel-inbox .v989-list-scroll .v987-message td{padding:0!important;
+ width:auto!important;min-width:0!important;max-width:100%!important;
+ line-height:1.45;box-sizing:border-box}
 #panel-inbox .v989-list-scroll .v987-indicator{grid-column:1;grid-row:1/3;padding-top:5px!important}
 #panel-inbox .v989-list-scroll .v987-identity{grid-column:2/4;grid-row:1;display:flex!important;
  align-items:center;gap:9px!important;padding:0!important;min-width:0}
@@ -501,7 +507,7 @@ BETA_MAIL_STYLE = r"""
 @media(max-width:760px){
  #panel-inbox .v989-mail-workspace{display:block;height:auto;min-height:65vh;overflow:visible}
  #panel-inbox .v989-mail-stream{border:0;min-height:60vh}
- #panel-inbox .v989-list-scroll{max-height:70vh}
+ #panel-inbox .v989-list-scroll{max-height:70vh;min-width:0!important}
  #panel-inbox .v989-reading-pane{display:none;min-height:60vh}
  #panel-inbox .v989-mail-workspace:has(.v963-detail) .v989-mail-stream{display:none!important}
  #panel-inbox .v989-mail-workspace:has(.v963-detail) .v989-reading-pane{display:block!important}
