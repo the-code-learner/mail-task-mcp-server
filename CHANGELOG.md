@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.17 - 2026-11-14
+
+### Refinements to self-hosted geographical tracking map
+- Compensates the SVG marker radii as the world viewBox zooms so that geographic points remain legible but no longer grow into oversized bubbles. Reset restores the original radii.
+- Reduces marker stroke and opacity for dense activity regions; supplies explicit stable category colours to avoid unintended theme overrides.
+- When markers overlap in the rendered viewport, shows an accessible selection list of nearby locations instead of losing the hidden markers to the one on top.
+- Uses text-only DOM APIs for map details and overlap choices to avoid injecting tracking metadata as HTML.
+- Preserves existing period, account, owner/project and event filters, privacy policy, self-hosted geography, exact-version pin selector and v9.8.9-beta.16 behaviour.
+- Adds regression tests covering adaptive marker scaling, category styles and safe overlap selection.
+- No changes to the original Portainer single-YAML deployment.
+
 ## 9.8.9-beta.16 - 2026-11-14
 
 ### Restore exact Stable/Beta release pinning in Settings
