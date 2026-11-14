@@ -44,7 +44,7 @@ from .webgui_overview_v985 import install_overview_v985
 from .webgui_settings_v985 import install_settings_v985
 from .webgui_catalog_v985 import install_catalog_v985
 from .webgui_tracking_v985 import install_tracking_v985
-from .webgui_mail_v986 import install_mail_gui_v986
+from .webgui_mail_v986 import install_mail_gui_v986, modern_inbox_markup
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -228,26 +228,30 @@ install_catalog_v985(_webgui_v962_views.v951, _webgui_v962, _core)
 install_tracking_v985(_webgui_v962_views, _webgui_v962)
 install_mail_gui_v986(_webgui_v960, _webgui_v962)
 
-# Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
-# At this point render_inbox_v963 already references the final post-v9.7.0 Inbox renderer.
-_webgui_v963.v960.render_inbox = _webgui_v963.render_inbox_v963
-
-
+# Mail renderer composition contract: the Safe Email renderer supplies mailbox
+# data and the cached safe reader, then the modern UX transforms the resulting
+# HTML. Previously the compatibility assignment BELOW install_mail_gui_v986
+# replaced the installed renderer with the old v9.6.3 function, silently
+# disabling every WebUI mail change despite passing isolated markup tests.
+# Keep one stable entry point for all lazy /dashboard/view/inbox fragments.
 def _render_inbox_compat(proxied_base, request):
-    """Stable compatibility entry point for the composed Safe Reader.
+    raw_html = _webgui_v963.render_inbox_v963(proxied_base, request)
+    selected_account = str(
+        request.query_params.get("account_id")
+        or request.query_params.get("account")
+        or ""
+    ).strip()
+    return modern_inbox_markup(
+        raw_html,
+        selected_account=selected_account,
+        query_string=request.url.query,
+    )
 
-    The delegated v9.6.3+ renderer continues to request inspection="full" with
-    content_mode="safe" by default; later overlays may enrich the returned HTML but
-    cannot weaken that zero-network Safe Email boundary.
-    """
-    return _webgui_v963.render_inbox_v963(proxied_base, request)
 
-
-# Keep the public v9.6.0/v9.6.3 renderer symbols on an explicit compatibility wrapper rather
-# than a transient lambda or a feature-specific renderer. The wrapper remains cache-first and
-# preserves the historical Safe Reader source contract while delegating to the final composition.
-_webgui_v963.v960.render_inbox = _render_inbox_compat
+_webgui_v960.render_inbox = _render_inbox_compat
 _webgui_v963.v951.render_inbox = _render_inbox_compat
+
+
 link_store = _core.link_store
 
 
