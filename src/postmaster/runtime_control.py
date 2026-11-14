@@ -146,7 +146,12 @@ def read_control(path: Path | None = None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     try:
         if raw.get("selector"):
-            result["selector"] = canonical_selector(str(raw["selector"]))
+            stored = str(raw["selector"])
+            beta_target = str(raw.get("beta_target") or "")
+            if beta_target and channels.bootstrap_transport_tag(beta_target) == stored:
+                result["selector"] = channels.canonical_tag(beta_target)
+            else:
+                result["selector"] = canonical_selector(stored)
     except ValueError:
         pass
     try:
@@ -169,8 +174,8 @@ def preferred_release_channel(path: Path | None = None) -> str:
 
 
 def beta_bootstrap_supported() -> bool:
-    """Old Portainer YAMLs cannot resolve beta tags, even with new Python code."""
-    return os.getenv("POSTMASTER_BOOTSTRAP_BETA_SUPPORTED","").strip().lower()=="true"
+    """Beta transport aliases work with the original numeric-only YAML."""
+    return True
 
 
 def write_control(
@@ -194,11 +199,18 @@ def write_control(
         raise ValueError("prerelease selector requires an explicit Stable + Beta opt-in")
     if normalized_ref and not channels.release_is_allowed(normalized_ref,effective_channel):
         raise ValueError("prerelease restart target requires Stable + Beta opt-in")
-    payload: dict[str, Any] = {"selector": normalized_selector}
+    is_beta_selector = channels.parse_release_tag(normalized_selector)
+    is_beta = bool(is_beta_selector and is_beta_selector[1] == "beta")
+    payload: dict[str, Any] = {
+        "selector": channels.bootstrap_transport_tag(normalized_selector)
+        if is_beta else normalized_selector
+    }
+    if is_beta:
+        payload["beta_target"] = normalized_selector
     if selected_channel:
         payload["release_channel"]=selected_channel
     if normalized_ref:
-        payload["restart_ref_once"] = normalized_ref
+        payload["restart_ref_once"] = channels.bootstrap_transport_tag(normalized_ref)
     if check_updates_once:
         payload["check_updates_once"] = True
     target.parent.mkdir(parents=True, exist_ok=True)
