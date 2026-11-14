@@ -68,12 +68,6 @@ def render_contacts(base: Any, core: Any, request: Request) -> str:
         request.query_params.get("account_id") or request.query_params.get("account") or ""
     ).strip()
     accounts = base.account_store().list_accounts()
-    options = '<option value="">All accounts</option>' + "".join(
-        f'<option value="{_e(x.get("id"))}"'
-        f'{" selected" if str(x.get("id") or "") == account else ""}>'
-        f'{_e(x.get("label") or x.get("email_address") or x.get("id"))}</option>'
-        for x in accounts
-    )
     csrf = str(base._csrf_value())
     tabs = "".join(
         f'<a class="v984-contact-tab{" selected" if tab==key else ""}" '
@@ -221,11 +215,13 @@ def render_contacts(base: Any, core: Any, request: Request) -> str:
     markup = (
         f'<div class="v984-contacts">{css}<div class="v951-pagehead">'
         '<h2>Contacts</h2><p>Address book, Inbox review and global sending authorizations</p></div>'
-        f'<form action="/" method="get" class="v951-toolbar">'
-        '<input type="hidden" name="ui_view" value="contacts">'
-        f'<input type="hidden" name="contact_tab" value="{_e(tab)}">'
-        f'<label>Email account <select name="account_id">{options}</select></label>'
-        '<button type="submit">Apply</button></form>'
+        '<p class="small muted v986-contacts-scope">'
+        + ('Email history for <strong>' + _e(next(
+            (row.get("label") or row.get("email_address") or account
+             for row in accounts if str(row.get("id") or "") == account),
+            account
+        )) + '</strong>' if account else 'Email history across all configured accounts')
+        + ' · Use the Email account selector in the global header to change scope.</p>'
         f'<nav class="v984-contact-tabs">{tabs}</nav>{info}'
         f'<section class="card wide">{"".join(body)}</section></div>'
     )
