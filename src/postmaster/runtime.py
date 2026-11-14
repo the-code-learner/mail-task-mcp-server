@@ -42,6 +42,7 @@ from .webgui_calendar_v984 import install_week_calendar_v984
 from .webgui_design_v985 import install_webgui_design_v985
 from .webgui_overview_v985 import install_overview_v985
 from .webgui_settings_v985 import install_settings_v985
+from .webgui_catalog_v985 import install_catalog_v985
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
@@ -221,6 +222,7 @@ install_webgui_release_identity(_webgui_v962, project_release_version())
 install_webgui_design_v985(_webgui_v962, _webgui_v970, project_release_version())
 install_overview_v985(_webgui_v962_views, _webgui_v962)
 install_settings_v985(_webgui_v962_views.v951, _webgui_v962)
+install_catalog_v985(_webgui_v962_views.v951, _webgui_v962, _core)
 
 # Preserve the v9.6.3 production composition boundary after every functional overlay is installed.
 # At this point render_inbox_v963 already references the final post-v9.7.0 Inbox renderer.
