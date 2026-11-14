@@ -93,7 +93,11 @@ def _release_snapshot(base: Any) -> dict[str, Any]:
         "bootstrap_control_supported": bootstrap_supported,
         "ok": True, "current_version": running, "release_channel": selected,
         "stable": stable, "beta": beta,
-        "stable_update": channels.newer_than(stable, running) is True,
+        # A user running a Beta may explicitly return to the latest Stable,
+        # even though Stable is numerically older. This is a switch, not an upgrade.
+        "stable_update": bool(stable and stable != active_ref and
+                              (channels.newer_than(stable, running) is True or
+                               "-beta." in running)),
         "beta_update": (selected == channels.STABLE_AND_BETA and
                         channels.newer_than(beta, running) is True),
         "beta_allowed": selected == channels.STABLE_AND_BETA,
@@ -114,7 +118,8 @@ def versions_settings(base: Any) -> str:
     chosen_beta = ' selected' if channel == "stable_beta" else ""
 
     def update_form(kind: str, target: str, enabled: bool) -> str:
-        label = "Update Stable" if kind == "stable" else "Update Beta"
+        label = ("Switch to Stable" if "-beta." in str(data["current_version"])
+                 else "Update Stable") if kind == "stable" else "Update Beta"
         disabled = "" if enabled else " disabled"
         return (
             '<form method="post" action="/dashboard/versions/preview" '
@@ -147,7 +152,7 @@ def versions_settings(base: Any) -> str:
         '<div class="v988-release-card">'
         '<strong>Latest Stable</strong>'
         f'<div class="v988-release-version" data-v988-version="stable">{_e(stable or "Unavailable")}</div>'
-        f'<p class="small muted" data-v988-message="stable">{"Update available" if stable_enabled else "No newer Stable release"}</p>'
+        f'<p class="small muted" data-v988-message="stable">{"Switch back to Stable" if stable_enabled and "-beta." in data["current_version"] else "Update available" if stable_enabled else "Latest Stable already installed" if stable == "v" + data["current_version"].removeprefix("v") else "Stable is older than the current version"}</p>'
         + update_form("stable", stable, stable_enabled) +
         '</div>'
         '<div class="v988-release-card">'
@@ -222,12 +227,18 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
         const enabled=Boolean(allowed && newer && value && data.check_status==='ok');
         form.querySelector('[name=target_version]').value=value;
         form.querySelector('[name=csrf]').value=data.csrf;
-        form.querySelector('button').disabled=!enabled;
+        const button=form.querySelector('button');
+        button.disabled=!enabled;
+        if(kind==='stable')button.textContent=data.current_version.includes('-beta.')
+          ?'Switch to Stable':'Update Stable';
         live.querySelector('[data-v988-message="'+kind+'"]').textContent=
           !allowed?'Enable Stable + Beta to install prereleases':
           !value?'No published '+kind+' release':
           data.check_status!=='ok'?'Release lookup unavailable; retrying':
-          enabled?'Update available':'Already up to date';
+          enabled?(kind==='stable'&&data.current_version.includes('-beta.')?'Switch back to Stable':'Update available'):
+          kind==='stable'&&!data.current_version.includes('-beta.')&&
+            value==='v'+data.current_version.replace(/^v/,'')?'Latest Stable already installed':
+          kind==='stable'?'Stable is older than the current version':'Already up to date';
       }
       live.querySelector('form[data-v988-channel] [name=csrf]').value=data.csrf;
       return data;
