@@ -71,6 +71,10 @@ def _link(key: str, label: str, icon: str, *, mobile: bool = False) -> str:
 
 
 def navigation() -> str:
+    # Structured Data and future views are registered during runtime composition.
+    # Read the live view registry here rather than a stale module-level import.
+    from . import webgui_v962 as shell
+    live_views = tuple(shell.VIEWS)
     groups = []
     included: set[str] = set()
     for heading, links in NAV_GROUPS_V985:
@@ -80,10 +84,10 @@ def navigation() -> str:
             group.append(_link(key, label, symbol))
         group.append("</div>")
         groups.extend(group)
-    rest = [(key, label, icon) for key, label, icon in MORE_VIEWS if key in VIEWS]
+    rest = [(key, label, icon) for key, label, icon in MORE_VIEWS if key in live_views]
     included.update(key for key, _name, _icon in rest)
     # A release may add a view without updating this file. Never make it unreachable.
-    for view in VIEWS:
+    for view in live_views:
         if view not in included:
             rest.append((view, view.replace("-", " ").title(), "•"))
     more = (
