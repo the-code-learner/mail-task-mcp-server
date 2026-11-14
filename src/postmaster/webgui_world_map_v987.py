@@ -225,6 +225,32 @@ document.addEventListener('click', function(event) {
     popup.hidden = true;
   }
 });
+// Drag to pan after zoom, while keeping the view inside the world bounds.
+let mapDrag = null;
+document.addEventListener('pointerdown', function(event) {
+  const svg = event.target.closest && event.target.closest('.pm-map-svg');
+  if (!svg || event.target.closest('.pm-map-marker') || event.button !== 0) return;
+  const vb = svg.viewBox.baseVal;
+  mapDrag = {svg:svg, pointerId:event.pointerId, x:event.clientX, y:event.clientY,
+             left:vb.x, top:vb.y, width:vb.width, height:vb.height};
+});
+document.addEventListener('pointermove', function(event) {
+  if (!mapDrag || mapDrag.pointerId !== event.pointerId) return;
+  const box = mapDrag.svg.getBoundingClientRect();
+  if (!box.width || !box.height) return;
+  const left = Math.max(0,Math.min(1000-mapDrag.width,
+               mapDrag.left-(event.clientX-mapDrag.x)*mapDrag.width/box.width));
+  const top = Math.max(0,Math.min(500-mapDrag.height,
+               mapDrag.top-(event.clientY-mapDrag.y)*mapDrag.height/box.height));
+  mapDrag.svg.setAttribute('viewBox',
+    [left,top,mapDrag.width,mapDrag.height].join(' '));
+});
+document.addEventListener('pointerup', function(event) {
+  if (mapDrag && mapDrag.pointerId === event.pointerId) mapDrag=null;
+});
+document.addEventListener('pointercancel', function(event) {
+  if (mapDrag && mapDrag.pointerId === event.pointerId) mapDrag=null;
+});
 document.addEventListener('keydown', function(event) {
   if ((event.key !== 'Enter' && event.key !== ' ') ||
       !event.target.matches || !event.target.matches('.pm-map-marker')) return;
