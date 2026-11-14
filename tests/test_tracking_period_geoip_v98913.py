@@ -18,6 +18,7 @@ def _request(query: str = "") -> Request:
     })
 
 
+# Exact-commit release guard: real period links and optional ISP availability.
 class TrackingPeriodGeoIPV98913Tests(unittest.TestCase):
     def test_period_chips_have_distinct_force_reload_urls(self):
         form = webgui_tracking_v985._period_form(
