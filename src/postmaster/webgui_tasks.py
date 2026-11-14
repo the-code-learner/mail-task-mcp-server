@@ -295,19 +295,20 @@ def task_fragment(base: Any, request: Request) -> str:
         pid = str(job.get("project_id") or "") or None
         view = escape(dashboard_url(request, tab="scheduler", project=project, extra={**base_extras, "view_job": raw_id}), quote=True)
         actions = f'<a href="{view}"><button type="button">View</button></a>'
-        if status != "completed":
+        autonomous = job.get("action_type") == "scheduled_email_send"
+        if not autonomous and status != "completed":
             edit = escape(dashboard_url(request, tab="scheduler", project=project, extra={**base_extras, "edit_job": raw_id}), quote=True)
             actions += f'<a href="{edit}"><button type="button">Edit</button></a>'
         if status == "paused":
             actions += f'''<form method="post" action="/dashboard/job/resume"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button class="ok" type="submit">Resume</button></form>'''
-        elif status != "completed":
+        elif status == "scheduled" or (not autonomous and status != "completed"):
             actions += f'''<form method="post" action="/dashboard/job/pause"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button type="submit">Pause</button></form>'''
         title = project_label_html(str(job.get("title") or ""), pid)
         scope = project_label_html(project_names.get(pid or "", pid or "global"), pid, compact=True)
         rows.append(
             f'<tr><td>{title}<div class="small muted mono">{escape(raw_id)}</div></td>'
             f'<td>{escape(str(job.get("owner_id") or ""))}<br>{scope}</td>'
-            f'<td>{escape(str(job.get("action_type") or ""))}</td><td><span class="badge">{escape(status)}</span></td>'
+            f'<td>{escape("Autonomous email send" if autonomous else str(job.get("action_type") or ""))}</td><td><span class="badge">{escape(status)}</span></td>'
             f'<td class="mono">{escape(str(job.get("next_run_utc") or "—"))}</td><td class="actions">{actions}</td></tr>'
         )
     toggle_label = "Hide completed" if show_completed else f"Show completed ({completed})"
@@ -338,7 +339,7 @@ def task_fragment(base: Any, request: Request) -> str:
 {_detail(base, request, project, show_completed)}{_editor(base, request, project, show_completed)}
 <section class="card wide"><div class="panel-title"><h2>Task registry</h2><div class="row"><div class="task-view-toggle"><a class="{"active" if view_mode == "agenda" else ""}" href="{agenda_url}">Agenda</a><a class="{"active" if view_mode == "calendar" else ""}" href="{calendar_url}">Calendar</a></div><span class="badge">{escape(count)}</span><a href="{toggle}"><button type="button">{escape(toggle_label)}</button></a></div></div>
 {filter_html}
-<p class="small muted"><strong>No cron worker runs here.</strong> Agenda and Calendar are two views of the same real task-registry rows; project colors are presentation metadata only.</p>
+<p class="small muted"><strong>Only explicitly scheduled one-time email sends run automatically.</strong> All other tasks remain passive. An in-progress SMTP handoff may be uncertain after a restart and is never retried automatically.</p>
 {content}
 </section></div></section>'''
 
