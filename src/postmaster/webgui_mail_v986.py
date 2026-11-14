@@ -567,6 +567,67 @@ BETA_MAIL_STYLE = r"""
  #panel-inbox .v989-mail-workspace:has(.v963-detail){height:auto}
  #panel-inbox .v989-reading-pane .v963-detail{padding:16px!important}
 }
+/* Beta.6: remove CSS-grid table-row layout entirely. Grid positioning in
+   browser table fragments and competing inherited td rules produced overlapping
+   sender/subject text despite the earlier fixed grid tracks. Every card now
+   follows normal vertical flex flow; absolutely positioned avatar and date
+   cannot change subject line placement. */
+#panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{
+ display:flex!important;flex-flow:column nowrap!important;
+ position:relative!important;justify-content:flex-start!important;
+ align-items:stretch!important;align-content:initial!important;
+ gap:0!important;grid-template-columns:none!important;
+ grid-template-rows:none!important;min-height:94px!important;
+ padding:14px 75px 13px 62px!important;box-sizing:border-box!important;
+ height:auto!important;overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v987-message td.v987-indicator{
+ position:absolute!important;top:24px!important;left:10px!important;
+ width:7px!important;height:8px!important;padding:0!important}
+#panel-inbox .v989-list-scroll .v987-message td.v987-identity{
+ display:block!important;position:static!important;order:0!important;
+ width:100%!important;min-height:21px!important;height:auto!important;
+ padding:0!important;margin:0 0 3px!important;line-height:20px!important;
+ overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v987-identity .v987-avatar{
+ position:absolute!important;top:15px!important;left:24px!important;
+ width:32px!important;height:32px!important;line-height:normal!important;
+ display:grid!important;place-items:center!important;margin:0!important}
+#panel-inbox .v989-list-scroll .v987-identity .v987-sender{
+ display:block!important;position:static!important;
+ height:auto!important;min-height:20px!important;
+ width:100%!important;max-width:100%!important;
+ overflow:hidden!important;line-height:20px!important}
+#panel-inbox .v989-list-scroll .v987-identity .v987-sender strong{
+ display:block!important;line-height:20px!important;height:20px!important;
+ padding:0!important;margin:0!important;font-size:13px!important;
+ font-weight:750!important;white-space:nowrap!important;overflow:hidden!important;
+ text-overflow:ellipsis!important}
+#panel-inbox .v989-list-scroll .v987-message td.v987-subject{
+ position:static!important;order:1!important;display:block!important;
+ width:100%!important;max-width:100%!important;min-height:20px!important;
+ height:auto!important;margin:0!important;padding:0!important;
+ overflow:hidden!important;line-height:19px!important}
+#panel-inbox .v989-list-scroll .v987-subject>span{
+ display:block!important;min-height:19px!important;height:19px!important;
+ line-height:19px!important;padding:0!important;margin:0!important;
+ white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+#panel-inbox .v989-list-scroll .v987-subject>.v989-preview{
+ display:block!important;min-height:19px!important;height:19px!important;
+ line-height:19px!important;margin:1px 0 0!important;
+ white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+#panel-inbox .v989-list-scroll .v987-message td.v987-date{
+ position:absolute!important;top:14px!important;right:15px!important;
+ width:57px!important;height:20px!important;line-height:20px!important;
+ text-align:right!important;white-space:nowrap!important;
+ padding:0!important;margin:0!important}
+@media(max-width:760px){
+ #panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{
+  min-height:94px!important;padding:13px 67px 13px 58px!important}
+ #panel-inbox .v989-list-scroll .v987-identity .v987-avatar{
+  left:20px!important;top:14px!important}
+ #panel-inbox .v989-list-scroll .v987-message td.v987-date{right:10px!important}
+}
+
 """
 
 MAIL_SCRIPT = r"""<script id="v986-mail-composer">
