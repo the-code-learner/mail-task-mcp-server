@@ -354,6 +354,7 @@ def render_inbox_v963(base: Any, request: Request) -> str:
         since_days=int(params["since_days"]),
     )
     rows: list[str] = []
+    selected_detail = ""
     uid = (request.query_params.get("message_uid") or "").strip()
     for row in query["messages"]:
         row_uid = str(row.get("uid") or "")
@@ -367,7 +368,10 @@ def render_inbox_v963(base: Any, request: Request) -> str:
                 detail = _detail(base, params, account_id, mailbox, role, uid, request)
             except Exception as exc:
                 detail = f'<div class="flash danger">Could not open message: {escape(type(exc).__name__ + ": " + str(exc))}</div>'
-            rows.append(f'<tr class="v960-inline-detail"><td colspan="4">{detail}</td></tr>')
+            # Beta split view: keep the reader OUTSIDE the message table.
+            # Invalid tr/td nesting caused browsers to move or stretch the
+            # entire message and diagnostics into a full-width table row.
+            selected_detail = detail
     state = store.state(account_id, mailbox)
     csrf = escape(str(base._csrf_value()), quote=True)
     previous = f'<a data-v960-fragment="inbox" href="{escape(_href(params, page=page-1, message_uid=None), quote=True)}">← Previous</a>' if page > 1 else ""
@@ -378,7 +382,7 @@ def render_inbox_v963(base: Any, request: Request) -> str:
 <section class="tab-panel" id="panel-inbox" data-panel="inbox"><div class="v963-inbox-head"><div><h2>Inbox</h2><p>Cache-first mailbox view · IMAP remains source of truth · Safe Email is the default.</p></div><div class="v963-refresh"><span class="v963-chip">{escape(_elapsed_label(str(state.get('last_sync_at') or '')))}</span><form method="post" action="/dashboard/inbox/refresh"><input type="hidden" name="csrf" value="{csrf}"><input type="hidden" name="account_id" value="{escape(account_id, quote=True)}"><input type="hidden" name="mailbox" value="{escape(mailbox, quote=True)}"><button class="primary" type="submit">Aggiorna</button></form></div></div>
 {f'<div class="flash">{flash}</div>' if flash else ''}{_mailbox_tabs(params, catalog, mailbox)}
 <form method="get" action="/" class="v951-toolbar" data-v960-fragment="inbox"><input type="hidden" name="ui_view" value="inbox"><input type="hidden" name="page" value="1"><label>Account {v953._account_select(accounts, account_id)}</label><label>Mailbox {v953._mailbox_select(available, mailbox)}</label><label>Subject <input name="subject" value="{escape(params.get('subject',''), quote=True)}"></label><label>Text <input name="text" value="{escape(params.get('text',''), quote=True)}"></label><label>Since days <input type="number" min="1" max="3650" name="since_days" value="{escape(params['since_days'], quote=True)}"></label><label><input type="checkbox" name="unread_only" value="1"{checked}> unread only</label><button type="submit">Filter cache</button></form>
-{table}<div class="v960-pagination"><span>{previous}</span><span class="small muted">Page {page} · {int(query['total'])} cached result(s)</span><span>{next_link}</span></div>{_proxy_card(base)}
+{table}<div class="v989-reader-source">{selected_detail}</div><div class="v960-pagination"><span>{previous}</span><span class="small muted">Page {page} · {int(query['total'])} cached result(s)</span><span>{next_link}</span></div>{_proxy_card(base)}
 </section>'''
 
 
