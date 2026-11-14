@@ -183,6 +183,43 @@ def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
     # Preserve the original table, row navigation and inline safe reader while
     # displaying a modern mail-list layout (no extra IMAP calls or guessed snippets).
     html = _MAIL_ROW.sub(_mail_message_card, html)
+    return beta_mailbox_layout(html)
+
+
+def beta_mailbox_layout(html: str) -> str:
+    """Beta: a real list/reader workspace with unchanged cached-message backend.
+
+    The safe reader is moved by the client after the fragment is loaded, not
+    re-rendered or fetched from an untrusted remote sender.
+    """
+    opening = '<div class="scroll"><table class="v960-mail-table v986-mail-list">'
+    if opening not in html:
+        return html
+    # A single clear toolbar replaces the feeling of a report/table.
+    start = (
+        '<div class="v989-mail-workspace" data-v989-mail-workspace>'
+        '<div class="v989-mail-stream">'
+        '<div class="v989-stream-header"><div><strong>Messages</strong>'
+        '<span class="v989-stream-subtitle">Select a message to read</span></div>'
+        '<div class="v989-stream-actions">'
+        '<span class="v989-stream-count">Mailbox</span></div></div>'
+        '<div class="scroll v989-list-scroll">'
+        '<table class="v960-mail-table v986-mail-list">'
+    )
+    # Only replace the known mailbox table wrapper, leaving every form and
+    # message UID link under their existing security and rendering contracts.
+    html = html.replace(opening, start, 1)
+    finish = '</table></div>'
+    end = (
+        '</table></div></div>'
+        '<section class="v989-reading-pane" aria-label="Message reading pane">'
+        '<div class="v989-reader-empty">'
+        '<span class="v989-reader-envelope" aria-hidden="true">✉</span>'
+        '<h3>Your messages</h3><p>Select a message on the left to read it here.</p>'
+        '<p>Remote images remain blocked unless explicitly approved.</p>'
+        '</div></section></div>'
+    )
+    html = html.replace(finish, end, 1)
     return html
 
 
@@ -310,6 +347,83 @@ MAIL_STYLE = r"""
  #panel-inbox .v987-date{grid-row:1;grid-column:3}
  #panel-inbox .v987-unread-label{display:none}
 
+}
+"""
+
+BETA_MAIL_STYLE = r"""
+/* Beta vertical mail client: folder sidebar is already provided by the shell. */
+#panel-inbox .v989-mail-workspace{display:grid;grid-template-columns:minmax(310px,375px) minmax(0,1fr);
+ min-height:480px;height:min(76vh,860px);border:1px solid var(--v970-line);
+ border-radius:14px;overflow:hidden;background:var(--v970-surface);margin-top:12px}
+#panel-inbox .v989-mail-stream{min-width:0;display:flex;flex-direction:column;
+ border-right:1px solid var(--v970-line);overflow:hidden}
+#panel-inbox .v989-stream-header{display:flex;justify-content:space-between;align-items:center;gap:8px;
+ padding:17px 16px 14px;border-bottom:1px solid var(--v970-line)}
+#panel-inbox .v989-stream-header strong{font-size:16px;font-weight:800}
+#panel-inbox .v989-stream-subtitle{display:block;font-size:11px;color:var(--v970-muted);margin-top:4px}
+#panel-inbox .v989-stream-count{font-size:11px;color:var(--v970-muted)}
+#panel-inbox .v989-list-scroll{border:0!important;border-radius:0!important;min-height:0;
+ flex:1;overflow-y:auto!important;overflow-x:hidden!important}
+#panel-inbox .v989-list-scroll table.v986-mail-list{display:block!important;border:0!important}
+#panel-inbox .v989-list-scroll .v986-mail-list tbody{display:block!important}
+#panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{display:grid!important;
+ grid-template-columns:8px 36px minmax(0,1fr) 66px!important;grid-template-rows:25px auto;
+ min-height:80px!important;gap:0 7px!important;padding:13px 13px 12px!important;
+ align-items:start;border-bottom:1px solid var(--v970-line)!important}
+#panel-inbox .v989-list-scroll .v987-message td{padding:0!important;line-height:1.45}
+#panel-inbox .v989-list-scroll .v987-indicator{grid-column:1;grid-row:1/3;padding-top:5px!important}
+#panel-inbox .v989-list-scroll .v987-identity{grid-column:2/4;grid-row:1;display:flex!important;
+ align-items:center;gap:9px!important;padding:0!important;min-width:0}
+#panel-inbox .v989-list-scroll .v987-avatar{width:32px;height:32px;flex-basis:32px;border-radius:50%;
+ font-size:11px;margin-top:0}
+#panel-inbox .v989-list-scroll .v987-sender{display:block;min-width:0}
+#panel-inbox .v989-list-scroll .v987-sender strong{display:block;font-size:13px;
+ white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#panel-inbox .v989-list-scroll .v987-sender small{display:none}
+#panel-inbox .v989-list-scroll .v987-subject{grid-column:2/5;grid-row:2;
+ padding:4px 0 0 4px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#panel-inbox .v989-list-scroll .v987-subject>span{font-size:12px;color:var(--v970-muted)}
+#panel-inbox .v989-list-scroll .v987-message.unread .v987-subject>span{color:var(--v970-text)}
+#panel-inbox .v989-list-scroll .v987-date{grid-column:4;grid-row:1;padding-top:4px!important;
+ font-size:10px!important;text-align:right!important;white-space:nowrap}
+#panel-inbox .v989-list-scroll .v987-message.v989-selected{background:var(--v970-accent-soft)!important;
+ box-shadow:inset 3px 0 var(--v970-accent)}
+#panel-inbox .v989-list-scroll .v987-unread-label{display:none}
+#panel-inbox .v989-reading-pane{min-width:0;min-height:0;overflow:auto;position:relative;
+ background:var(--v970-surface)}
+#panel-inbox .v989-reader-empty{max-width:340px;margin:clamp(80px,15vh,170px) auto;
+ text-align:center;padding:18px;color:var(--v970-muted)}
+#panel-inbox .v989-reader-empty h3{color:var(--v970-text);font-size:18px;margin:16px 0 8px}
+#panel-inbox .v989-reader-empty p{font-size:12px;line-height:1.7}
+#panel-inbox .v989-reader-envelope{font-size:43px;display:inline-grid;place-items:center;
+ width:84px;height:84px;background:var(--v970-accent-soft);color:var(--v970-accent);
+ border-radius:22px}
+#panel-inbox .v989-reading-pane:has(.v963-detail)>.v989-reader-empty{display:none}
+#panel-inbox .v989-reading-pane .v963-detail{position:static!important;inset:auto!important;
+ z-index:auto!important;margin:0!important;min-height:100%;width:100%!important;
+ overflow:visible!important;padding:25px!important;border:0!important;
+ border-radius:0!important;box-shadow:none!important;background:transparent!important}
+#panel-inbox .v989-reading-pane .v963-detail>.v963-inbox-head{display:flex!important;
+ flex-wrap:wrap!important}
+#panel-inbox .v989-reading-pane .v963-detail-actions{position:static!important;
+ background:transparent!important;flex-wrap:wrap}
+#panel-inbox .v989-reading-pane .v963-safe-email{min-height:190px}
+#panel-inbox .v989-reading-pane .v960-reader{max-width:100%!important;overflow-wrap:anywhere}
+#panel-inbox .v989-mail-filters{margin:9px 0}
+#panel-inbox:has(.v989-mail-workspace)>.v960-pagination{margin:8px 0}
+@media(max-width:1000px){
+ #panel-inbox .v989-mail-workspace{grid-template-columns:minmax(260px,320px) minmax(0,1fr);height:70vh}
+ #panel-inbox .v989-reading-pane .v963-detail{padding:15px!important}
+}
+@media(max-width:760px){
+ #panel-inbox .v989-mail-workspace{display:block;height:auto;min-height:65vh;overflow:visible}
+ #panel-inbox .v989-mail-stream{border:0;min-height:60vh}
+ #panel-inbox .v989-list-scroll{max-height:70vh}
+ #panel-inbox .v989-reading-pane{display:none;min-height:60vh}
+ #panel-inbox .v989-mail-workspace:has(.v963-detail) .v989-mail-stream{display:none!important}
+ #panel-inbox .v989-mail-workspace:has(.v963-detail) .v989-reading-pane{display:block!important}
+ #panel-inbox .v989-mail-workspace:has(.v963-detail){height:auto}
+ #panel-inbox .v989-reading-pane .v963-detail{padding:16px!important}
 }
 """
 
@@ -476,6 +590,32 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    if(oldLabel)oldLabel.hidden=true;
    refresh();
  }
+ function enhanceBetaInbox(inbox){
+   const workspace=inbox.querySelector('[data-v989-mail-workspace]');
+   if(!workspace)return;
+   const pane=workspace.querySelector('.v989-reading-pane');
+   const detailRow=workspace.querySelector('tr.v960-inline-detail');
+   if(detailRow){
+     // Move the already-sanitized, cache-backed reader. Do not re-fetch MIME
+     // or attempt to render remote resources through the browser.
+     const detail=detailRow.querySelector('.v963-detail');
+     const fallback=detailRow.querySelector('.flash');
+     if(detail)pane.append(detail);
+     else if(fallback)pane.append(fallback);
+     detailRow.remove();
+   }
+   const uid=new URL(location.href).searchParams.get('message_uid');
+   workspace.querySelectorAll('tr[data-v960-href]').forEach(row=>{
+     const selected=Boolean(uid && new URL(row.dataset.v960Href,location.href)
+       .searchParams.get('message_uid')===uid);
+     row.classList.toggle('v989-selected',selected);
+     row.setAttribute('aria-selected',String(selected));
+     // The existing lazy fragment reader binds the row navigation and keys.
+   });
+   const count=inbox.querySelector('.v960-pagination .small');
+   const label=workspace.querySelector('.v989-stream-count');
+   if(count && label)label.textContent=count.textContent.trim();
+ }
  function init(){
    const inbox=document.querySelector('#panel-inbox.active');
    if(!inbox)return;
@@ -487,6 +627,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      const form=composer.querySelector('form[data-v960-send]');
      if(form)setupAttachments(form);
    }
+   enhanceBetaInbox(inbox);
  }
  document.addEventListener('submit',ev=>{
    const editor=ev.target.querySelector?.('[data-v986-editor]');
@@ -523,3 +664,8 @@ def install_mail_gui_v986(v960: Any, shell: Any) -> None:
         shell._styles=styles
     if 'id="v986-mail-composer"' not in shell.SCRIPT:
         shell.SCRIPT+=MAIL_SCRIPT
+    if 'v989-mail-workspace' not in shell._styles():
+        previous_styles = shell._styles
+        def beta_styles() -> str:
+            return previous_styles() + "\n" + BETA_MAIL_STYLE
+        shell._styles = beta_styles
