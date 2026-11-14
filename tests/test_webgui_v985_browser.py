@@ -102,5 +102,79 @@ class V985BrowserLayoutTests(unittest.TestCase):
                         self.assertTrue(payload["mobileVisible"])
 
 
+    def test_actual_production_composed_shell_in_chrome(self):
+        """Inspect the exact release-composed shell, not only synthetic CSS fixtures."""
+        from postmaster import runtime as _runtime
+        from postmaster import webgui_v962 as shell
+        from starlette.requests import Request
+
+        request=Request({
+            "type":"http","method":"GET","scheme":"http",
+            "path":"/","query_string":b"ui_view=overview","headers":[],
+        })
+        response=shell._shell(request)
+        html=response.body.decode("utf-8")
+        self.assertEqual(response.headers["x-postmaster-webgui-design"],
+                         "v9.8.5-approved-v5")
+        self.assertIn('id="v985-production-ui"',html)
+        self.assertIn('id="v984-scopebar"',html)
+        self.assertIn('data-v985-compose',html)
+        self.assertIn('data-v970-theme-toggle',html)
+        self.assertIn('id="v962-lazy-dashboard"',html)
+        self.assertIn('data-v962-nav="data"',html)
+        browser=_browser_session()
+        with _serve_browser_document(html) as url:
+            for width,height in ((1440,900),(390,840)):
+                with self.subTest(viewport=(width,height)):
+                    browser._call("Emulation.setDeviceMetricsOverride",{
+                        "width":width,"height":height,
+                        "deviceScaleFactor":1,"mobile":False
+                    })
+                    nav=browser._call("Page.navigate",{"url":url})
+                    self.assertFalse(nav.get("result",{}).get("errorText"))
+                    expression="""(() => {
+                        if(document.readyState!=='complete') return null;
+                        const el=document.querySelector('.v985-header');
+                        const scopes=el?.querySelector('#v984-scopebar');
+                        const side=document.querySelector('.v985-sidebar');
+                        const main=document.querySelector('.v970-workspace > main');
+                        const css=el&&getComputedStyle(el);
+                        if(!el||!scopes||!side||!main)return null;
+                        return {
+                          headerWidth:el.getBoundingClientRect().width,
+                          documentWidth:document.documentElement.clientWidth,
+                          bg:css.backgroundColor,
+                          sidebarDisplay:getComputedStyle(side).display,
+                          mainWidth:main.getBoundingClientRect().width,
+                          v5:!!document.querySelector('.v985-brand'),
+                          liveAccountSelect:!!scopes.querySelector('[data-v984-scope="account_id"]'),
+                          availableViews:document.querySelectorAll('[data-v962-nav="tracking"]').length,
+                          horizontalOverflow:document.documentElement.scrollWidth-document.documentElement.clientWidth,
+                          mobileNav:getComputedStyle(document.querySelector('.v985-mobile-nav')).display
+                        };
+                    })()"""
+                    payload=None
+                    for _ in range(80):
+                        result=browser._call("Runtime.evaluate",{
+                            "expression":expression,"returnByValue":True
+                        })
+                        payload=result.get("result",{}).get("result",{}).get("value")
+                        if isinstance(payload,dict):break
+                        time.sleep(.03)
+                    self.assertIsInstance(payload,dict)
+                    self.assertTrue(payload["v5"])
+                    self.assertTrue(payload["liveAccountSelect"])
+                    self.assertGreater(payload["availableViews"],0)
+                    self.assertLessEqual(abs(payload["headerWidth"]-payload["documentWidth"]),2)
+                    self.assertLessEqual(payload["horizontalOverflow"],2)
+                    self.assertGreater(payload["mainWidth"],150)
+                    if width>560:
+                        self.assertNotEqual(payload["sidebarDisplay"],"none")
+                        self.assertEqual(payload["mobileNav"],"none")
+                    else:
+                        self.assertEqual(payload["sidebarDisplay"],"none")
+                        self.assertNotEqual(payload["mobileNav"],"none")
+
+
 if __name__=="__main__":
     unittest.main()
