@@ -350,7 +350,9 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn("setStatus('Unable to load more messages. Scroll to retry.')", MAIL_SCRIPT)
         self.assertIn("if(!response.ok)throw new Error('Could not load more messages')", MAIL_SCRIPT)
         self.assertIn("if(u.origin!==location.origin)", MAIL_SCRIPT)
-        self.assertIn("known.has(itemUid)", MAIL_SCRIPT)
+        self.assertIn("known.has(identity)", MAIL_SCRIPT)
+        self.assertIn("p.get('message_account_id')", MAIL_SCRIPT)
+        self.assertIn("p.get('message_mailbox')", MAIL_SCRIPT)
 
     def test_beta_narrow_list_never_inherits_old_table_minimum_width(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
