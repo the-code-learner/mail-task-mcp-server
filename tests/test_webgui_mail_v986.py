@@ -88,6 +88,30 @@ class MailGuiV986ContractTests(unittest.TestCase):
         all_scope = modern_inbox_markup(html)
         self.assertIn("Sender account <select", all_scope)
 
+    def test_modern_mail_cards_keep_cached_mail_navigation_and_no_external_fetch(self):
+        sample = INBOX.replace(
+            "<td>Alice</td><td>Subject</td><td>2026-11-14</td>",
+            "<td>Alice Example &lt;alice@example.test&gt;</td>"
+            "<td>Project update</td><td>2026-11-14T12:00:00+00:00</td>"
+        )
+        result = modern_inbox_markup(sample)
+        self.assertIn('class="v963-mail-row v987-message"', result)
+        self.assertIn('class="v987-avatar"', result)
+        self.assertIn('>AE</span>', result)
+        self.assertIn("Alice Example", result)
+        self.assertIn("alice@example.test", result)
+        self.assertIn("Project update", result)
+        self.assertIn('data-v960-href=', result)
+        self.assertIn('data-v987-date="2026-11-14T12:00:00+00:00"', result)
+        self.assertNotIn("fetch(", result)
+
+    def test_unread_mail_and_active_reader_remain_semantically_compatible(self):
+        sample = INBOX.replace('class="v963-mail-row"', 'class="v963-mail-row unread"')
+        result = modern_inbox_markup(sample)
+        self.assertIn('class="v963-mail-row unread v987-message"', result)
+        self.assertIn("Unread message", result)
+        self.assertIn('data-v960-href=', result)
+
     def test_compose_refuses_partial_markup_transformations(self):
         html='<form><textarea name="body_html"></textarea></form>'
         self.assertEqual(modern_compose_markup(html),html)
