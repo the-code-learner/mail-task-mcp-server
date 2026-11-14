@@ -2,6 +2,15 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.3 - 2026-11-14
+
+### Beta: fix why the mail WebUI did not change after installation
+- Fixed the **actual runtime composition boundary**: `runtime.py` installed the new Inbox renderer but subsequently overwrote `v960.render_inbox` with the original v9.6.3 renderer. All lazy WebUI mailbox requests then bypassed the Beta layout entirely, even though isolated HTML transformation tests were green.
+- The final shared runtime renderer now calls the existing secure cache-backed v9.6.3 message reader and explicitly applies `modern_inbox_markup` before returning HTML. Inbox, Sent, Spam, Drafts and Trash use the same working list/reader/infinite-scroll Beta interface.
+- Added regression tests against the **final runtime-installed renderer**, not only isolated formatting utilities; they check the actual `v960` and `v951` entry points and each folder. This prevents the exact overwrite regression from recurring.
+- No remote message resources are loaded automatically, no email is sent or drafts auto-dispatched, and the unchanged original Portainer YAML is retained.
+- This remains an opt-in prerelease with a separate immutable numeric transport alias. The Stable branch stays at 9.8.8.
+
 ## 9.8.9-beta.2 - 2026-11-14
 
 ### Beta: coherent mail client in every folder
