@@ -276,18 +276,23 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    const amp=form.querySelector('textarea[name="body_amp"]');
    if(!visual||!code||!picker||!body||!html||!amp)return;
    const drafts={plain:body.value||'',html:html.value||'',amp:amp.value||''};
-   let format='plain',mode='visual';
+   let format='plain',mode='visual',visualDirty=false;
    const read=()=>mode==='code'?code.value:
      format==='plain'?visual.innerText:visual.innerHTML;
    function save(){
-     const value=read();
-     drafts[format]=value;
-     const out=format==='plain'?value:plain(format==='amp'?getBody(value):value);
-     body.value=out;
-     html.value=format==='html'?
-       (mode==='visual'?safeHTML(value):safeHTML(value)):'';
-     amp.value=format==='amp'?
-       (/<html\b[^>]*amp4email/i.test(value)?value:ampTemplate(safeHTML(value))):'';
+     if(mode==='code'){
+       // Code is the authoritative source until the user actually edits Visual.
+       drafts[format]=code.value;
+     }else if(visualDirty){
+       const value=read();
+       drafts[format]=format==='plain'?value:
+         format==='html'?safeHTML(value):ampTemplate(safeHTML(value));
+     }
+     const value=drafts[format];
+     body.value=format==='plain'?value:
+       plain(format==='amp'?getBody(value):value);
+     html.value=format==='html'?value:'';
+     amp.value=format==='amp'?value:'';
    }
    function show(){
      const value=drafts[format] || (format==='plain'?'':format==='html'?safeHTML(escapeText(drafts.plain).replaceAll('\n','<br>')):
@@ -299,6 +304,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      }else{
        code.value=value;
      }
+     visualDirty=false;
      visual.hidden=mode!=='visual';
      code.hidden=mode!=='code';
      const tools=editor.querySelector('.v986-rich-toolbar');
@@ -321,7 +327,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      const txt=ev.clipboardData?.getData('text/plain')||'';
      document.execCommand('insertText',false,txt);
    });
-   visual.addEventListener('input',save);
+   visual.addEventListener('input',()=>{visualDirty=true;save();});
    code.addEventListener('input',save);
    editor.querySelectorAll('[data-v986-rich-command]').forEach(btn=>{
      btn.addEventListener('click',()=>{
@@ -332,6 +338,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
          if(!val||!(/^(https?:|mailto:)/i.test(val)))return;
          document.execCommand(cmd,false,val);
        }else document.execCommand(cmd,false,null);
+       visualDirty=true;
        save();
      });
    });
