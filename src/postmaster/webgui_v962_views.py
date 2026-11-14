@@ -25,6 +25,7 @@ VIEWS = (
     "overview", "accounts", "mail-health", "inbox", "compose", "tracking",
     "deliveries", "suppressions", "security", "system", "coverage", "amp",
     "domains", "recipients", "projects", "knowledge", "files", "scheduler",
+    "contacts",
 )
 
 

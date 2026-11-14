@@ -25,6 +25,7 @@ NAV_GROUPS = (
         ("knowledge", "Knowledge", "KN"),
         ("files", "Files", "FL"),
         ("scheduler", "Tasks", "TS"),
+        ("contacts", "Contacts", "CT"),
     )),
     ("Control", (
         ("security", "Security", "SC"),
@@ -49,6 +50,7 @@ VIEW_LABELS = {
     "knowledge": ("Knowledge", "Memories, skills and scoped context"),
     "files": ("Files", "Persistent File Store"),
     "scheduler": ("Tasks", "Registry list and calendar views"),
+    "contacts": ("Contacts", "Inbox sender review, address book and global sending policy"),
     "security": ("Security", "Privacy Proxy and security posture"),
     "domains": ("Domain controls", "Authorized domain policy"),
     "recipients": ("Recipient controls", "Exact-address authorization policy"),

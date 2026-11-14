@@ -234,17 +234,25 @@ def render_contacts(base: Any, core: Any, request: Request) -> str:
 
 def install_contacts_webgui_v984(app: Any, base: Any, core: Any,
                                 v962: Any, views: Any, v970: Any) -> None:
-    if "contacts" in views.VIEWS:
+    # Contacts is a declared lazy view; installation adds its route and handler once.
+    # Do not use membership in VIEWS as an installation sentinel: consumers may
+    # import the view tuple before runtime composition.
+    if any(
+        isinstance(route, Route) and route.path == "/dashboard/contacts/action"
+        for route in app.router.routes
+    ):
         return
-    views.VIEWS = tuple(views.VIEWS) + ("contacts",)
+    if "contacts" not in views.VIEWS:
+        views.VIEWS = tuple(views.VIEWS) + ("contacts",)
     v962.VIEWS = views.VIEWS
-    v962.NAV = tuple(v962.NAV) + (("contacts", "Contacts"),)
+    if not any(view == "contacts" for view, _label in v962.NAV):
+        v962.NAV = tuple(v962.NAV) + (("contacts", "Contacts"),)
 
     # Preserve legacy domains/recipients views for old URLs but move primary links to Contacts.
     new_groups = []
     for heading, links in v970.NAV_GROUPS:
         kept = [x for x in links if x[0] not in {"domains", "recipients"}]
-        if heading == "Organize":
+        if heading == "Organize" and not any(view == "contacts" for view, _label, _code in kept):
             kept.append(("contacts", "Contacts", "CT"))
         new_groups.append((heading, tuple(kept)))
     v970.NAV_GROUPS = tuple(new_groups)
