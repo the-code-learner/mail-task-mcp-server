@@ -425,15 +425,12 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
             )
-        # Show an explicit, styled countdown rather than returning the user to
-        # an unstyled POST endpoint. The update is only *scheduled*: the linked
-        # dashboard will show the real build after the bootstrap completes.
-        # Meta refresh works with JavaScript disabled. Client-side countdown
-        # navigates after exactly 10 seconds; no POST is repeated on refresh.
+        # Wait at least 15 seconds, then verify the actual running build.
+        # A simple HTTP 200 is not sufficient: the old runtime might still
+        # answer during restart. Never submit the update POST a second time.
         return HTMLResponse(
             '<!doctype html><html lang="en"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
-            '<meta http-equiv="refresh" content="10;url=/?ui_view=system&amp;settings_tab=versions#system">'
             '<title>Updating Postmaster MCP</title>'
             '<style>html{color-scheme:dark}*{box-sizing:border-box}'
             'body{margin:0;min-height:100dvh;display:grid;place-items:center;'
@@ -454,22 +451,59 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             '<main role="status" aria-live="polite">'
             '<div class="mark" aria-hidden="true">✉</div>'
             '<h1>Updating Postmaster MCP</h1>'
-            '<p>Update scheduled for <strong>' + _e(result.get("target_version_ref")) +
+            '<p>Update scheduled for <strong id="target-version">' +
+            _e(result.get("target_version_ref")) +
             '</strong>. The container is restarting.</p>'
-            '<p>Returning to the dashboard in <span id="countdown" class="seconds">10</span> seconds…</p>'
+            '<p id="update-status">Checking the installed build in '
+            '<span id="countdown" class="seconds">15</span> seconds…</p>'
             '<div class="bar" aria-hidden="true"><span id="progress"></span></div>'
-            '<p><a href="/?ui_view=system&amp;settings_tab=versions#system">Return to dashboard now</a></p>'
-            '<p>The dashboard will report the installed build after restart. '
-            'A scheduled update is not yet a verified installation.</p>'
+            '<p><a href="/?ui_view=system&amp;settings_tab=versions#system">'
+            'Return to dashboard now</a></p>'
+            '<p>The dashboard will open automatically only once the requested '
+            'build is running. No update operation will be repeated.</p>'
+            '<noscript><p>Automatic status checks require JavaScript. '
+            'You may return manually using the link above.</p></noscript>'
             '</main>'
-            '<script>(()=>{"use strict";const url="/?ui_view=system&settings_tab=versions#system";'
-            'const start=Date.now();let finished=false;'
-            'const tick=()=>{if(finished)return;const remaining=Math.max(0,10-Math.floor((Date.now()-start)/1000));'
-            'document.getElementById("countdown").textContent=String(remaining);'
-            'document.getElementById("progress").style.transform="scaleX("+(remaining/10)+")";'
-            'if(remaining===0){finished=true;location.replace(url);return;}'
+            '<script>(()=>{"use strict";'
+            'const target=document.getElementById("target-version").textContent.trim();'
+            'const status=document.getElementById("update-status");'
+            'const counter=document.getElementById("countdown");'
+            'const progress=document.getElementById("progress");'
+            'const dashboard="/?ui_view=system&settings_tab=versions#system";'
+            'const minimumMs=15000;const start=Date.now();'
+            'let complete=false,checking=false,lastCheck=0;'
+            'const normalize=s=>String(s||"").trim().replace(/^v/,"");'
+            'async function check(){'
+            'if(complete||checking)return;checking=true;'
+            'const controller=new AbortController();'
+            'const timeout=setTimeout(()=>controller.abort(),4000);'
+            'try{'
+            'const response=await fetch("/dashboard/versions/status?update_health="+Date.now(),{'
+            'method:"GET",credentials:"same-origin",cache:"no-store",'
+            'headers:{"Accept":"application/json"},signal:controller.signal});'
+            'if(!response.ok)throw new Error("Health not available");'
+            'const data=await response.json();'
+            'const running=normalize(data.current_version);'
+            'if(data.ok===true&&running===normalize(target)){'
+            'complete=true;status.textContent="New version verified. Opening dashboard…";'
+            'location.replace(dashboard);return;}'
+            'status.textContent="Waiting for the requested version…"+'
+            '(running?" Currently running: "+running+".":"");'
+            '}catch(_e){status.textContent="Waiting for Postmaster to restart…";}'
+            'finally{clearTimeout(timeout);checking=false;}'
+            '}'
+            'const tick=()=>{if(complete)return;'
+            'const elapsed=Date.now()-start;'
+            'const remaining=Math.max(0,Math.ceil((minimumMs-elapsed)/1000));'
+            'if(remaining>0){counter.textContent=String(remaining);'
+            'progress.style.transform="scaleX("+(remaining/15)+")";}'
+            'else{progress.style.transform="scaleX(0)";'
+            'if(!lastCheck||Date.now()-lastCheck>=3000){'
+            'lastCheck=Date.now();check();}}'
             'setTimeout(tick,250);};tick();})();</script></body></html>',
-            headers={"Cache-Control": "no-store"},
+            headers={"Cache-Control": "private, no-store",
+                     "Referrer-Policy": "no-referrer",
+                     "X-Content-Type-Options": "nosniff"},
         )
 
     async def save_channel(req: Request) -> Response:
