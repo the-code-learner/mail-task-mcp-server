@@ -34,6 +34,7 @@ from .runtime_tracking_v984 import install_runtime_tracking_v984
 from .runtime_contacts_v984 import install_runtime_contacts_v984
 from .webgui_files_v984 import install_file_previews_v984
 from .webgui_tracking_v984 import install_tracking_dashboard_v984
+from .webgui_links_v984 import install_tracked_links_webgui_v984
 from .webgui_contacts_v984 import install_contacts_webgui_v984
 from .webgui_versions_v984 import install_versions_webgui_v984
 from .webgui_calendar_v984 import install_week_calendar_v984
@@ -204,6 +205,7 @@ _v984_contacts = install_runtime_contacts_v984(_base, _core)
 runtime_status = _v984_contacts["runtime_status"]
 install_file_previews_v984(app, _base)
 install_tracking_dashboard_v984(_webgui_v962_views)
+install_tracked_links_webgui_v984(app, _base, _core)
 install_contacts_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
 install_versions_webgui_v984(app, _base, _core, _webgui_v962, _webgui_v962_views, _webgui_v970)
 install_week_calendar_v984(_webgui_tasks)
