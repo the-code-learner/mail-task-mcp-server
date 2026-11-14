@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9 - 2026-11-15
+
+### Stable release — consolidated and verified 9.8.9 beta series
+- Promotes the validated `v9.8.9-beta.19` application code to the stable 9.8.9 channel, including fixes and features accumulated through beta.1–beta.19. This is a source release, not an automatic production deployment.
+- **Autonomous scheduled email:** one-time email scheduling from the Inbox composer or existing MCP `send_email(send_at=..., schedule_timezone=...)`; persistent scheduler tasks and a lifecycle-managed worker. Only explicitly authorized `scheduled_email_send` executes autonomously, without a second confirmation at the due time. All other tasks remain passive.
+- **Safety:** atomic claim and at-most-once SMTP attempt, idempotent scheduling, cancellation/pause while pending, recipient/suppression checks and sender identity pinning. An interrupted or ambiguous SMTP outcome is never retried automatically. Tracking-off consent, when required, is obtained when scheduling. Scheduled attachments require immutable snapshots and are not yet available; stored-file links can be included in email bodies.
+- **Tracking Overview:** self-hosted interactive vector world map with zoom-adaptive, class-coloured markers, nearby-point selection, detailed classification reuse, and explicit country-level fallback for uncertain GeoIP coordinates. Period/account filtering and received-mail aggregate statistics fixes retained.
+- **Settings:** exact Stable/Beta version pinning, channel controls, account administration and update flows. Additional tracking and GeoIP improvements from the beta series are retained.
+- Tested: the full runtime regression suite passed for beta.19; a live scheduled email was successfully dispatched autonomously and observed in the recipient mailbox on 2026-11-15. Stable candidate requires its own CI before merge.
+- Maintains the existing Portainer single-YAML deployment unchanged. No automatic update or restart of running instances is performed by publishing this release.
+
 ## 9.8.9-beta.19 - 2026-11-15
 
 ### Explicitly authorized autonomous one-time scheduled email sending
