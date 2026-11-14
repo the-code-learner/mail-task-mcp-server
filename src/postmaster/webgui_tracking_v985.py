@@ -313,7 +313,7 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     if tab=="overview":
         content=(
             '<div class="v985-tracking-two">'+recent+performances+'</div>'
-            +render_world_map(events,truncated=truncated)
+            +render_world_map(events,truncated=truncated,base=base)
             +'<div class="v985-tracking-heatmaps">'+heat+'</div>'
             +_activity_trend(events,start,finish)
         )
