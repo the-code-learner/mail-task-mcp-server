@@ -62,7 +62,7 @@ class ReceivedHeatmapAllAccountsV98914(unittest.TestCase):
         dates,note=cached_received_dates(self.base,"",self.since,self.until)
         self.assertEqual(len(dates),2)
         self.assertIn("all 2 enabled accounts",note)
-        self.assertIn("already synchronized",note.replace("already synced","already synchronized") if False else note.replace("already synced","already synchronized"))
+        self.assertIn("already synchronized",note)
         self.assertTrue(all("2026-11-13" in s for s in dates))
 
     def test_explicit_account_is_restricted_and_invalid_account_never_leaks(self):
