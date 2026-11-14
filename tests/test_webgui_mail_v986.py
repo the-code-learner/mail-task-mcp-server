@@ -129,6 +129,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
                                   'class="active" href="/?ui_view=inbox&amp;mailbox=Sent#inbox">'+folder)
         return sample
 
+    # Exact-commit beta release guard: per-account refresh stays reachable in every folder.
     def test_specific_account_mailboxes_show_real_imap_sync_button(self):
         for folder in ("Inbox","Sent","Drafts","Spam","Trash"):
             with self.subTest(folder=folder):
