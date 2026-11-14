@@ -256,9 +256,32 @@ class MailGuiV986ContractTests(unittest.TestCase):
             assert 'class="v989-reading-pane"' in response.text
             assert 'class="v989-reader-source"' in response.text
         """ % repr(raw))
-        completed=subprocess.run([sys.executable,"-c",script],
-                                 capture_output=True,text=True,timeout=60)
-        self.assertEqual(completed.returncode,0,completed.stderr[-2000:])
+        import os
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory(prefix="postmaster-beta3-runtime-") as tmp:
+            env=os.environ.copy()
+            env.update({
+                "MAIL_EMAIL":"test@example.invalid",
+                "MAIL_PASSWORD":"test-only-password",
+                "IMAP_HOST":"imap.example.com",
+                "SMTP_HOST":"smtp.example.com",
+                "ENABLE_SEND":"false",
+                "CONTEXT_SEMANTIC_ENABLED":"false",
+                "CONTEXT_DB_PATH":str(Path(tmp)/"knowledge.db"),
+                "SCHEDULER_DB_PATH":str(Path(tmp)/"scheduler.db"),
+                "MAIL_ACCOUNTS_DB_PATH":str(Path(tmp)/"accounts.db"),
+                "MAIL_ACCOUNTS_KEY_PATH":str(Path(tmp)/"accounts.key"),
+                "EMAIL_ANALYTICS_DB_PATH":str(Path(tmp)/"analytics.db"),
+                "EMAIL_ANALYTICS_KEY_PATH":str(Path(tmp)/"analytics.key"),
+                "RECIPIENT_POLICY_DB_PATH":str(Path(tmp)/"recipient-policy.db"),
+                "FILE_STORE_DB_PATH":str(Path(tmp)/"files.db"),
+                "FILE_STORE_ROOT":str(Path(tmp)/"files"),
+                "POSTMASTER_STRUCTURED_DATA_DB":str(Path(tmp)/"structured.db"),
+            })
+            completed=subprocess.run([sys.executable,"-c",script],
+                                     env=env,capture_output=True,text=True,timeout=60)
+            self.assertEqual(completed.returncode,0,completed.stderr[-2500:])
 
     def test_composed_renderer_keeps_every_mailbox_including_drafts(self):
         from unittest.mock import patch
