@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: beta-application-release
@@ -52,6 +53,29 @@ jobs:
           )
           with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as fh:
               fh.write(f"RELEASE_TAG=v{requested}\n")
+          PY
+
+      - name: Require green v9 runtime tests for this exact beta commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/v9-runtime-tests.yml/runs?head_sha=$GITHUB_SHA&per_page=100" > /tmp/postmaster-beta-ci.json
+          python - <<'PY'
+          import json,os
+          with open("/tmp/postmaster-beta-ci.json",encoding="utf-8") as stream:
+              payload=json.load(stream)
+          sha=os.environ["GITHUB_SHA"]
+          passed=any(
+              run.get("head_sha")==sha and run.get("conclusion")=="success"
+              for run in payload.get("workflow_runs",[])
+          )
+          if not passed:
+              raise SystemExit(
+                  "Refusing Beta publication: run and pass the v9 runtime tests "
+                  "for the exact selected commit before publishing."
+              )
+          print("Verified successful v9 runtime tests for",sha)
           PY
 
       - name: Create immutable beta tag and prerelease
