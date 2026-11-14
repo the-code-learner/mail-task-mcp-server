@@ -30,34 +30,39 @@ SemVer components, not alphabetical tag ordering. In Stable-only mode,
 prereleases are hidden and disallowed by the server, even if someone submits
 a beta target manually.
 
-## One-time Portainer bootstrap requirement
+## Existing Portainer YAML — no changes required
 
-The **versioned canonical** [`postmaster-mcp.yml`](../postmaster-mcp.yml)
-adds the beta-aware resolver and the
-`POSTMASTER_BOOTSTRAP_BETA_SUPPORTED: "true"` capability flag.
-An existing 9.8.5 stack can continue receiving **Stable** releases without
-changing its deployment. **Beta opt-in is disabled until the operator updates
-the Portainer stack from this new canonical YAML.** Merely installing a newer
-Python application build cannot change the shell script in the *already
-deployed* Portainer YAML.
+The existing `postmaster-mcp.yml` stays **byte-for-byte unchanged**.
+Its startup shell accepts numeric `vX.Y.Z` refs but cannot parse
+`-beta.N` suffixes. The beta publishing workflow therefore creates two
+immutable Git tags pointing to the **same exact tested commit**:
 
-Upgrade the *existing* stack through its normal operator-approved Portainer
-procedure, **preserving all existing secrets, domain settings, mounted volumes
-and local customizations**. This is not an instruction to create another stack.
-The default remains `POSTMASTER_VERSION: latest` with **Stable only** until
-the user saves the Beta preference. The preference is persisted under the
-existing Postmaster runtime-control path; it is not tied to an owner, project
-or email account and does not change MCP authorization.
+- Human-facing GitHub prerelease: `v9.8.7-beta.2`.
+- Internal numeric transport alias: `v999999999.9.8000007000002`.
 
-When `latest` is the effective selector, an ordinary future container
-restart may resolve the newest eligible version. That is why opting into
-Beta **before a scheduled restart** can change what installs on that restart.
-A pinned specific version stays pinned. Neither GitHub release publication
-nor preference saving directly restarts the running production instance.
+Only the human-facing tag gets a GitHub Release entry. Beta opt-in,
+catalog filtering, version comparisons and approval previews all use the
+real `-beta.N` version. On confirmation, the Python runtime writes its
+numeric transport alias into the *existing* persistent runtime-control file.
+The original YAML reads this numeric selector normally and downloads
+the matching immutable Git ref. An accompanying `beta_target` key allows
+the WebGUI and MCP API to display the original version rather than the alias.
 
-Users currently *running* a beta must first explicitly switch to an eligible
-stable release before disabling beta; this avoids an accidental downgrade on
-the next ordinary restart.
+Stable remains the default and retains its normal `latest` startup behavior.
+**A selected Beta remains pinned until a further explicitly approved
+version change**: the legacy bootstrap only discovers stable releases for
+`latest`. Selecting Stable + Beta changes which updates can be installed;
+saving the preference alone neither restarts nor installs anything.
+The usual CSRF and preview/explicit confirmation safety checks remain in force.
+Reverting to Stable while running or pinned to Beta requires first
+installing an eligible stable version explicitly.
+
+The beta publishing workflow refuses alias collisions and never reassigns
+published Git refs. Each beta must have a successful test run for the same
+commit and a matching VERSION and CHANGELOG entry. If the alias was not
+published, the install fails safely rather than switching to arbitrary code.
+No new container, volume, Portainer stack edit, Docker socket access,
+or in-place tampering with the cached source is required.
 
 ## Maintainer release procedure
 
