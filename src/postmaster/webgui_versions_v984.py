@@ -73,8 +73,10 @@ def versions_settings(base: Any) -> str:
         '</form>'
         '<p class="small muted">Stable only is the default. Beta releases are opt-in '
         'prereleases and may contain unfinished functionality. Choosing a channel '
-        'changes which updates are shown, not the installed build. '
-        'A version change always requires a separate preview and confirmation.</p>'
+        'changes the eligible updates; it does not restart Postmaster immediately. '
+        'If the runtime selector is latest, an ordinary future restart may install '
+        'the newest eligible release automatically. Explicit version changes from '
+        'this page still require preview and confirmation.</p>'
     )
     if not versions:
         selector_control = '<div class="notice">Release discovery unavailable; version selection is disabled.</div>'
@@ -245,6 +247,15 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             return error
         chosen=str(form.get("release_channel") or "").strip()
         try:
+            # Never make switching to Stable only silently downgrade an
+            # already running beta on the next ordinary latest-selector boot.
+            current=base.build_status()
+            running=str(current.get("version") or "") if isinstance(current,dict) else ""
+            if chosen=="stable" and "-beta." in running:
+                raise ValueError(
+                    "A Beta runtime is installed. Preview and install a published "
+                    "Stable release before disabling Beta updates."
+                )
             runtime_control.save_release_channel(chosen)
         except (ValueError,OSError) as exc:
             return _response_page(
