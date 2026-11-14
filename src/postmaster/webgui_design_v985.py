@@ -429,7 +429,14 @@ def install_webgui_design_v985(v962: Any, v970: Any, version: str) -> None:
                     scope.group(0) + '<div class="v970-context-actions">', 1,
                 )
             html = html[:header_match.start()] + current + html[header_match.end():]
-        headers = {k:v for k,v in response.headers.items() if k.lower()!="content-length"}
+        # Starlette's HTTP headers are case-insensitive, but Python dicts
+        # are not. Drop the legacy marker before setting the v5 marker: keeping
+        # both spellings would produce duplicate HTTP fields and expose the
+        # old design value as the first response-header lookup.
+        headers = {
+            k:v for k,v in response.headers.items()
+            if k.lower() not in {"content-length", "x-postmaster-webgui-design"}
+        }
         headers["X-Postmaster-WebGUI-Design"]="v9.8.5-approved-v5"
         return HTMLResponse(html, status_code=response.status_code,headers=headers)
 
