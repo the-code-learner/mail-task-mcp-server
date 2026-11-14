@@ -30,6 +30,7 @@ def request(query: bytes = b""):
 
 
 class GeoIPSettingsTests(unittest.TestCase):
+    # Exact-commit release gate: untrusted inputs never fetch files until explicit consent.
     def test_geoip_tab_shows_download_consent_status_without_credential_storage(self):
         with patch("postmaster.webgui_geoip_v9899.geoip_status",
                    return_value={"city_database_available":False,
