@@ -127,17 +127,20 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
                     "version_change_applied": False,
                 }
             if op in {"check-update", "list-versions"}:
-                versions, release_status = runtime_control.stable_release_tags(force=force_refresh)
+                channel=runtime_control.preferred_release_channel()
+                versions, release_status = runtime_control.available_release_tags(
+                    channel=channel,force=force_refresh,
+                )
                 latest = versions[0] if versions else None
-                current = runtime_control.semver_tuple(str(status.get("version") or ""))
-                latest_tuple = runtime_control.semver_tuple(latest)
-                update_available = latest_tuple > current if latest_tuple and current else None
+                from .release_channels_v986 import newer_than
+                update_available=newer_than(latest,str(status.get("version") or ""))
                 status.update({
                     "runtime_operation": op,
                     "current_selector": selector,
                     "available_versions": versions,
                     "latest_version_ref": latest,
                     "update_available": update_available,
+                    "update_release_channel": channel,
                     "stable_release_check_status": release_status,
                     "force_refresh": bool(force_refresh),
                     "version_change_applied": False,
@@ -166,12 +169,14 @@ def install_runtime_v964(base: Any, core: Any, legacy_build_status: Any):
             return {**status, "ok": False, "error": str(exc), "version_change_applied": False}
 
         if target != "latest":
-            versions, release_status = runtime_control.stable_release_tags(force=False)
+            versions, release_status = runtime_control.available_release_tags(
+                channel=runtime_control.preferred_release_channel(),force=False,
+            )
             if release_status != "ok" or target not in versions:
                 return {
                     **status,
                     "ok": False,
-                    "error": f"target {target} is not a verified stable release",
+                    "error": f"target {target} is not a verified release allowed by the selected channel",
                     "available_versions": versions,
                     "stable_release_check_status": release_status,
                     "version_change_applied": False,
