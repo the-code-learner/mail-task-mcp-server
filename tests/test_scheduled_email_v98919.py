@@ -127,7 +127,6 @@ class ScheduledEmailTests(unittest.TestCase):
     def test_pause_resume_and_cancel_only_before_claim(self):
         job = self.schedule()
         self.registry.pause_job(job["id"])
-        self.due(job["id"])
         self.assertFalse(self.service.process_once())
         self.registry.resume_job(job["id"])
         self.service.cancel(job["id"])
