@@ -307,6 +307,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('min-height:105px!important', BETA_MAIL_STYLE)
         self.assertIn('grid-template-columns:minmax(405px,38%)', BETA_MAIL_STYLE)
 
+    # Release-gated regression: each sidebar mailbox must fetch a new fragment.
     def test_beta5_navigation_changes_folder_without_reusing_old_inbox(self):
         from postmaster import webgui_v962
         source=webgui_v962.SCRIPT
