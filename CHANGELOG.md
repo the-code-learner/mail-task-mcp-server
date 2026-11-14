@@ -11,6 +11,8 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - Uses text-only DOM APIs for map details and overlap choices to avoid injecting tracking metadata as HTML.
 - Preserves existing period, account, owner/project and event filters, privacy policy, self-hosted geography, exact-version pin selector and v9.8.9-beta.16 behaviour.
 - Adds regression tests covering adaptive marker scaling, category styles and safe overlap selection.
+- Adds locally bundled Natural Earth country bounding boxes for conservative GeoIP consistency checking: a `BE` record with coordinates in the United States is excluded from the map as unreliable, not moved to Belgium. Unknown/unresolved locations are counted separately.
+- Adds explicit tests for plausible Belgium coordinates and contradictory Belgium/United States coordinates.
 - No changes to the original Portainer single-YAML deployment.
 
 ## 9.8.9-beta.16 - 2026-11-14
