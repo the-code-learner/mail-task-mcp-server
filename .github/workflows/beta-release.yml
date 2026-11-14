@@ -57,7 +57,7 @@ jobs:
           transport = bootstrap_transport_tag("v" + requested)
           with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as fh:
               fh.write(f"RELEASE_TAG=v{requested}\n")
-              fh.write(f"TRANSPORT_TAG={transport}\\n")
+              fh.write(f"TRANSPORT_TAG={transport}\n")
           PY
 
       - name: Require green v9 runtime tests for this exact beta commit
