@@ -72,12 +72,15 @@ class ApprovedDesignV985Tests(unittest.TestCase):
                 self._nav=lambda: "old nav"
                 self._shell=lambda req: HTMLResponse(
                     '<!doctype html><html><head></head><body><div class="shell">'
-                    +contextbar("9.8.5")+'<main>Work</main></div></body></html>'
+                    '<header class="v970-contextbar">'
+                    '<div class="v970-context-title">Old shell title</div>'
+                    '<div class="v970-context-actions"></div></header>'
+                    '<main>Work</main></div></body></html>'
                 )
         fake=FakeV962()
-        mockv970=SimpleNamespace(_context_bar=lambda:"")
-        install_webgui_design_v985(fake,mockv970,"9.8.5")
+        mockv970=SimpleNamespace(_context_bar=lambda:"",VIEW_LABELS={})
         install_scopebar_webgui_v984(Starlette(),object(),fake,mockv970)
+        install_webgui_design_v985(fake,mockv970,"9.8.5")
         html=fake._shell(None).body.decode("utf-8")
         self.assertEqual(html.count('id="v984-scopebar"'),1)
         self.assertLess(html.index('id="v984-scopebar"'),html.index("</header>"))
