@@ -303,6 +303,15 @@ def task_fragment(base: Any, request: Request) -> str:
             actions += f'''<form method="post" action="/dashboard/job/resume"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button class="ok" type="submit">Resume</button></form>'''
         elif status == "scheduled" or (not autonomous and status != "completed"):
             actions += f'''<form method="post" action="/dashboard/job/pause"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="job_id" value="{escape(raw_id)}"><button type="submit">Pause</button></form>'''
+        if autonomous and status in {"scheduled", "paused"}:
+            actions += (
+                '<form method="post" action="/dashboard/scheduled-email/cancel">'
+                '<input type="hidden" name="csrf" value="' +
+                escape(base._csrf_value(), quote=True) + '">'
+                '<input type="hidden" name="job_id" value="' +
+                escape(raw_id, quote=True) + '">'
+                '<button type="submit">Cancel scheduled email</button></form>'
+            )
         title = project_label_html(str(job.get("title") or ""), pid)
         scope = project_label_html(project_names.get(pid or "", pid or "global"), pid, compact=True)
         rows.append(
@@ -339,7 +348,7 @@ def task_fragment(base: Any, request: Request) -> str:
 {_detail(base, request, project, show_completed)}{_editor(base, request, project, show_completed)}
 <section class="card wide"><div class="panel-title"><h2>Task registry</h2><div class="row"><div class="task-view-toggle"><a class="{"active" if view_mode == "agenda" else ""}" href="{agenda_url}">Agenda</a><a class="{"active" if view_mode == "calendar" else ""}" href="{calendar_url}">Calendar</a></div><span class="badge">{escape(count)}</span><a href="{toggle}"><button type="button">{escape(toggle_label)}</button></a></div></div>
 {filter_html}
-<p class="small muted"><strong>Only explicitly scheduled one-time email sends run automatically.</strong> All other tasks remain passive. An in-progress SMTP handoff may be uncertain after a restart and is never retried automatically.</p>
+<p class="small muted"><strong>No cron worker runs here.</strong> Only explicitly scheduled one-time email sends run automatically. All other tasks remain passive. An in-progress SMTP handoff may be uncertain after a restart and is never retried automatically.</p>
 {content}
 </section></div></section>'''
 
