@@ -92,6 +92,7 @@ class ReleasePolicyTests(unittest.TestCase):
 
     def test_eligible_runtime_previews_and_exact_execute_are_channel_aware(self):
         with patch.object(runtime_control,"preferred_release_channel",return_value="stable_beta"),\
+             patch.object(runtime_control,"beta_bootstrap_supported",return_value=True),\
              patch.object(runtime_control,"available_release_tags",
                           return_value=(["v9.8.7-beta.1","v9.8.6","v9.8.5"],"ok")) as discover:
             target,selector,versions=_release_target("update-latest",None,execute=False)
@@ -148,6 +149,7 @@ class SettingsPreferenceTests(unittest.TestCase):
     def test_settings_channel_control_selected_and_releases_labeled(self):
         base=_Base()
         with patch.object(runtime_control,"preferred_release_channel",return_value="stable_beta"),\
+             patch.object(runtime_control,"beta_bootstrap_supported",return_value=True),\
              patch.object(runtime_control,"available_release_tags",
                           return_value=(["v9.8.6-beta.2","v9.8.5"],"ok")),\
              patch.object(runtime_control,"read_control",return_value={"selector":"latest"}):
@@ -164,7 +166,10 @@ class SettingsPreferenceTests(unittest.TestCase):
     def test_preference_route_is_csrf_guarded_persistent_and_read_only(self):
         with tempfile.TemporaryDirectory() as td:
             path=str(Path(td)/"control.json")
-            with patch.dict(os.environ,{"POSTMASTER_RUNTIME_CONTROL_PATH":path}):
+            with patch.dict(os.environ,{
+                "POSTMASTER_RUNTIME_CONTROL_PATH":path,
+                "POSTMASTER_BOOTSTRAP_BETA_SUPPORTED":"true",
+            }):
                 client,base=_client()
                 with client:
                     bad=client.post("/dashboard/versions/channel",data={
@@ -180,6 +185,22 @@ class SettingsPreferenceTests(unittest.TestCase):
                 self.assertEqual(runtime_control.preferred_release_channel(),STABLE_AND_BETA)
                 self.assertEqual(runtime_control.read_control()["selector"],"latest")
                 self.assertFalse(runtime_control.read_control().get("restart_ref_once"))
+
+    def test_outdated_portainer_bootstrap_rejects_beta_preference(self):
+        with tempfile.TemporaryDirectory() as td:
+            path=str(Path(td)/"control.json")
+            with patch.dict(os.environ,{
+                "POSTMASTER_RUNTIME_CONTROL_PATH":path,
+                "POSTMASTER_BOOTSTRAP_BETA_SUPPORTED":"false",
+            }):
+                client,base=_client()
+                with client:
+                    bad=client.post("/dashboard/versions/channel",data={
+                        "csrf":base._csrf_value(),"release_channel":"stable_beta",
+                    })
+                self.assertEqual(bad.status_code,400)
+                self.assertIn("updated v9.8.6 Portainer",bad.text)
+                self.assertFalse(Path(path).exists())
 
     def test_default_preference_stable_without_explicit_save(self):
         with tempfile.TemporaryDirectory() as td:
@@ -202,6 +223,7 @@ class BootstrapContracts(unittest.TestCase):
         self.assertIn('order += (0 if is_beta else 1',yaml)
         self.assertIn('release.get("prerelease") is True',yaml)
         self.assertIn('POSTMASTER_VERSION: latest',yaml)
+        self.assertIn('POSTMASTER_BOOTSTRAP_BETA_SUPPORTED: "true"',yaml)
         self.assertIn('mcp_data:/data',yaml)
 
     def test_embedded_bootstrap_python_resolves_real_stable_and_beta_order(self):
