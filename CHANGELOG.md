@@ -2,6 +2,16 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.12 - 2026-11-14
+
+### Beta: health-aware return following version changes
+- The branded update screen now waits at least **15 seconds** rather than redirecting unconditionally after ten seconds.
+- Afterwards, it polls the authenticated, no-cache `GET /dashboard/versions/status` endpoint every three seconds and redirects to Dashboard Settings only when the **actual running version equals the approved target version**. HTTP availability from an old release does not count as success.
+- During a container restart or slow download, the update screen remains visible and reports that Postmaster is restarting. A persistent manual Dashboard link remains available.
+- Bounded per-request timeout, no-store credentials-aware GET, and no duplicate version-change POST. In the no-JavaScript case the user is offered a manual link rather than a premature timed meta refresh.
+- Adds regression checks for 15-second minimum, exact build matching, no-cache polling, abort handling and removal of unconditional redirects.
+- Beta-only changes, without modifying Stable v9.8.8, Portainer YAML, persistent volumes or MCP tools.
+
 ## 9.8.9-beta.11 - 2026-11-14
 
 ### Beta: MaxMind GeoLite2 download authentication and actionable error diagnostics
