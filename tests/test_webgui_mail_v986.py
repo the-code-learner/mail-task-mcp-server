@@ -128,6 +128,22 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertLess(result.index('v989-mail-stream'),result.index('v989-reading-pane'))
         self.assertIn('Remote images remain blocked',result)
 
+    def test_beta_all_unread_links_preserve_mailbox_and_clear_selection(self):
+        sample = INBOX.replace("</section>",
+            '<div class="v960-pagination"><span>Page 1</span></div></section>')
+        result = modern_inbox_markup(
+            sample, query_string="account_id=one&mailbox=INBOX&unread_only=1&message_uid=42"
+        )
+        self.assertIn('class="v989-list-filters"',result)
+        self.assertIn('>All</a>',result)
+        self.assertIn('>Unread</a>',result)
+        self.assertIn('account_id=one',result)
+        self.assertIn('mailbox=INBOX',result)
+        self.assertIn('unread_only=1',result)
+        filters = result.split('class="v989-list-filters"')[1].split('</nav>')[0]
+        self.assertNotIn('message_uid=42',filters)
+        self.assertIn('data-v960-fragment="inbox"',filters)
+
     def test_beta_uses_cached_snippets_without_fetching_remote_media(self):
         sample = INBOX.replace(
             "<td>Subject</td>",
