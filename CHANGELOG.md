@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.4 - 2026-11-14
+
+### Beta: truthful update activation and Portainer bootstrap compatibility
+- Distinguishes **persisted update intent** from the **version actually running** in `runtime_status`. The new `update_activation_status`, `update_activation_verified`, `bootstrap_control_supported` and `update_activation_warning` fields detect a selected Beta when a legacy container command is still running the Stable build.
+- Both WebUI and MCP show an actionable warning rather than incorrectly implying an update finished when the actual process version differs from the selector.
+- WebUI versions panel displays the selected target and running build mismatch and distinguishes an unverified legacy Portainer bootstrap from an installation still awaiting container activation.
+- The runtime version-change execution response explicitly reports `installation_verified: false` at execution time. Only a subsequent runtime status check may confirm the new build.
+- The Portainer migration is intentionally distributed **separately** as a redacted user-specific YAML preserving the volumes, account settings and secure download bootstrap. On bootstrap startup it reads the same persistent control file as WebUI/MCP, accepts immutable numeric Beta aliases and one-shot Stable refs, and preserves the original source-download safety checks.
+- Once the updated Portainer stack has been redeployed (without removing named volumes), future version selections made via WebUI/MCP can activate during a full container restart; changing the deployed container command requires a one-time stack redeploy, not just a Restart.
+- This Beta does not modify the public repository's canonical Portainer YAML, tracked links, message data, passwords or the 134 MCP tools. Stable main remains at v9.8.8.
+
 ## 9.8.9-beta.3 - 2026-11-14
 
 ### Beta: fix why the mail WebUI did not change after installation
