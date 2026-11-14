@@ -189,6 +189,16 @@ SCRIPT = r'''
     }
   }
 
+  // Period chips must not be treated as a form submit. Route explicitly,
+  // preserving period query and updating the active chip only on loaded data.
+  document.addEventListener('click',ev=>{
+    const a=ev.target.closest?.('a[data-v985-period]');
+    if(!a)return;
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+    load('tracking',a.href,true,true);
+  },true);
+
   document.addEventListener('click', ev => {
     const a=ev.target.closest('a'); if(!a) return;
     let u; try { u=new URL(a.href,location.href); } catch (_) { return; }
