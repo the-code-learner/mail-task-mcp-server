@@ -8,6 +8,7 @@ Other legacy scheduler tasks remain passive.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 import threading
@@ -127,6 +128,13 @@ class ScheduledEmailService:
         key = str(idempotency_key or "").strip() or None
         if key and len(key) > 180:
             raise SchedulerError("idempotency_key is too long")
+        if key is None:
+            # A retrying MCP client may re-issue a scheduling call without
+            # supplying the optional key. Deduplicate that exact email/time.
+            stable = json.dumps({"account": aid, "message": frozen,
+                                 "send_at": due.isoformat()}, sort_keys=True,
+                                ensure_ascii=False)
+            key = "auto-" + hashlib.sha256(stable.encode("utf-8")).hexdigest()
         job_id = "job_" + uuid.uuid4().hex[:16]
         now = datetime.now(timezone.utc).isoformat()
         owner = owner_id or self.scheduler.settings.default_owner_id
