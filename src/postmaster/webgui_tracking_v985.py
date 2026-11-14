@@ -22,6 +22,7 @@ from .webgui_links_v984 import render_tracked_links_v984
 from .webgui_v962_views import _panel
 from .tracking_presentation_v9898 import attach_sent_email_links
 from .tracking_geoip_v984 import geoip_status
+from .tracking_received_cache_v98914 import cached_received_dates
 
 
 EVENT_TYPES=(
@@ -225,9 +226,16 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     except Exception as exc:
         sent,sent_truncated=[],False
         errors.append("Sent history unavailable: "+type(exc).__name__)
-    try:received,received_note=_received(base,account,start,finish)
+    try:
+        if account:
+            # Keep the existing single-account live sample behavior.
+            received,received_note=_received(base,account,start,finish)
+        else:
+            # All accounts must not return an empty heatmap merely because no
+            # account_id was selected. Use the union of already synced Inboxes.
+            received,received_note=cached_received_dates(base,"",start,finish)
     except Exception as exc:
-        received,received_note=[],"Mail search currently unavailable"
+        received,received_note=[],"Received-mail cache currently unavailable"
         errors.append("Received history unavailable: "+type(exc).__name__)
     counts=Counter(str(e.get("event_kind") or "") for e in events)
     email_rows=[e for e in events if str(e.get("event_kind") or "").startswith("email_")]
@@ -251,12 +259,12 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         +_rate("Observed email click signals",ratio(len(clicked)),
               "Unique deliveries with a click / tracked sent emails.","v985-r-click")
     )
-    received_stat=str(len(received)) if account else "—"
+    received_stat=str(len(received))
     perf=(
         _stat("Sent emails",str(len(sent))+("+" if sent_truncated else ""),
               "Tracked sent message IDs")
         +_stat("Received emails",received_stat,
-               "Recent bounded Inbox sample" if account else "Choose an email account")
+               "Recent bounded Inbox sample" if account else "Cached received mail across enabled accounts")
         +_stat("Observed opens",counts["email_open"],"Not confirmed human reads")
         +_stat("Email clicks",counts["email_click"],"Observed interaction requests")
         +_stat("Recipients with events",len(email_recipients),"Tracked email recipient identifiers")
@@ -270,7 +278,6 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         "An open event is not proof of human reading.",
     ]
     if truncated:warnings.append("At least 500 events match; displayed counts and charts may be undercounts.")
-    if not account:warnings.append("Received-mail heatmaps require a selected email account.")
     if errors:warnings.extend(errors)
     short_note=" ".join(warnings)
     recent=(
