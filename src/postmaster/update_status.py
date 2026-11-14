@@ -9,18 +9,25 @@ import urllib.request
 from datetime import datetime, timezone
 from typing import Any
 
+from . import release_channels_v986 as channels
+
 
 UPDATE_CACHE_TTL_SECONDS = 60.0
 _REPO_RE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
 _SEMVER_RE = re.compile(r"^v?([0-9]+)\.([0-9]+)\.([0-9]+)$")
 _UPDATE_LOCK = threading.RLock()
-_UPDATE_CACHE: dict[str, Any] = {
-    "latest_version": None,
-    "last_attempt_monotonic": None,
-    "update_checked_at": None,
-    "update_last_attempt_at": None,
-    "update_check_status": "never",
-}
+def _new_cache() -> dict[str,Any]:
+    return {
+        "latest_version": None,
+        "last_attempt_monotonic": None,
+        "update_checked_at": None,
+        "update_last_attempt_at": None,
+        "update_check_status": "never",
+    }
+
+
+_UPDATE_CACHE: dict[str, Any] = _new_cache()
+_BETA_UPDATE_CACHE: dict[str, Any] = _new_cache()
 
 
 def _utc_now() -> str:
@@ -60,59 +67,62 @@ def _fetch_latest_stable_version() -> str:
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def _fetch_latest_beta_version() -> str:
+    from . import runtime_control
+    versions,status=runtime_control.available_release_tags(channel=channels.STABLE_AND_BETA)
+    if status!="ok" or not versions:
+        raise RuntimeError("eligible stable and beta release discovery unavailable")
+    return versions[0].removeprefix("v")
+
+
 def reset_update_cache() -> None:
     """Reset the process-local lazy cache. Primarily useful for deterministic tests."""
     with _UPDATE_LOCK:
-        _UPDATE_CACHE.update(
-            {
-                "latest_version": None,
-                "last_attempt_monotonic": None,
-                "update_checked_at": None,
-                "update_last_attempt_at": None,
-                "update_check_status": "never",
-            }
-        )
+        _UPDATE_CACHE.update(_new_cache())
+        _BETA_UPDATE_CACHE.update(_new_cache())
 
 
-def latest_version_status(current_version: str) -> dict[str, Any]:
-    """Return the latest stable release using one shared lazy 60-second cache.
+def latest_version_status(current_version: str, *, channel: str | None = None) -> dict[str, Any]:
+    """Return the latest release eligible for the user's saved update channel.
 
     A failed refresh never discards the last known good latest version. Unknown latest
     state is represented with update_available=None rather than a false negative.
     """
+    from . import runtime_control
+    selected=channels.valid_channel(channel or runtime_control.preferred_release_channel())
+    cache=_UPDATE_CACHE if selected==channels.STABLE else _BETA_UPDATE_CACHE
+    fetch=(
+        _fetch_latest_stable_version
+        if selected==channels.STABLE else _fetch_latest_beta_version
+    )
     now_monotonic = time.monotonic()
     with _UPDATE_LOCK:
-        last_attempt = _UPDATE_CACHE.get("last_attempt_monotonic")
+        last_attempt = cache.get("last_attempt_monotonic")
         cache_fresh = (
             last_attempt is not None
             and now_monotonic - float(last_attempt) < UPDATE_CACHE_TTL_SECONDS
         )
         if not cache_fresh:
             attempt_at = _utc_now()
-            _UPDATE_CACHE["last_attempt_monotonic"] = now_monotonic
-            _UPDATE_CACHE["update_last_attempt_at"] = attempt_at
+            cache["last_attempt_monotonic"] = now_monotonic
+            cache["update_last_attempt_at"] = attempt_at
             try:
-                latest = _fetch_latest_stable_version()
-                _UPDATE_CACHE["latest_version"] = latest
-                _UPDATE_CACHE["update_checked_at"] = attempt_at
-                _UPDATE_CACHE["update_check_status"] = "ok"
+                latest = fetch()
+                cache["latest_version"] = latest
+                cache["update_checked_at"] = attempt_at
+                cache["update_check_status"] = "ok"
             except Exception:
-                _UPDATE_CACHE["update_check_status"] = "error"
+                cache["update_check_status"] = "error"
 
-        latest = _UPDATE_CACHE.get("latest_version")
-        current_tuple = _semver_tuple(current_version)
-        latest_tuple = _semver_tuple(str(latest)) if latest else None
-        update_available: bool | None
-        if current_tuple is None or latest_tuple is None:
-            update_available = None
-        else:
-            update_available = latest_tuple > current_tuple
+        latest = cache.get("latest_version")
+        update_available=channels.newer_than(str(latest) if latest else None,current_version)
 
         return {
             "latest_version": str(latest) if latest else None,
             "update_available": update_available,
-            "update_checked_at": _UPDATE_CACHE.get("update_checked_at"),
-            "update_last_attempt_at": _UPDATE_CACHE.get("update_last_attempt_at"),
-            "update_check_status": str(_UPDATE_CACHE.get("update_check_status") or "never"),
+            "update_checked_at": cache.get("update_checked_at"),
+            "update_last_attempt_at": cache.get("update_last_attempt_at"),
+            "update_check_status": str(cache.get("update_check_status") or "never"),
+            "release_channel": selected,
             "update_cache_ttl_seconds": int(UPDATE_CACHE_TTL_SECONDS),
         }
