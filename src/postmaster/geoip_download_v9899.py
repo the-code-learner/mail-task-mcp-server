@@ -6,6 +6,7 @@ are written only to configured fixed MMDB paths in the existing data volume.
 from __future__ import annotations
 
 import base64
+import json
 import os
 from pathlib import Path
 import shutil
@@ -43,10 +44,72 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
             raise GeoIPDownloadError("Database download redirected to an unapproved host")
         redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
         if redirected is not None:
-            # Authentication is valid only for download.maxmind.com; the
-            # object-store presigned URL must never receive MaxMind credentials.
-            redirected.remove_header("Authorization")
+            # MaxMind occasionally redirects between its own download hosts:
+            # keep Basic auth ONLY on its explicitly allowed official hosts.
+            # R2 receives a presigned URL and must NEVER receive the key.
+            if parsed.hostname not in {"download.maxmind.com", "updates.maxmind.com"}:
+                redirected.remove_header("Authorization")
+            elif req.has_header("Authorization"):
+                redirected.add_header("Authorization", req.get_header("Authorization"))
         return redirected
+
+
+_SAFE_CODES = {
+    "ACCOUNT_ID_REQUIRED", "ACCOUNT_ID_INVALID", "LICENSE_KEY_REQUIRED",
+    "LICENSE_KEY_INVALID", "LICENSE_KEY_EXPIRED", "PERMISSION_REQUIRED",
+    "AUTHENTICATION_FAILED", "INVALID_AUTHORIZATION",
+    "DATABASE_NOT_FOUND", "DATABASE_NOT_AVAILABLE",
+    "INVALID_DATABASE", "INVALID_EDITION_ID",
+}
+
+
+def _http_download_error(exc: urllib.error.HTTPError, edition: str) -> GeoIPDownloadError:
+    """Reveal diagnostic stage and status, never URL query or server error body.
+
+    Error bodies/redirect URLs may include signed tokens or credential values.
+    Only a known machine-readable code is safe to surface.
+    """
+    try:
+        host = urllib.parse.urlsplit(exc.geturl()).hostname or ""
+    except ValueError:
+        host = ""
+    stage = ("MaxMind authentication / database permissions"
+             if host in {"download.maxmind.com", "updates.maxmind.com"}
+             else "Cloudflare R2 database transfer"
+             if host.endswith(".r2.cloudflarestorage.com")
+             else "database download")
+    code = ""
+    if host in {"download.maxmind.com", "updates.maxmind.com"}:
+        try:
+            data = json.loads(exc.read(2048).decode("utf-8", "replace"))
+            if isinstance(data, dict) and str(data.get("code") or "") in _SAFE_CODES:
+                code = str(data["code"])
+        except (ValueError, UnicodeError, OSError):
+            pass
+    detail = f" (MaxMind code: {code})" if code else ""
+    if exc.code == 401:
+        message = (
+            f"{edition}: HTTP 401 at {stage}{detail}. "
+            "Verify Account ID and the *active database-download* license key; "
+            "the server did not authorize this request."
+        )
+    elif exc.code == 403:
+        message = (
+            f"{edition}: HTTP 403 at {stage}{detail}. "
+            "If this occurred at MaxMind, check the key's GeoLite2 database "
+            "permissions/subscription. If at R2, check outbound HTTPS, "
+            "proxy/security filters and signed redirect access. "
+            "This does not prove the key is incorrect."
+        )
+    elif exc.code == 404:
+        message = f"{edition}: HTTP 404 at {stage}{detail}. Check that this edition is enabled."
+    elif exc.code == 429:
+        message = f"{edition}: HTTP 429 at {stage}. MaxMind download limit reached."
+    elif exc.code in (500, 502, 503, 504):
+        message = f"{edition}: HTTP {exc.code} at {stage}. Temporary provider error."
+    else:
+        message = f"{edition}: HTTP {exc.code} at {stage}{detail}."
+    return GeoIPDownloadError(message)
 
 
 def _target(edition: str) -> Path:
@@ -122,13 +185,7 @@ def _fetch_edition(account_id: str, license_key: str, edition: str) -> dict:
         staged_path = None
         return {"edition": edition, "installed": True, "path": str(destination)}
     except urllib.error.HTTPError as exc:
-        if exc.code in (401, 403):
-            raise GeoIPDownloadError(
-                "MaxMind rejected the account/license or this database edition is unavailable"
-            ) from None
-        if exc.code == 429:
-            raise GeoIPDownloadError("MaxMind download quota reached; try another day") from None
-        raise GeoIPDownloadError("MaxMind database download failed (HTTP error)") from None
+        raise _http_download_error(exc, edition) from None
     except (urllib.error.URLError, OSError, tarfile.TarError) as exc:
         raise GeoIPDownloadError("GeoIP download or archive validation failed") from None
     finally:
