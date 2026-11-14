@@ -49,7 +49,7 @@ class WorldMapTests(unittest.TestCase):
         html = render_world_map(self.events, truncated=True)
         self.assertIn("Geographical activity", html)
         self.assertIn("sample limit reached", html)
-        self.assertIn("without coordinates", html)
+        self.assertIn("without reliable coordinates", html)
         self.assertIn('data-category="scanner"', html)
         self.assertNotIn("192.0.2.1", html)
         self.assertNotIn("private@example.org", html)
@@ -65,6 +65,31 @@ class WorldMapTests(unittest.TestCase):
                                     "estimated_classification": "likely_human"}), "human")
         self.assertEqual(_category({"event_kind": "email_open",
                                     "user_agent": "HeadlessScanner"}), "scanner")
+
+    def test_be_country_in_us_coordinates_is_not_plotted_in_america(self):
+        from postmaster.webgui_world_map_v987 import _consistent_country_coordinates
+        self.assertTrue(_consistent_country_coordinates("BE", 50.85, 4.35))
+        self.assertFalse(_consistent_country_coordinates("BE", 39.0, -98.0))
+        self.assertTrue(_consistent_country_coordinates("US", 39.0, -98.0))
+        rows = [
+            {"event_kind": "email_open", "geo_country_code": "BE",
+             "geo_latitude": 39.0, "geo_longitude": -98.0},
+            {"event_kind": "email_open", "geo_country_code": "BE",
+             "geo_latitude": 50.85, "geo_longitude": 4.35},
+        ]
+        points, omitted = aggregate_map_points(rows)
+        self.assertEqual(omitted, 1)
+        self.assertEqual(len(points), 1)
+        self.assertEqual(points[0]["country"], "BE")
+        self.assertAlmostEqual(points[0]["lon"], 4.3, places=1)
+        html = render_world_map(rows)
+        self.assertIn("1 without reliable coordinates", html)
+        self.assertIn("Country/coordinate conflicts", html)
+
+    def test_unknown_country_codes_are_not_arbitrarily_repositioned(self):
+        from postmaster.webgui_world_map_v987 import _consistent_country_coordinates
+        self.assertTrue(_consistent_country_coordinates("ZZ", 39.0, -98.0))
+        self.assertTrue(_consistent_country_coordinates("", 39.0, -98.0))
 
     def test_invalid_coordinates_are_not_placed_on_map(self):
         points, missing = aggregate_map_points([
