@@ -15,11 +15,9 @@ services:
       PYTHONUNBUFFERED: "1"
       PYTHONDONTWRITEBYTECODE: "1"
 
-      # Bootstrap update policy. `latest` follows the saved Settings release channel (Stable by default); explicit refs remain pinned.
+      # Bootstrap update policy. `latest` follows stable GitHub Releases; an explicit version/tag/commit stays pinned.
       POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
       POSTMASTER_VERSION: latest
-      # Capability flag: older Portainer stacks do not support prerelease tags.
-      POSTMASTER_BOOTSTRAP_BETA_SUPPORTED: "true"
       POSTMASTER_CHECK_UPDATES_ON_START: "true"
       POSTMASTER_FORCE_REFRESH: "false"
 
@@ -106,7 +104,6 @@ services:
         CONTROL_FILE="$${POSTMASTER_RUNTIME_CONTROL_PATH:-$$APP_ROOT/.postmaster-runtime-control.json}"
         CONTROL_RESTART_REF=""
         CONTROL_CHECK_ONCE="false"
-        CONTROL_CHANNEL="stable"
         CURRENT="$$APP_ROOT/current"
         mkdir -p "$$APP_ROOT/releases"
 
@@ -123,30 +120,20 @@ services:
         if not isinstance(payload, dict):
             raise RuntimeError("runtime control must be an object")
         stable = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
-        beta = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*")
-        channel = str(payload.get("release_channel") or "stable").strip()
-        if channel not in {"stable", "stable_beta"}:
-            raise RuntimeError("invalid release channel")
-        def allowed(ref):
-            return bool(stable.fullmatch(ref) or (
-                channel == "stable_beta" and beta.fullmatch(ref)
-            ))
         selector = str(payload.get("selector") or "").strip()
         restart_ref = str(payload.get("restart_ref_once") or "").strip()
-        if selector and selector != "latest" and not allowed(selector):
-            raise RuntimeError("invalid runtime control selector for release channel")
-        if restart_ref and not allowed(restart_ref):
-            raise RuntimeError("invalid one-shot restart ref for release channel")
+        if selector and selector != "latest" and not stable.fullmatch(selector):
+            raise RuntimeError("invalid runtime control selector")
+        if restart_ref and not stable.fullmatch(restart_ref):
+            raise RuntimeError("invalid one-shot restart ref")
         print(selector)
         print(restart_ref)
         print("true" if payload.get("check_updates_once") is True else "false")
-        print(channel)
         PY
           )"; then
             CONTROL_REQUESTED="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '1p')"
             CONTROL_RESTART_REF="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '2p')"
             CONTROL_CHECK_ONCE="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '3p')"
-            CONTROL_CHANNEL="$$(printf '%s\n' "$$CONTROL_VALUES" | sed -n '4p')"
             if [ -n "$$CONTROL_REQUESTED" ]; then
               REQUESTED="$$CONTROL_REQUESTED"
             fi
@@ -177,7 +164,7 @@ services:
           fi
 
           if [ -z "$$REF" ]; then
-            export REPO CONTROL_CHANNEL
+            export REPO
             if REF="$$(python - <<'PY'
         import json
         import os
@@ -196,32 +183,16 @@ services:
         )
         with urllib.request.urlopen(request, timeout=30) as response:
             payload = json.load(response)
-        channel = os.environ.get("CONTROL_CHANNEL", "stable")
-        if channel not in {"stable", "stable_beta"}:
-            raise RuntimeError("Invalid Postmaster release channel")
         candidates = []
         for release in payload if isinstance(payload, list) else []:
-            if not isinstance(release, dict) or release.get("draft"):
+            if release.get("draft") or release.get("prerelease"):
                 continue
             tag = str(release.get("tag_name") or "").strip()
-            match = re.fullmatch(
-                r"v([0-9]+)\.([0-9]+)\.([0-9]+)(?:-beta\.([1-9][0-9]*))?",
-                tag,
-            )
-            if not match:
-                continue
-            beta_number = match.group(4)
-            is_beta = beta_number is not None
-            if is_beta != (release.get("prerelease") is True):
-                continue
-            if is_beta and channel != "stable_beta":
-                continue
-            order = tuple(int(match.group(i)) for i in (1, 2, 3))
-            # Final/stable outranks beta of the same base version.
-            order += (0 if is_beta else 1, int(beta_number) if is_beta else 0)
-            candidates.append((order, tag))
+            match = re.fullmatch(r"v([0-9]+)\.([0-9]+)\.([0-9]+)", tag)
+            if match:
+                candidates.append((tuple(int(x) for x in match.groups()), tag))
         if not candidates:
-            raise RuntimeError("No published Postmaster release is eligible for the selected channel")
+            raise RuntimeError("No stable Postmaster vX.Y.Z release found")
         print(max(candidates, key=lambda item: item[0])[1])
         PY
             )"; then
