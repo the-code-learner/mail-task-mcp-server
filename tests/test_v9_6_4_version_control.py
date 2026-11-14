@@ -12,7 +12,7 @@ from postmaster import runtime_control
 from postmaster.runtime_v964 import install_runtime_v964
 
 
-EXPECTED_SINGLE_YAML_BLOB = "7d2c0deb735a64a1f893b9c224cad39caba68509"
+EXPECTED_SINGLE_YAML_BLOB = "1c76fc7032a251f5fad061ad3aa86f0a2c837af6"
 STABLE_RELEASES = ["v9.6.5", "v9.6.4", "v9.6.3", "v9.6.2"]
 
 
