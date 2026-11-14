@@ -72,6 +72,55 @@ class GeoIPSettingsTests(unittest.TestCase):
         }):
             self.assertEqual(str(_target("GeoLite2-City")),td+"/my-city.mmdb")
 
+    def test_maxmind_same_host_redirect_preserves_auth_but_r2_strips_it(self):
+        from urllib.request import Request
+        req=Request(
+            "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz",
+            headers={"Authorization":"Basic ONLY_IN_MAXMIND"}
+        )
+        handler=_SafeRedirect()
+        same=handler.redirect_request(
+            req,None,302,"Found",{},
+            "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz&redirect=1"
+        )
+        self.assertEqual(same.get_header("Authorization"),"Basic ONLY_IN_MAXMIND")
+        other=handler.redirect_request(
+            req,None,302,"Found",{},
+            "https://mm-prod-geoip-databases.a2649acb697e2c09b632799562c076f2.r2.cloudflarestorage.com/archive?token=hidden"
+        )
+        self.assertIsNone(other.get_header("Authorization"))
+
+    def test_maxmind_failure_diagnostics_never_expose_license_or_signed_url(self):
+        import urllib.error
+        from postmaster.geoip_download_v9899 import _http_download_error
+        url="https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"
+        error=urllib.error.HTTPError(
+            url,403,"Forbidden",{},io.BytesIO(
+                b'{"code":"PERMISSION_REQUIRED","error":"secret=do-not-print"}'
+            )
+        )
+        message=str(_http_download_error(error,"GeoLite2-City"))
+        self.assertIn("HTTP 403",message)
+        self.assertIn("MaxMind authentication",message)
+        self.assertIn("PERMISSION_REQUIRED",message)
+        self.assertNotIn("do-not-print",message)
+        r2="https://mm-prod-geoip-databases.a2649acb697e2c09b632799562c076f2.r2.cloudflarestorage.com/a?X-Amz-Signature=PRIVATE_SIGNATURE"
+        error2=urllib.error.HTTPError(r2,403,"Forbidden",{},io.BytesIO(b"PRIVATE_SIGNATURE"))
+        message2=str(_http_download_error(error2,"GeoLite2-ASN"))
+        self.assertIn("Cloudflare R2",message2)
+        self.assertIn("HTTP 403",message2)
+        self.assertNotIn("PRIVATE_SIGNATURE",message2)
+
+    def test_http_errors_are_classified_by_stage_and_status(self):
+        import urllib.error
+        from postmaster.geoip_download_v9899 import _http_download_error
+        u="https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz"
+        for status, expected in ((401,"active database-download"),
+                                 (404,"edition"),(429,"download limit"),(503,"Temporary")):
+            with self.subTest(status=status):
+                e=urllib.error.HTTPError(u,status,"Failed",{},io.BytesIO(b""))
+                self.assertIn(expected,str(_http_download_error(e,"GeoLite2-ASN")))
+
     def test_redirects_cannot_send_credentials_to_unapproved_hosts(self):
         from urllib.request import Request
         original=Request("https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz",
