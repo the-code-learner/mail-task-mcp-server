@@ -75,6 +75,29 @@ class WorldMapTests(unittest.TestCase):
         self.assertEqual(missing, 2)
         self.assertEqual(len(points), 1)
 
+    def test_zoom_uses_bounded_base_radius_with_gentle_scale(self):
+        html = render_world_map(self.events)
+        self.assertIn('data-base-radius=', html)
+        self.assertIn('Math.pow(width/1000,.85)', WORLD_MAP_SCRIPT)
+        self.assertIn("Math.max(1.2,base*scale)", WORLD_MAP_SCRIPT)
+        self.assertIn("node.setAttribute('r'", WORLD_MAP_SCRIPT)
+        self.assertIn("data-map-zoom=\"reset\"", html)
+
+    def test_overlapping_points_have_accessible_safe_chooser(self):
+        self.assertIn("Math.hypot", WORLD_MAP_SCRIPT)
+        self.assertIn("pm-map-overlap", WORLD_MAP_SCRIPT)
+        self.assertIn("document.createElement('button')", WORLD_MAP_SCRIPT)
+        self.assertIn("button.textContent", WORLD_MAP_SCRIPT)
+        self.assertIn("popup.replaceChildren", WORLD_MAP_SCRIPT)
+        self.assertNotIn("popup.innerHTML", WORLD_MAP_SCRIPT)
+
+    def test_category_colors_and_transparency_are_preserved(self):
+        from postmaster.webgui_world_map_v987 import WORLD_MAP_STYLE
+        for category in ("human", "proxy", "scanner", "other"):
+            self.assertIn(f'data-category="{category}"', WORLD_MAP_STYLE)
+        self.assertIn("opacity:.72", WORLD_MAP_STYLE)
+        self.assertIn("stroke-width:.85", WORLD_MAP_STYLE)
+
     def test_map_controls_are_delegated_for_lazy_fragments(self):
         self.assertIn("document.addEventListener('click'", WORLD_MAP_SCRIPT)
         self.assertIn("aria-pressed", render_world_map(self.events))
