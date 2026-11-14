@@ -67,5 +67,5 @@ jobs:
             exit 0
           fi
           gh workflow run beta-release.yml --repo "$GITHUB_REPOSITORY" \
-            --ref "$GITHUB_REF_NAME" -f version="9.8.9-beta.4"
+            --ref "$GITHUB_REF_NAME" -f version="9.8.9-beta.5"
           echo "The original immutable-tag, exact-commit gated beta workflow was dispatched."
