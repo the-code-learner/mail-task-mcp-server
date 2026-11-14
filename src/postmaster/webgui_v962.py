@@ -44,6 +44,33 @@ SCRIPT = r'''
   const views = new Set(%VIEWS%);
   const controllers = new Map();
   const generations = new Map();
+  // Bounded private in-memory prefetch: no disk storage and no message-body requests.
+  const warmCache = new Map();
+  const warming = new Map();
+  const WARM_TTL_MS = 12000;
+  function safeToWarm(view, url) {
+    if (!views.has(view)) return false;
+    const u = new URL(url || location.href,location.href);
+    return !['message_uid','full_html','full_html_intent','compose_mode']
+      .some(key => u.searchParams.has(key)) && !['system','contacts'].includes(view);
+  }
+  function warm(view,url) {
+    if (!safeToWarm(view,url) || document.hidden) return;
+    const endpoint=fragmentUrl(view,url);
+    const hit=warmCache.get(endpoint);
+    if (hit && Date.now()-hit.at<WARM_TTL_MS) return;
+    if (warming.has(endpoint) || warming.size>=2) return;
+    const task=fetch(endpoint,{credentials:'same-origin',
+      headers:{'X-Postmaster-Fragment':'1'}}).then(async res=>{
+        if(!res.ok)return;
+        const html=await res.text();
+        const holder=document.createElement('div');holder.innerHTML=html.trim();
+        if(holder.firstElementChild?.dataset.panel!==view)return;
+        warmCache.set(endpoint,{at:Date.now(),html});
+        while(warmCache.size>6)warmCache.delete(warmCache.keys().next().value);
+      }).catch(()=>{}).finally(()=>warming.delete(endpoint));
+    warming.set(endpoint,task);
+  }
 
   function viewFromUrl(url) {
     const u = new URL(url || location.href, location.href);
@@ -128,9 +155,18 @@ SCRIPT = r'''
     const generation = (generations.get(view) || 0) + 1; generations.set(view, generation);
     const started = performance.now();
     try {
-      const res = await fetch(fragmentUrl(view,url), {signal:controller.signal,headers:{'X-Postmaster-Fragment':'1'}});
-      if (!res.ok) throw new Error('fragment ' + res.status);
-      const html = await res.text();
+      const endpoint=fragmentUrl(view,url);
+      const prefetched=safeToWarm(view,url) ? warmCache.get(endpoint) : null;
+      let html, timing='';
+      if(prefetched && Date.now()-prefetched.at<WARM_TTL_MS){
+        html=prefetched.html; timing='prefetch;hit';
+      }else{
+        const res=await fetch(endpoint,{signal:controller.signal,
+          credentials:'same-origin',headers:{'X-Postmaster-Fragment':'1'}});
+        if(!res.ok)throw new Error('fragment '+res.status);
+        html=await res.text();
+        timing=res.headers.get('Server-Timing')||'';
+      }
       if (controller.signal.aborted || generations.get(view) !== generation) return;
       const box=document.createElement('div'); box.innerHTML=html.trim();
       const next=box.firstElementChild;
@@ -138,7 +174,6 @@ SCRIPT = r'''
       // Preserve the v9.6.1 active-fragment invariant during replacement.
       if (target.classList.contains('active')) next.classList.add('active');
       next.dataset.v962Loaded='1';
-      const timing=res.headers.get('Server-Timing') || '';
       const line=document.createElement('div'); line.className='v962-perfline';
       line.textContent='Fragment ' + (performance.now()-started).toFixed(1) + ' ms' + (timing ? ' · ' + timing : '');
       next.insertBefore(line,next.firstChild);
@@ -178,6 +213,27 @@ SCRIPT = r'''
   });
 
   window.addEventListener('popstate',()=>load(viewFromUrl(location.href),location.href,false,true));
+  const warmNav=event=>{
+    const a=event.target.closest?.('a[data-v962-nav]');
+    if(!a)return;
+    const view=a.dataset.v962Nav;
+    if(view && view!==viewFromUrl(location.href))warm(view,a.href);
+  };
+  document.addEventListener('pointerover',warmNav,{passive:true});
+  document.addEventListener('focusin',warmNav);
+  // Cache-first fragments refresh without sending email, modifying flags, or
+  // disrupting active text fields / drafts / detailed message reading.
+  setInterval(()=>{
+    if(document.hidden || controllers.size)return;
+    const view=viewFromUrl(location.href);
+    if(!['inbox','tracking'].includes(view))return;
+    const active=document.activeElement;
+    if(active?.closest?.('input,textarea,select,[contenteditable="true"],form'))return;
+    if(view==='inbox' && (new URL(location.href).searchParams.has('message_uid') ||
+       document.querySelector('#panel-inbox details.v971-floating-compose[open]')))return;
+    warmCache.delete(fragmentUrl(view,location.href));
+    load(view,location.href,false,true);
+  },90000);
   bindAll();
   load(viewFromUrl(location.href),location.href,false,true);
 })();
