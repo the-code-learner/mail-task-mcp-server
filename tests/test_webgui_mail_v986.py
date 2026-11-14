@@ -298,6 +298,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
                 self.assertIn('class="v989-reading-pane"',response)
                 self.assertIn('class="v989-mail-workspace"',response)
 
+    # Exact-commit CI and gated release: vertical-flow rows must remain non-overlapping.
     def test_beta6_mail_cards_are_vertical_flow_not_grid_tracks(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
         css=BETA_MAIL_STYLE.split("/* Beta.6:")[1]
