@@ -11,6 +11,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - A SQLite immediate transaction atomically claims each due send before SMTP. Duplicate compose submissions with the same key reuse the job; no automatic retries follow unknown SMTP outcomes or worker crashes (potentially interrupted sends stay marked `sending` for review).
 - Source account, recipients, subject and body are frozen at schedule time. Suppressed recipients and sender policy are checked before queueing and before sending. The existing fresh tracking-OFF approval boundary applies when scheduling, not at dispatch.
 - Jobs remain visible in Tasks and can be paused/resumed while unsent, or cancelled before claim. Authorized messages cannot be rewritten by the generic task editor or marked complete without SMTP.
+- The beta release is gated on the complete runtime regression suite for the exact branch commit.
 - Supports new-message scheduling only. Stored-file attachments are deliberately rejected until immutable attachment snapshotting is available; persistent file links in the body are supported. No Portainer YAML changes.
 
 ## 9.8.9-beta.18 - 2026-11-15
