@@ -516,7 +516,7 @@ Tracking has no automatic expiry and is accessible through authenticated global 
 
 The English WebGUI provides selectable 24-hour / 7-day / 28-day / 90-day / custom tracking periods, three heatmaps and an activity trend; tracked URL/file management; Contacts with Inbox review, Sent suggestions and recipient/domain authorization; header context selectors; FileStore previews; monthly/weekly Activities calendars; and version preview/confirmation.
 
-WhatsApp work remains in the separate v9.9.0 draft. A stable source release does not activate production or modify Portainer.
+WhatsApp work remains in the separate v9.9.0 draft. Existing /t/c/* callback paths and legacy mail semantics are preserved. A stable source release does not activate production or modify Portainer.
 
 See [v9.8.4 tracking privacy and setup](docs/V984_TRACKING_NETWORK_PRIVACY.md) for offline MMDB provisioning, raw-IP storage and operator erasure responsibilities.
 
