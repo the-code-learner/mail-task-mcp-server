@@ -107,7 +107,10 @@ def _mail_message_card(match: re.Match[str]) -> str:
     subject_html = cells[2].strip()
     snippet_match = re.search(r'<small class="v989-snippet-source">(.*?)</small>', subject_html, re.S)
     snippet = snippet_match.group(1) if snippet_match else ""
-    subject = re.sub(r'<small class="v989-snippet-source">.*?</small>', "", subject_html, flags=re.S).strip() or "(No subject)"
+    account_match = re.search(r'<small class="v989-account-origin">(.*?)</small>', subject_html, re.S)
+    account_origin = account_match.group(1) if account_match else ""
+    subject = re.sub(r'<small class="v989-(?:snippet-source|account-origin)">.*?</small>',
+                     "", subject_html, flags=re.S).strip() or "(No subject)"
     unread = " unread" in " " + match.group("classes")
     return (
         '<tr class="' + match.group("classes") + ' v987-message" data-v960-href="'
@@ -120,6 +123,7 @@ def _mail_message_card(match: re.Match[str]) -> str:
         + '</span></td>'
         + '<td class="v987-subject"><span>' + subject + '</span>'
         + ('<small class="v989-preview">' + snippet + '</small>' if snippet else '')
+        + ('<small class="v989-account-origin">' + account_origin + '</small>' if account_origin else '')
         + ('<small class="v987-unread-label">Unread message</small>' if unread else '')
         + '</td>'
         + '<td class="v987-date" data-v987-date="' + escape(
