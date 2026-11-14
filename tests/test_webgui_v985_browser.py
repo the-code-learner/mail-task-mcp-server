@@ -125,8 +125,15 @@ class V985BrowserLayoutTests(unittest.TestCase):
         )
         process=subprocess.run(
             [sys.executable,"-c",source],capture_output=True,text=True,
-            timeout=45,check=True
+            timeout=45,check=False
         )
+        if process.returncode:
+            from test_webgui_v970 import _redact_diagnostic_text
+            diagnostic=_redact_diagnostic_text(process.stderr[-1400:])
+            self.fail(
+                f"Fresh production-shell process failed (exit={process.returncode}): "
+                +diagnostic
+            )
         stdout=process.stdout
         self.assertIn('V985_SHELL_BEGIN',stdout)
         self.assertIn('V985_SHELL_END',stdout)
