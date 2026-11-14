@@ -81,7 +81,7 @@ def render_overview_v985(base: Any, request: Request) -> str:
     custom=(
         f'<label>From <input type="date" name="from" value="{date1}"></label>'
         f'<label>To <input type="date" name="to" value="{date2}"></label>'
-    ) if selected=="custom" else ""
+    )
     scope='<input type="hidden" name="account_id" value="'+_esc(account)+'">' if account else ""
     form=(
         '<form class="v985-periods" action="/" method="get">'
