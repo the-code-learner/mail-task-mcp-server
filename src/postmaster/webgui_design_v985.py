@@ -150,7 +150,7 @@ def contextbar(release_version: str) -> str:
         '<div class="v970-context-title v985-view-context">'
         '<strong data-v970-context-title>Overview</strong>'
         '<span data-v970-context-subtitle>Current workspace</span></div>'
-        '<div class="v970-context-actions v985-scope-actions"></div>'
+        '<div class="v970-context-actions"></div>'
         '</div></header>'
     )
 
@@ -201,7 +201,7 @@ body{background:var(--v970-surface)!important;color:var(--v970-text)}
 .v985-theme:hover,.v985-top-home:hover{background:var(--v970-accent-soft)!important}
 .v985-scope-row{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-height:48px;padding:4px 20px}
 .v985-view-context{display:none!important}
-.v985-scope-actions{display:none!important}
+.v985-scope-row>.v970-context-actions{display:none!important}
 .v985-header .v984-scopebar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:0!important;
  background:transparent!important;border:0!important;justify-content:flex-end}
 .v985-header .v984-scopebar label{font-size:10px;color:var(--v970-muted);font-weight:700;display:flex;gap:4px;flex-direction:column}
