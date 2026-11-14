@@ -19,6 +19,7 @@ from .webgui_tracking_v984 import (
     _activity_trend, _event_html, _time, _ZONE,
 )
 from .webgui_links_v984 import render_tracked_links_v984
+from .webgui_world_map_v987 import render_world_map, WORLD_MAP_STYLE, WORLD_MAP_SCRIPT
 from .webgui_v962_views import _panel
 
 
@@ -302,7 +303,8 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     if tab=="overview":
         content=(
             '<div class="v985-tracking-two">'+recent+performances+'</div>'
-            '<div class="v985-tracking-heatmaps">'+heat+'</div>'
+            +render_world_map(events,truncated=truncated)
+            +'<div class="v985-tracking-heatmaps">'+heat+'</div>'
             +_activity_trend(events,start,finish)
         )
     else:
@@ -436,9 +438,11 @@ TRACKING_STYLE=r"""
 
 def install_tracking_v985(views: Any, shell: Any) -> None:
     views.render_tracking=render_tracking_v985
+    if 'pm-world-map-script' not in shell.SCRIPT:
+        shell.SCRIPT += '<script id="pm-world-map-script">'+WORLD_MAP_SCRIPT+'</script>'
     old=shell._styles
     if getattr(old,"_postmaster_v985_tracking",False):return
     def styles()->str:
-        return old().rstrip()+"\n"+TRACKING_STYLE
+        return old().rstrip()+"\n"+TRACKING_STYLE+"\n"+WORLD_MAP_STYLE
     styles._postmaster_v985_tracking=True
     shell._styles=styles
