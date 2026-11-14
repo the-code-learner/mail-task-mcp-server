@@ -6,7 +6,7 @@ fields; stored file choices remain opt-in through attachment_file_ids.
 """
 from __future__ import annotations
 
-from html import escape
+from html import escape, unescape
 import re
 from typing import Any
 from starlette.requests import Request
@@ -83,6 +83,46 @@ _SELECTED_MAILBOX = re.compile(
 )
 
 
+_MAIL_ROW = re.compile(
+    r'<tr class="(?P<classes>v963-mail-row[^"]*)" data-v960-href="(?P<href>[^"]*)">'
+    r'\s*(?P<body>(?:<td>.*?</td>\s*){4})</tr>', re.S,
+)
+_MAIL_CELL = re.compile(r'<td>(.*?)</td>', re.S)
+
+
+def _mail_message_card(match: re.Match[str]) -> str:
+    """Upgrade cached message rows without changing their links or reader actions."""
+    cells = _MAIL_CELL.findall(match.group("body"))
+    if len(cells) != 4:
+        return match.group(0)
+    sender = unescape(re.sub(r"<[^>]*>", "", cells[1])).strip()
+    name, sep, address = sender.rpartition(" <")
+    if sep and address.endswith(">"):
+        address = address[:-1]
+    else:
+        name, address = sender, ""
+    name = name.strip().strip('"') or address or "Unknown sender"
+    initials = "".join(part[0] for part in name.split()[:2] if part)[:2].upper() or "?"
+    subject = cells[2].strip() or "(No subject)"
+    unread = " unread" in " " + match.group("classes")
+    return (
+        '<tr class="' + match.group("classes") + ' v987-message" data-v960-href="'
+        + match.group("href") + '" aria-label="Open email">'
+        + '<td class="v987-indicator">' + cells[0] + '</td>'
+        + '<td class="v987-identity"><span class="v987-avatar" aria-hidden="true">'
+        + escape(initials) + '</span><span class="v987-sender">'
+        + '<strong>' + escape(name) + '</strong>'
+        + ('<small>' + escape(address) + '</small>' if address else '')
+        + '</span></td>'
+        + '<td class="v987-subject"><span>' + subject + '</span>'
+        + ('<small class="v987-unread-label">Unread message</small>' if unread else '')
+        + '</td>'
+        + '<td class="v987-date" data-v987-date="' + escape(
+            unescape(re.sub(r"<[^>]*>", "", cells[3])), quote=True
+        ) + '">' + cells[3] + '</td></tr>'
+    )
+
+
 def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
     if 'id="panel-inbox"' not in html:
         return html
@@ -140,6 +180,9 @@ def modern_inbox_markup(html: str, *, selected_account: str = "") -> str:
         '<table class="v960-mail-table">',
         '<table class="v960-mail-table v986-mail-list">',1,
     )
+    # Preserve the original table, row navigation and inline safe reader while
+    # displaying a modern mail-list layout (no extra IMAP calls or guessed snippets).
+    html = _MAIL_ROW.sub(_mail_message_card, html)
     return html
 
 
@@ -164,16 +207,37 @@ MAIL_STYLE = r"""
 #panel-inbox table.v986-mail-list{display:block!important;width:100%;border:0!important;border-collapse:separate!important}
 #panel-inbox .v986-mail-list thead{display:none!important}
 #panel-inbox .v986-mail-list tbody{display:block!important}
-#panel-inbox .v986-mail-list tr.v963-mail-row{display:grid!important;grid-template-columns:18px minmax(160px,1.15fr) minmax(180px,2fr) 155px;
- align-items:center;gap:10px;padding:0 14px!important;background:var(--v970-surface);min-height:57px;
- border-bottom:1px solid var(--v970-line)!important;cursor:pointer}
-#panel-inbox .v986-mail-list tr.v963-mail-row:hover{background:var(--v970-accent-soft)!important}
-#panel-inbox .v986-mail-list tr.v963-mail-row.unread{background:var(--v970-surface-2);font-weight:750}
-#panel-inbox .v986-mail-list tr.v963-mail-row td{display:block!important;min-width:0;padding:11px 0!important;
- overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:0!important;font-size:12px}
-#panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(2){font-weight:700}
-#panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(3){color:var(--v970-text)}
-#panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(4){font-size:11px;color:var(--v970-muted);text-align:right}
+#panel-inbox .v986-mail-list tr.v963-mail-row{display:grid!important;
+ grid-template-columns:12px minmax(210px,0.9fr) minmax(260px,1.8fr) 112px;
+ gap:12px;align-items:center;padding:0 18px!important;min-height:78px;
+ background:var(--v970-surface);border-bottom:1px solid var(--v970-line)!important;
+ cursor:pointer;transition:background .12s ease}
+#panel-inbox .v986-mail-list tr.v963-mail-row:hover,
+#panel-inbox .v986-mail-list tr.v963-mail-row:focus{background:var(--v970-accent-soft)!important;outline:0}
+#panel-inbox .v986-mail-list tr.v963-mail-row.unread{background:var(--v970-surface-2)}
+#panel-inbox .v986-mail-list tr.v963-mail-row td{display:block!important;min-width:0;
+ border:0!important;padding:13px 0!important;overflow:hidden;text-overflow:ellipsis;
+ white-space:nowrap;font-size:12px}
+#panel-inbox .v987-message .v987-identity{display:flex!important;align-items:center;gap:11px}
+#panel-inbox .v987-avatar{width:37px;height:37px;flex:0 0 37px;border-radius:50%;
+ background:var(--v970-accent-soft);color:var(--v970-accent);display:grid;
+ place-items:center;font-size:12px;letter-spacing:.3px;font-weight:800}
+#panel-inbox .v987-sender{min-width:0;display:flex;flex-direction:column;gap:3px;
+ overflow:hidden;text-overflow:ellipsis}
+#panel-inbox .v987-sender strong{overflow:hidden;text-overflow:ellipsis;
+ font-size:13px;font-weight:650}
+#panel-inbox .v987-sender small{color:var(--v970-muted);font-size:11px;
+ overflow:hidden;text-overflow:ellipsis}
+#panel-inbox .v987-message.unread .v987-sender strong,
+#panel-inbox .v987-message.unread .v987-subject>span{font-weight:850}
+#panel-inbox .v987-subject>span{display:block;overflow:hidden;text-overflow:ellipsis;
+ font-size:13px;color:var(--v970-text);font-weight:550}
+#panel-inbox .v987-unread-label{font-size:10px;color:var(--v970-accent);font-weight:700;
+ display:block;margin-top:5px}
+#panel-inbox .v987-date{text-align:right!important;color:var(--v970-muted);
+ font-size:11px!important;font-variant-numeric:tabular-nums}
+#panel-inbox .v987-message.unread .v987-date{color:var(--v970-text);font-weight:700}
+#panel-inbox .v987-indicator .v963-unread-dot{box-shadow:0 0 0 3px var(--v970-accent-soft)}
 #panel-inbox .v986-mail-list tr.v960-inline-detail{display:block!important;padding:15px;border-bottom:1px solid var(--v970-line)}
 #panel-inbox .v986-mail-list tr.v960-inline-detail td{display:block!important;width:100%;padding:0!important}
 #panel-inbox .v986-mail-list tr:not(.v963-mail-row):not(.v960-inline-detail){display:block!important;padding:14px}
@@ -232,14 +296,20 @@ MAIL_STYLE = r"""
 #panel-inbox .v971-floating-compose .v971-file-picker{display:none!important}
 #panel-inbox .v971-floating-compose .v971-file-picker>option:checked{display:block}
 @media(max-width:890px){
- #panel-inbox .v986-mail-list tr.v963-mail-row{grid-template-columns:14px minmax(110px,1fr) minmax(130px,1.5fr) 105px;gap:7px}
+ #panel-inbox .v986-mail-list tr.v963-mail-row{grid-template-columns:10px minmax(170px,1fr) minmax(160px,1.3fr) 85px;gap:8px}
  #panel-inbox .v971-floating-compose .v951-formgrid{grid-template-columns:1fr}
 }
 @media(max-width:560px){
- #panel-inbox .v986-mail-list tr.v963-mail-row{grid-template-columns:12px minmax(85px,.9fr) minmax(120px,1.5fr);padding:0 8px!important}
- #panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(4){grid-column:3;text-align:left;padding-top:0!important;font-size:10px}
- #panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(3){grid-column:3;grid-row:1}
- #panel-inbox .v986-mail-list tr.v963-mail-row td:nth-child(2){grid-column:2;grid-row:1}
+ #panel-inbox .v986-mail-list tr.v963-mail-row{grid-template-columns:8px minmax(0,1fr) 80px;
+  grid-template-rows:36px 28px;padding:4px 12px!important;gap:0 8px;min-height:77px}
+ #panel-inbox .v987-indicator{grid-row:1/3;grid-column:1}
+ #panel-inbox .v987-identity{grid-row:1;grid-column:2;gap:7px!important}
+ #panel-inbox .v987-avatar{width:27px;height:27px;flex-basis:27px;font-size:10px}
+ #panel-inbox .v987-sender small{display:none}
+ #panel-inbox .v987-subject{grid-row:2;grid-column:2/4;padding:0!important;padding-left:35px!important}
+ #panel-inbox .v987-date{grid-row:1;grid-column:3}
+ #panel-inbox .v987-unread-label{display:none}
+
 }
 """
 
