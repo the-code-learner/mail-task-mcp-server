@@ -2,6 +2,15 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.16 - 2026-11-14
+
+### Restore exact Stable/Beta release pinning in Settings
+- Restores an exact-version drop-down under Settings → Versions & updates, listing verified published Stable releases and eligible Beta releases in the chosen update channel.
+- Supports explicit pinning and downgrades to any listed release via the existing CSRF-protected, server-side pending preview and second explicit confirmation before restart.
+- The 30-second release catalog refresh retains a selected tag if it remains eligible; stale, missing, or channel-forbidden targets are rejected before preview.
+- Retains the two latest-version update cards, the full v9.8.9-beta.15 world map and received-mail fixes, and the original single-YAML Portainer deployment unchanged.
+- Adds regression tests for stable-only channel exclusion, available release selection, and live refresh preservation.
+
 ## 9.8.9-beta.15 - 2026-11-14
 
 ### Beta: self-hosted geographical tracking overview
