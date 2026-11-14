@@ -28,12 +28,12 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
                 conn.executescript("""
                 CREATE TABLE tracking_opens (
                     id INTEGER PRIMARY KEY, account_id TEXT,recipient TEXT,
-                    delivery_id TEXT, user_agent TEXT,browser TEXT,os TEXT,
+                    delivery_id TEXT,campaign_id TEXT, user_agent TEXT,browser TEXT,os TEXT,
                     client_source TEXT,metadata_confidence TEXT
                 );
                 CREATE TABLE tracking_clicks (
                     id INTEGER PRIMARY KEY,account_id TEXT, recipient TEXT,
-                    delivery_id TEXT, link_id TEXT, link_occurrence_id TEXT, user_agent TEXT,
+                    delivery_id TEXT, campaign_id TEXT, link_id TEXT, link_occurrence_id TEXT, user_agent TEXT,
                     browser TEXT,os TEXT,client_source TEXT,metadata_confidence TEXT
                 );
                 CREATE TABLE generic_tracking_links (
@@ -57,9 +57,9 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
                     client_source TEXT,metadata_confidence TEXT
                 );
                 INSERT INTO tracking_opens VALUES
-                    (1,'mail-1','recipient@example.com','del-1','ExampleClient','Browser','OS','pixel','low');
+                    (1,'mail-1','recipient@example.com','del-1','camp-1','ExampleClient','Browser','OS','pixel','low');
                 INSERT INTO tracking_clicks VALUES
-                    (2,'mail-2','other@example.net','del-2','click-1','occ-1','ClientClick','Browser','OS','link','medium');
+                    (2,'mail-2','other@example.net','del-2','camp-1','click-1','occ-1','ClientClick','Browser','OS','link','medium');
                 INSERT INTO generic_tracking_links(id,label,target_type,destination_host,
                     destination_url,download_filename) VALUES
                     ('link-1','File URL','stored_file','example.com',
