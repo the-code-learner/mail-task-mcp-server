@@ -1,7 +1,7 @@
 """v9.8.4 release status and guarded version changes in authenticated WebGUI.
 
-Uses the existing v9.6.7 preview/execute MCP backend. Never performs a version
-change without explicit CSRF-verified preview and a separate confirmation.
+Uses the v9.6.9 server-side pending preview/execute backend. Never performs a
+version change without CSRF-verified preview and separate explicit confirmation.
 """
 from __future__ import annotations
 
@@ -150,10 +150,19 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 status=400,
             )
         info = dict(result.get("action_preview") or {})
-        token = str(result.get("confirmation_token") or "")
+        # Since v9.6.9, the MCP lifecycle uses a server-side pending preview.
+        # The public preview_id is correlation metadata, NOT an approval bearer
+        # token. The former confirmation_token no longer exists in the runtime.
+        preview_id = str(result.get("preview_id") or "")
         exact_target = str(info.get("target_version_ref") or "")
-        if not token or not exact_target:
-            return _response_page("Missing confirmation state", "Preview cannot be confirmed.", 500)
+        if not preview_id or not exact_target:
+            return _response_page(
+                "Preview unavailable",
+                "<p>The runtime did not provide a complete server-side pending preview. "
+                "No version change has been scheduled.</p>"
+                '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
+                status=400,
+            )
         panel = (
             '<p>The following action changes the selected runtime after a restart.</p>'
             f'<p><b>Operation:</b> {_e(info.get("operation"))}<br>'
@@ -166,7 +175,7 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
             f'<input type="hidden" name="operation" value="{_e(operation)}">'
             f'<input type="hidden" name="target_version" value="{_e(exact_target)}">'
-            f'<input type="hidden" name="confirmation_token" value="{_e(token)}">'
+            f'<input type="hidden" name="preview_id" value="{_e(preview_id)}">'
             '<label><input type="checkbox" name="approved" value="yes" required>'
             'I explicitly approve this exact version change and restart.</label>'
             '<p><button type="submit">Confirm version change</button>'
@@ -182,11 +191,14 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             return PlainTextResponse("Explicit confirmation required", status_code=400)
         operation = str(form.get("operation") or "").strip()
         target = str(form.get("target_version") or "").strip()
-        token = str(form.get("confirmation_token") or "").strip()
-        if not target or not token:
-            return PlainTextResponse("Invalid confirmation state", status_code=400)
+        preview_id = str(form.get("preview_id") or "").strip()
+        if not target or not preview_id:
+            return PlainTextResponse("Invalid or missing server-side preview", status_code=400)
+        # Only explicit approval in this separate, CSRF-checked POST may execute
+        # the exact version the user reviewed. The runtime atomically consumes
+        # and validates the matching pending preview before scheduling restart.
         result = core.runtime_version_change_execute(
-            operation=operation, target_version=target, confirmation_token=token,
+            operation=operation, target_version=target, preview_id=preview_id,
         )
         if not isinstance(result, dict) or not result.get("ok"):
             return _response_page(
