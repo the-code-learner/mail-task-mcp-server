@@ -103,7 +103,10 @@ def _mail_message_card(match: re.Match[str]) -> str:
         name, address = sender, ""
     name = name.strip().strip('"') or address or "Unknown sender"
     initials = "".join(part[0] for part in name.split()[:2] if part)[:2].upper() or "?"
-    subject = cells[2].strip() or "(No subject)"
+    subject_html = cells[2].strip()
+    snippet_match = re.search(r'<small class="v989-snippet-source">(.*?)</small>', subject_html, re.S)
+    snippet = snippet_match.group(1) if snippet_match else ""
+    subject = re.sub(r'<small class="v989-snippet-source">.*?</small>', "", subject_html, flags=re.S).strip() or "(No subject)"
     unread = " unread" in " " + match.group("classes")
     return (
         '<tr class="' + match.group("classes") + ' v987-message" data-v960-href="'
@@ -115,6 +118,7 @@ def _mail_message_card(match: re.Match[str]) -> str:
         + ('<small>' + escape(address) + '</small>' if address else '')
         + '</span></td>'
         + '<td class="v987-subject"><span>' + subject + '</span>'
+        + ('<small class="v989-preview">' + snippet + '</small>' if snippet else '')
         + ('<small class="v987-unread-label">Unread message</small>' if unread else '')
         + '</td>'
         + '<td class="v987-date" data-v987-date="' + escape(
@@ -373,7 +377,7 @@ BETA_MAIL_STYLE = r"""
 #panel-inbox .v989-list-scroll .v986-mail-list tbody{display:block!important}
 #panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{display:grid!important;
  grid-template-columns:8px 36px minmax(0,1fr) 66px!important;grid-template-rows:25px auto;
- min-height:80px!important;gap:0 7px!important;padding:13px 13px 12px!important;
+ min-height:90px!important;gap:0 7px!important;padding:13px 13px 12px!important;
  align-items:start;border-bottom:1px solid var(--v970-line)!important}
 #panel-inbox .v989-list-scroll .v987-message td{padding:0!important;line-height:1.45}
 #panel-inbox .v989-list-scroll .v987-indicator{grid-column:1;grid-row:1/3;padding-top:5px!important}
@@ -387,7 +391,10 @@ BETA_MAIL_STYLE = r"""
 #panel-inbox .v989-list-scroll .v987-sender small{display:none}
 #panel-inbox .v989-list-scroll .v987-subject{grid-column:2/5;grid-row:2;
  padding:4px 0 0 4px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panel-inbox .v989-list-scroll .v987-subject>span{font-size:12px;color:var(--v970-muted)}
+#panel-inbox .v989-list-scroll .v987-subject>span{font-size:12px;color:var(--v970-muted);
+ display:block;overflow:hidden;text-overflow:ellipsis}
+#panel-inbox .v989-list-scroll .v989-preview{display:block;color:var(--v970-muted);
+ font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:4px}
 #panel-inbox .v989-list-scroll .v987-message.unread .v987-subject>span{color:var(--v970-text)}
 #panel-inbox .v989-list-scroll .v987-date{grid-column:4;grid-row:1;padding-top:4px!important;
  font-size:10px!important;text-align:right!important;white-space:nowrap}
@@ -616,6 +623,15 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      row.classList.toggle('v989-selected',selected);
      row.setAttribute('aria-selected',String(selected));
      // The existing lazy fragment reader binds the row navigation and keys.
+   });
+   workspace.querySelectorAll('.v987-date[data-v987-date]').forEach(node=>{
+     const date=new Date(node.dataset.v987Date);
+     if(Number.isNaN(date.getTime()))return;
+     const now=new Date();
+     const sameDay=now.toDateString()===date.toDateString();
+     node.textContent=sameDay?date.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}):
+       date.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+     node.title=date.toLocaleString();
    });
    const count=inbox.querySelector('.v960-pagination .small');
    const label=workspace.querySelector('.v989-stream-count');
