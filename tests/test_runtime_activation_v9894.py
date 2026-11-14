@@ -1,4 +1,4 @@
-"""Beta 9.8.9 activation is confirmed only by running build, never selector intent."""
+"""Beta 9.8.9 activation is confirmed only by running build, never selector intent.\n\nFinal beta.4 exact-commit CI smoke contract.\n"""
 from __future__ import annotations
 
 import os
