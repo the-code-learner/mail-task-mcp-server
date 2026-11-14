@@ -16,6 +16,8 @@ def request(query=b""):
 
 
 class FakeBase:
+    def _csrf_value(self):
+        return "test-csrf-for-geoip"
     def _safe_call(self, fn):
         return {"ok": True}
     def build_status(self):
