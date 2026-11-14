@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.15 - 2026-11-14
+
+### Beta: self-hosted geographical tracking overview
+- Adds a locally bundled Natural Earth vector world map to Tracking Overview, without third-party map tiles, geolocation lookups or external dependencies.
+- Uses the existing persisted GeoIP latitude/longitude and conservative opening/click classifications, with four categories: likely human, proxy/provider, scanner/bot and unknown; no observed email fetch is asserted to prove human reading.
+- Adds coloured location markers, approximate position grouping, category filters, zoom, pan and click/keyboard-accessible details compatible with dynamically loaded Tracking fragments.
+- Reuses existing account, owner/project, event and statistics-period filters; the view is a bounded event sample and reports events without coordinates rather than inventing their location.
+- Reduces displayed coordinates to approximately 0.1 degree; map marker data does not expose raw IP addresses, recipient email addresses or user agents.
+- Preserves all v9.8.9-beta.14 received-mail cache and heatmap fixes, the stable Portainer YAML and the existing account policies.
+- Adds privacy, classification, coordinate-validation and Overview regression tests.
+
 ## 9.8.9-beta.14 - 2026-11-14
 
 ### Beta: restore received-mail heatmap and statistics for All accounts
