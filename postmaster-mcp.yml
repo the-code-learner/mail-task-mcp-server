@@ -18,6 +18,8 @@ services:
       # Bootstrap update policy. `latest` follows the saved Settings release channel (Stable by default); explicit refs remain pinned.
       POSTMASTER_REPO: the-code-learner/mail-task-mcp-server
       POSTMASTER_VERSION: latest
+      # Capability flag: older Portainer stacks do not support prerelease tags.
+      POSTMASTER_BOOTSTRAP_BETA_SUPPORTED: "true"
       POSTMASTER_CHECK_UPDATES_ON_START: "true"
       POSTMASTER_FORCE_REFRESH: "false"
 

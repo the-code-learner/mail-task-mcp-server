@@ -49,7 +49,9 @@ def version_summary(base: Any) -> str:
 
 def versions_settings(base: Any) -> str:
     channel = runtime_control.preferred_release_channel()
-    versions, lookup = runtime_control.available_release_tags(channel=channel)
+    bootstrap_beta=runtime_control.beta_bootstrap_supported()
+    effective_channel=channel if bootstrap_beta else "stable"
+    versions, lookup = runtime_control.available_release_tags(channel=effective_channel)
     build = base.build_status()
     running = str(build.get("version") or "unknown") if isinstance(build, dict) else "unknown"
     selector = runtime_control.read_control().get("selector") or str(
@@ -62,12 +64,19 @@ def versions_settings(base: Any) -> str:
     )
     chosen_stable=' selected' if channel=="stable" else ""
     chosen_beta=' selected' if channel=="stable_beta" else ""
+    beta_disabled="" if bootstrap_beta else " disabled"
+    bootstrap_note=(
+        "" if bootstrap_beta else
+        '<p class="small muted">Beta updates are currently unavailable: '
+        'the Portainer stack needs the channel-aware v9.8.6 bootstrap YAML. '
+        'Stable updates continue to work.</p>'
+    )
     pref_form=(
         '<form method="post" action="/dashboard/versions/channel">'
         f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
         '<label>Update channel <select name="release_channel">'
         f'<option value="stable"{chosen_stable}>Stable only</option>'
-        f'<option value="stable_beta"{chosen_beta}>Stable + Beta</option>'
+        f'<option value="stable_beta"{chosen_beta}{beta_disabled}>Stable + Beta</option>'
         '</select></label>'
         '<button type="submit">Save update preference</button>'
         '</form>'
@@ -102,6 +111,7 @@ def versions_settings(base: Any) -> str:
         f'<p class="small muted">Release check: {_e(lookup)}. '
         'Draft releases are always excluded; Beta is shown only when selected.</p>'
         f'{pref_form}'
+        f'{bootstrap_note}'
         f'{selector_control}'
         '<p class="small muted">Preview and explicit confirmation are mandatory. '
         'A confirmed change is handled by the existing version selector and process restart mechanism; '
@@ -247,6 +257,10 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             return error
         chosen=str(form.get("release_channel") or "").strip()
         try:
+            if chosen=="stable_beta" and not runtime_control.beta_bootstrap_supported():
+                raise ValueError(
+                    "Beta updates require the updated v9.8.6 Portainer stack bootstrap."
+                )
             # Never make switching to Stable only silently downgrade an
             # already running beta on the next ordinary latest-selector boot.
             current=base.build_status()

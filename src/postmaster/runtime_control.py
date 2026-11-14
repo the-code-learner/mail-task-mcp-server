@@ -168,6 +168,11 @@ def preferred_release_channel(path: Path | None = None) -> str:
     return str(read_control(path).get("release_channel") or channels.STABLE)
 
 
+def beta_bootstrap_supported() -> bool:
+    """Old Portainer YAMLs cannot resolve beta tags, even with new Python code."""
+    return os.getenv("POSTMASTER_BOOTSTRAP_BETA_SUPPORTED","").strip().lower()=="true"
+
+
 def write_control(
     *,
     selector: str,

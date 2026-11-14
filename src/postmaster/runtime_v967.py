@@ -111,6 +111,11 @@ def _release_target(
     if op not in RUNTIME_OPERATIONS:
         raise ValueError(f"unsupported runtime version operation: {op or '<empty>'}")
     selected_channel=runtime_control.preferred_release_channel()
+    if selected_channel=="stable_beta" and not runtime_control.beta_bootstrap_supported():
+        raise RuntimeError(
+            "Beta requires the updated versioned Portainer stack YAML. "
+            "Install the channel-aware bootstrap before requesting a beta version change."
+        )
     versions, release_status = runtime_control.available_release_tags(
         channel=selected_channel,force=False,
     )
