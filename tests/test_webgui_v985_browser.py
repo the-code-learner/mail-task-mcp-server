@@ -121,6 +121,8 @@ class V985BrowserLayoutTests(unittest.TestCase):
             "response=shell._shell(req)\n"
             "assert response.headers['x-postmaster-webgui-design']=="
             "'v9.8.5-approved-v5', response.headers['x-postmaster-webgui-design']\n"
+            "assert sum(k.lower()==b'x-postmaster-webgui-design' for k,v in "
+            "response.raw_headers)==1, 'duplicate design HTTP headers'\n"
             "print('V985_SHELL_BEGIN')\n"
             "print(base64.b64encode(response.body).decode('ascii'))\n"
             "print('V985_SHELL_END')\n"
