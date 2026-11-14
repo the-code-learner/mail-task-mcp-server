@@ -234,8 +234,11 @@ def beta_mailbox_layout(html: str, *, query_string: str = "") -> str:
     # The original table closes before the separately rendered reader-source;
     # no regex parsing, nested table extraction, or DOM reparenting is required.
     html = html.replace(opening, begin, 1)
+    boundary = '</table></div>' + reader
+    if boundary not in html:
+        return html  # Reader and message list must be contiguous siblings.
     html = html.replace(
-        '</table></div>' + reader,
+        boundary,
         '</table></div><div class="v989-scroll-status" aria-live="polite"></div>'
         '</div><section class="v989-reading-pane" aria-label="Message reading pane">'
         + reader, 1,
@@ -411,6 +414,18 @@ BETA_MAIL_STYLE = r"""
  overflow-wrap:anywhere;font-family:inherit;margin:0;line-height:1.65}
 #panel-inbox .v989-reader-source .v963-inbox-head h3{font-size:18px;line-height:1.35}
 #panel-inbox .v989-reader-source .v963-inbox-head p{font-size:12px;line-height:1.5}
+/* Override the legacy mobile reader's fixed full-screen mode in every folder. */
+@media(max-width:820px){
+ #panel-inbox:has(.v989-mail-workspace)>.v963-inbox-head,
+ #panel-inbox:has(.v989-mail-workspace)>.v960-pagination{display:flex!important}
+ #panel-inbox:has(.v989-mail-workspace) .v989-mail-stream{display:flex}
+ #panel-inbox:has(.v989-mail-workspace) .v989-list-scroll{display:block;max-width:100%!important}
+ #panel-inbox .v989-reading-pane .v963-detail{position:static!important;inset:auto!important;
+  z-index:auto!important;max-width:100%!important;width:100%!important;
+  max-height:none!important;overflow:visible!important;background:transparent!important}
+ #panel-inbox .v989-reading-pane .v963-detail-actions{position:static!important;top:auto!important}
+ #panel-inbox:has(.v989-mail-workspace)>.v963-proxy-card{display:none}
+}
 #panel-inbox .v989-mail-stream{min-width:0;display:flex;flex-direction:column;
  border-right:1px solid var(--v970-line);overflow:hidden}
 #panel-inbox .v989-stream-header{display:flex;justify-content:space-between;align-items:center;gap:8px;
