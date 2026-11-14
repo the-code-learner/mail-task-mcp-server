@@ -67,6 +67,22 @@ class ApprovedDesignV985Tests(unittest.TestCase):
         self.assertNotIn("/dashboard/compose/send",DESIGN_SCRIPT)
         self.assertIn("data-v985-mailbox",DESIGN_SCRIPT)
 
+    def test_mailbox_sidebar_always_loads_changed_folder_even_when_inbox_loaded(self):
+        from postmaster import webgui_v962, webgui_design_v985
+        source=webgui_v962.SCRIPT
+        nav=webgui_design_v985._link("sent","Sent","➤")
+        for folder in ("inbox","sent","drafts","spam"):
+            link=webgui_design_v985._link(folder,folder.title(),"✉")
+            self.assertIn('data-v985-mailbox=',link)
+            self.assertIn('data-v962-nav="inbox"',link)
+        self.assertIn('data-v985-mailbox=',nav)
+        self.assertIn("const isFolder=a.hasAttribute('data-v985-mailbox')",source)
+        self.assertIn("load(view,u.toString(),true,isFolder || !isNav)",source)
+        self.assertIn("target.classList.add('v989-folder-loading')",source)
+        self.assertIn("next.dataset.v989LoadedMailbox=",source)
+        self.assertIn("target.removeAttribute('aria-busy')",source)
+        self.assertNotIn("load(view,u.toString(),true,!isNav);",source)
+
     def test_scopebar_integration_uses_the_real_top_header_insertion_hook(self):
         from starlette.applications import Starlette
         from starlette.responses import HTMLResponse
