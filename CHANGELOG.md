@@ -2,6 +2,20 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.1 - 2026-11-14
+
+### Beta: familiar three-pane email client
+- Introduced an experimental desktop layout modeled on established mail-client interaction patterns: folder sidebar, message-list cards and a persistent reading pane to the right. Narrow/mobile screens switch to a focused list-or-message mode.
+- Message list presents sender initials, display name, subject, short text snippet from the **existing local mailbox cache** when available, readable local time/date and distinct unread/selected states.
+- Selecting a message uses the existing authenticated lazy Inbox fragment and moves the **already-rendered safe reader** to the reading pane, preserving protected remote-image behavior, Reply/Reply all/Forward, source inventory and existing compose and draft actions.
+- No remote image fetching, automatic message sending, synthetic previews, background MIME preloads, new IMAP synchronization, account permission bypass or changes to the 134 MCP tool schemas.
+- The original Inbox cache remains the source of the list; link-based navigation, keyboard support, progressive loading, pagination, global account selector and provider mailbox navigation remain intact.
+- New regression checks cover split-pane shell, cached snippets, message links and legacy fallbacks.
+
+### Beta-only rollout
+- The source version is explicitly 9.8.9-beta.1 and must be published as a **GitHub prerelease** with a paired immutable numeric transport alias using the gated Beta workflow. Stable v9.8.8 and its existing deployment remain unchanged.
+- No change to `postmaster-mcp.yml` is necessary. Installing this Beta requires opting into Stable + Beta and an explicit update approval.
+
 ## 9.8.8 - 2026-11-14
 
 ### WebUI version update controls
