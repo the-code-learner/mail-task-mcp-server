@@ -634,40 +634,136 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    if(oldLabel)oldLabel.hidden=true;
    refresh();
  }
+ let lastListPosition={key:'',top:0};
+ const loadingLists=new WeakSet();
+ function mailboxKey(url) {
+   const u=new URL(url,location.href);
+   u.searchParams.delete('message_uid');
+   u.searchParams.delete('compose_mode');
+   u.searchParams.delete('full_html');
+   u.searchParams.delete('full_html_intent');
+   u.searchParams.delete('page');
+   return u.pathname+'?'+u.searchParams.toString();
+ }
+ function bindMessageRow(row,scroller) {
+   row.tabIndex=0;
+   // Newly appended rows are not seen by the original lazy fragment's bindReader.
+   // Dispatch a same-origin link click through its existing client-side router.
+   const link=document.createElement('a');
+   link.href=row.dataset.v960Href||'#inbox';
+   link.dataset.v960Fragment='inbox';
+   link.hidden=true;
+   link.tabIndex=-1;
+   row.append(link);
+   const open=()=>{
+     lastListPosition={key:mailboxKey(location.href),top:scroller.scrollTop};
+     link.click();
+   };
+   row.onclick=event=>{
+     if(!event.target.closest('a,button,input,form,select,textarea'))open();
+   };
+   row.onkeydown=event=>{
+     if((event.key==='Enter'||event.key===' ') &&
+       !event.target.closest('a,button,input,form,select,textarea')) {
+       event.preventDefault();open();
+     }
+   };
+ }
+ function normalizeDate(node) {
+   const date=new Date(node.dataset.v987Date);
+   if(Number.isNaN(date.getTime()))return;
+   const now=new Date();
+   node.textContent=now.toDateString()===date.toDateString()
+     ?date.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})
+     :date.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+   node.title=date.toLocaleString();
+ }
+ function updateListCounter(workspace,number) {
+   const label=workspace.querySelector('.v989-stream-count');
+   if(label)label.textContent=number+' shown';
+ }
  function enhanceBetaInbox(inbox){
    const workspace=inbox.querySelector('[data-v989-mail-workspace]');
-   if(!workspace)return;
+   if(!workspace || workspace.dataset.v989Bound==='1')return;
+   workspace.dataset.v989Bound='1';
+   const scroller=workspace.querySelector('.v989-list-scroll');
+   const tbody=scroller?.querySelector('tbody');
    const pane=workspace.querySelector('.v989-reading-pane');
-   const detailRow=workspace.querySelector('tr.v960-inline-detail');
-   if(detailRow){
-     // Move the already-sanitized, cache-backed reader. Do not re-fetch MIME
-     // or attempt to render remote resources through the browser.
-     const detail=detailRow.querySelector('.v963-detail');
-     const fallback=detailRow.querySelector('.flash');
-     if(detail)pane.append(detail);
-     else if(fallback)pane.append(fallback);
-     detailRow.remove();
-   }
+   const source=workspace.querySelector('.v989-reader-source');
+   if(!scroller || !tbody || !pane || !source)return;
+   // Reader is server-rendered as a sibling, never moved from an invalid tr.
    const uid=new URL(location.href).searchParams.get('message_uid');
-   workspace.querySelectorAll('tr[data-v960-href]').forEach(row=>{
-     const selected=Boolean(uid && new URL(row.dataset.v960Href,location.href)
+   const rows=[...tbody.querySelectorAll('tr[data-v960-href]')];
+   rows.forEach(row=>{
+     const selected=Boolean(uid&&new URL(row.dataset.v960Href,location.href)
        .searchParams.get('message_uid')===uid);
      row.classList.toggle('v989-selected',selected);
      row.setAttribute('aria-selected',String(selected));
-     // The existing lazy fragment reader binds the row navigation and keys.
    });
-   workspace.querySelectorAll('.v987-date[data-v987-date]').forEach(node=>{
-     const date=new Date(node.dataset.v987Date);
-     if(Number.isNaN(date.getTime()))return;
-     const now=new Date();
-     const sameDay=now.toDateString()===date.toDateString();
-     node.textContent=sameDay?date.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}):
-       date.toLocaleDateString(undefined,{day:'numeric',month:'short'});
-     node.title=date.toLocaleString();
-   });
-   const count=inbox.querySelector('.v960-pagination .small');
-   const label=workspace.querySelector('.v989-stream-count');
-   if(count && label)label.textContent=count.textContent.trim();
+   workspace.querySelectorAll('.v987-date[data-v987-date]').forEach(normalizeDate);
+   const key=mailboxKey(location.href);
+   if(lastListPosition.key===key)scroller.scrollTop=lastListPosition.top;
+   updateListCounter(workspace,rows.length);
+   // Real infinite scrolling through successive cached pages: never request
+   // message bodies, external media, or IMAP sync; only app-owned GET fragments.
+   const pagination=inbox.querySelector('.v960-pagination');
+   let nextLink=[...(pagination?.querySelectorAll('a[href]')||[])]
+     .find(a=>a.textContent.toLowerCase().includes('next'));
+   if(pagination)pagination.hidden=true;
+   const status=workspace.querySelector('.v989-scroll-status');
+   let complete=false;
+   let inflight=false;
+   function setStatus(s){if(status)status.textContent=s;}
+   async function more(){
+     if(inflight||complete||!nextLink||document.hidden)return;
+     if(!workspace.isConnected)return;
+     inflight=true;loadingLists.add(workspace);
+     setStatus('Loading more messages…');
+     try{
+       const u=new URL(nextLink.href,location.href);
+       if(u.origin!==location.origin)throw new Error('Cross-origin page');
+       u.pathname='/dashboard/view/inbox';u.searchParams.set('ui_view','inbox');
+       u.searchParams.delete('message_uid');u.searchParams.delete('compose_mode');
+       u.searchParams.delete('full_html');u.searchParams.delete('full_html_intent');
+       u.hash='';
+       const response=await fetch(u.toString(),{credentials:'same-origin',cache:'no-store',
+         headers:{'X-Postmaster-Fragment':'1'}});
+       if(!response.ok)throw new Error('Could not load more messages');
+       const box=document.createElement('div');box.innerHTML=(await response.text()).trim();
+       const panel=box.firstElementChild;
+       if(panel?.dataset.panel!=='inbox')throw new Error('Unexpected mailbox response');
+       if(!workspace.isConnected || mailboxKey(location.href)!==key)return;
+       const extra=panel.querySelector('.v989-list-scroll tbody');
+       const extraRows=[...(extra?.querySelectorAll('tr[data-v960-href]')||[])];
+       const known=new Set([...tbody.querySelectorAll('tr[data-v960-href]')]
+         .map(row=>new URL(row.dataset.v960Href,location.href).searchParams.get('message_uid')));
+       let added=0;
+       for(const item of extraRows){
+         const itemUid=new URL(item.dataset.v960Href,location.href).searchParams.get('message_uid');
+         if(!itemUid||known.has(itemUid))continue;
+         known.add(itemUid);
+         const row=document.importNode(item,true);
+         bindMessageRow(row,scroller);
+         row.querySelectorAll('.v987-date[data-v987-date]').forEach(normalizeDate);
+         tbody.append(row);added++;
+       }
+       const morePagination=panel.querySelector('.v960-pagination');
+       const found=[...(morePagination?.querySelectorAll('a[href]')||[])]
+         .find(a=>a.textContent.toLowerCase().includes('next'));
+       nextLink=found||null;
+       complete=!nextLink||!extraRows.length;
+       updateListCounter(workspace,tbody.querySelectorAll('tr[data-v960-href]').length);
+       setStatus(complete?'All cached messages loaded':'');
+     }catch(err){
+       setStatus('Unable to load more messages. Scroll to retry.');
+     }finally{inflight=false;loadingLists.delete(workspace);}
+   }
+   scroller.addEventListener('scroll',()=>{
+     lastListPosition={key,top:scroller.scrollTop};
+     if(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<230)more();
+   },{passive:true});
+   if(!nextLink)setStatus('All cached messages loaded');
+   else if(scroller.scrollHeight<=scroller.clientHeight+250)more();
  }
  function init(){
    const inbox=document.querySelector('#panel-inbox.active');
