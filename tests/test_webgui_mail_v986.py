@@ -64,9 +64,9 @@ class MailGuiV986ContractTests(unittest.TestCase):
         html=modern_inbox_markup(INBOX)
         self.assertIn("v986-inbox-head",html)
         self.assertIn("v986-mail-list",html)
-        self.assertIn("Advanced mailbox filters",html)
-        self.assertIn('type="hidden" name="account_id" value="one"',html)
-        self.assertIn('type="hidden" name="mailbox" value="INBOX"',html)
+        self.assertNotIn("Advanced mailbox filters",html)
+        self.assertNotIn('class="v951-toolbar"',html)
+        self.assertIn('class="v960-mailbox-tabs"',html)
         self.assertNotIn('<select name="account_id">',html)
         self.assertNotIn('<select name="mailbox">',html)
         self.assertIn('data-v960-href=',html)
@@ -112,25 +112,64 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn("Unread message", result)
         self.assertIn('data-v960-href=', result)
 
-    def test_beta_three_pane_markup_preserves_safe_mailbox_contract(self):
-        sample = INBOX.replace("</section>",
+    def _sample_real_folder(self, folder: str, detail: bool = True) -> str:
+        sample = INBOX.replace(
+            '</table></div>', '</table></div><div class="v989-reader-source">'
+            + ('<div class="v963-detail"><h3>Safe message</h3>'
+               '<details class="v963-tech"><summary>Technical details</summary>'
+               '<div class="scroll v963-url-table"><table><tr><td>Evidence</td>'
+               '</tr></table></div></details></div>' if detail else '')
+            + '</div>'
             '<div class="v960-pagination"><span></span>'
-            '<span class="small muted">Page 1 · 1 cached result(s)</span></div>'
-            '</section>')
+            '<span class="small muted">Page 1 · 1 cached result(s)</span></div>', 1)
+        if folder != "Inbox":
+            sample=sample.replace('class="active" href="/?ui_view=inbox&amp;mailbox=INBOX#inbox">Inbox',
+                                  'class="" href="/?ui_view=inbox&amp;mailbox=INBOX#inbox">Inbox')
+            sample=sample.replace('class="" href="/?ui_view=inbox&amp;mailbox=Sent#inbox">Sent',
+                                  'class="active" href="/?ui_view=inbox&amp;mailbox=Sent#inbox">'+folder)
+        return sample
+
+    def test_beta_three_pane_markup_preserves_safe_mailbox_contract(self):
+        sample = self._sample_real_folder("Inbox")
         result = modern_inbox_markup(sample)
         self.assertIn('class="v989-mail-workspace"', result)
         self.assertIn('class="v989-mail-stream"', result)
         self.assertIn('class="v989-reading-pane"', result)
-        self.assertIn('data-v960-href=', result)
+        self.assertIn('class="v989-reader-source"', result)
         self.assertIn('class="v987-avatar"', result)
         self.assertIn('class="v960-pagination"', result)
-        self.assertEqual(result.count('v989-mail-workspace'), 2) # class and data attribute
+        self.assertIn('data-v960-href=', result)
         self.assertLess(result.index('v989-mail-stream'),result.index('v989-reading-pane'))
         self.assertIn('Remote images remain blocked',result)
+        self.assertNotIn('class="v951-toolbar"',result)
+        self.assertIn('class="v963-tech"',result)
+        self.assertNotIn('v960-inline-detail',result)
+
+    def test_every_mail_folder_shares_split_reader_not_full_page(self):
+        for folder in ("Inbox","Sent","Spam","Drafts","Trash"):
+            with self.subTest(folder=folder):
+                result=modern_inbox_markup(self._sample_real_folder(folder))
+                self.assertIn('class="v989-mail-workspace"',result)
+                self.assertIn('class="v989-reading-pane"',result)
+                self.assertIn('class="v989-reader-source"',result)
+                self.assertLess(result.index('</table></div>'),result.index('class="v989-reading-pane"'))
+                self.assertIn("Safe message",result)
+                self.assertIn('data-v960-href=',result)
+                self.assertNotIn('class="v951-toolbar"',result)
+
+    def test_beta_technical_details_stay_inside_reading_pane(self):
+        from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
+        result=modern_inbox_markup(self._sample_real_folder("Sent"))
+        pane=result.split('class="v989-reading-pane"')[1].split('class="v960-pagination"')[0]
+        self.assertIn('class="v963-tech"',pane)
+        self.assertIn('class="v963-url-table"',pane)
+        self.assertIn("max-height:300px",BETA_MAIL_STYLE)
+        self.assertIn("overflow-x:auto!important",BETA_MAIL_STYLE)
+        self.assertIn("position:static!important",BETA_MAIL_STYLE)
+        self.assertNotIn('class="v960-inline-detail"',result)
 
     def test_beta_all_unread_links_preserve_mailbox_and_clear_selection(self):
-        sample = INBOX.replace("</section>",
-            '<div class="v960-pagination"><span>Page 1</span></div></section>')
+        sample = self._sample_real_folder("Inbox")
         result = modern_inbox_markup(
             sample, query_string="account_id=one&mailbox=INBOX&unread_only=1&message_uid=42"
         )
@@ -144,15 +183,18 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertNotIn('message_uid=42',filters)
         self.assertIn('data-v960-fragment="inbox"',filters)
 
-    def test_beta_live_reader_reuses_original_safe_message_element(self):
+    def test_beta_reader_is_server_rendered_and_infinite_scroll_uses_cache_fragments(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
-        self.assertIn('function enhanceBetaInbox(inbox)', MAIL_SCRIPT)
-        self.assertIn("const detail=detailRow.querySelector('.v963-detail')", MAIL_SCRIPT)
-        self.assertIn('if(detail)pane.append(detail)', MAIL_SCRIPT)
-        self.assertIn('detailRow.remove()', MAIL_SCRIPT)
-        self.assertIn('grid-template-columns:minmax(310px,375px)', BETA_MAIL_STYLE)
-        self.assertIn('@media(max-width:760px)', BETA_MAIL_STYLE)
-        self.assertIn(':has(.v963-detail) .v989-mail-stream', BETA_MAIL_STYLE)
+        self.assertIn('function enhanceBetaInbox(inbox)',MAIL_SCRIPT)
+        self.assertIn("const source=workspace.querySelector('.v989-reader-source')",MAIL_SCRIPT)
+        self.assertIn("u.pathname='/dashboard/view/inbox'",MAIL_SCRIPT)
+        self.assertIn("u.searchParams.delete('message_uid')",MAIL_SCRIPT)
+        self.assertIn("response=await fetch(u.toString()",MAIL_SCRIPT)
+        self.assertIn("row.dataset.v960Href",MAIL_SCRIPT)
+        self.assertIn('lastListPosition',MAIL_SCRIPT)
+        self.assertIn('grid-template-columns:minmax(340px,380px)',BETA_MAIL_STYLE)
+        self.assertIn('@media(max-width:760px)',BETA_MAIL_STYLE)
+        self.assertIn(':has(.v963-detail) .v989-mail-stream',BETA_MAIL_STYLE)
 
     def test_beta_uses_cached_snippets_without_fetching_remote_media(self):
         sample = INBOX.replace(
