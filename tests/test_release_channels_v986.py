@@ -1,9 +1,14 @@
 """Stable/Beta release channel contracts and persistent update opt-in."""
 from __future__ import annotations
 
+import io
+import json
 import os
+import re
 import tempfile
+import textwrap
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -198,6 +203,57 @@ class BootstrapContracts(unittest.TestCase):
         self.assertIn('release.get("prerelease") is True',yaml)
         self.assertIn('POSTMASTER_VERSION: latest',yaml)
         self.assertIn('mcp_data:/data',yaml)
+
+    def test_embedded_bootstrap_python_resolves_real_stable_and_beta_order(self):
+        yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
+        found=re.search(
+            r'if REF="\$\$\(python - <<\x27PY\x27\n(?P<body>.*?)\n        PY',
+            yaml,re.S,
+        )
+        self.assertIsNotNone(found,"embedded release resolver missing")
+        source=textwrap.dedent(found.group("body"))
+        compile(source,"<portainer release resolver>","exec")
+        def resolve(channel):
+            result=io.StringIO()
+            payload=json.dumps(RELEASES).encode()
+            with patch.dict(os.environ,{"REPO":"the-code-learner/mail-task-mcp-server",
+                                        "CONTROL_CHANNEL":channel}),\
+                 patch("urllib.request.urlopen",return_value=io.BytesIO(payload)),\
+                 redirect_stdout(result):
+                exec(compile(source,"<portainer release resolver>","exec"),{})
+            return result.getvalue().strip()
+        self.assertEqual(resolve("stable"),"v9.8.6")
+        self.assertEqual(resolve("stable_beta"),"v9.8.7-beta.1")
+
+    def test_embedded_bootstrap_control_reader_validates_opt_in(self):
+        yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
+        found=re.search(
+            r'if CONTROL_VALUES="\$\$\(python - <<\x27PY\x27\n(?P<body>.*?)\n        PY',
+            yaml,re.S,
+        )
+        self.assertIsNotNone(found,"embedded runtime preference reader missing")
+        source=textwrap.dedent(found.group("body"))
+        compile(source,"<portainer release preference>","exec")
+        def read(payload):
+            with tempfile.TemporaryDirectory() as td:
+                path=Path(td)/"state.json"
+                path.write_text(json.dumps(payload),encoding="utf-8")
+                result=io.StringIO()
+                with patch.dict(os.environ,{"CONTROL_FILE":str(path)}),redirect_stdout(result):
+                    exec(compile(source,"<portainer release preference>","exec"),{})
+                return result.getvalue().splitlines()
+        self.assertEqual(
+            read({"selector":"latest"}),
+            ["latest","","false","stable"],
+        )
+        self.assertEqual(
+            read({"selector":"latest","release_channel":"stable_beta",
+                  "restart_ref_once":"v9.8.6-beta.1","check_updates_once":True}),
+            ["latest","v9.8.6-beta.1","true","stable_beta"],
+        )
+        with self.assertRaisesRegex(RuntimeError,"invalid one-shot restart ref"):
+            read({"selector":"latest","release_channel":"stable",
+                  "restart_ref_once":"v9.8.6-beta.1"})
 
     def test_workflows_do_not_publish_beta_as_stable(self):
         root=Path(__file__).resolve().parents[1]/".github"/"workflows"
