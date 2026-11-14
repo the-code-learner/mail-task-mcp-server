@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - beta/v9.8.9-beta.18-map-fallback
+      - beta/v9.8.9-beta.19-scheduled-email
       - beta/v9.8.9-beta.17-map-markers
     paths:
       - 'README.md'
