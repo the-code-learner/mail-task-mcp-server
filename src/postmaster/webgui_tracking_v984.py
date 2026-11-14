@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from html import escape
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 from starlette.requests import Request
@@ -186,22 +186,90 @@ def _events(base: Any, account_id: str, owner_id: str, project_id: str,
 
 
 def _event_html(event: dict[str, Any]) -> str:
+    """Human-readable event destination with exact, optional source email link.
+
+    Raw tracking identifiers remain available under a collapsed technical
+    disclosure; no external resource is fetched or opened while rendering.
+    """
     def e(k: str) -> str:
         return escape(str(event.get(k) or "—"))
-    return f'''<details class="v984-event">
-<summary><strong>{e("event_kind")}</strong><time>{e("observed_at")}</time><span>{e("recipient")}</span><span>{e("geo_country_code")}</span></summary>
-<div class="v984-detail">
-<div><b>Raw IP</b><code>{e("source_ip")}</code></div>
-<div><b>Estimated location</b>{e("geo_city")}, {e("geo_region")}, {e("geo_country_code")}</div>
-<div><b>ASN</b>{e("geo_asn")}</div>
-<div><b>ISP / Organization</b>{e("geo_isp")} / {e("geo_organization")}</div>
-<div><b>GeoIP source / confidence</b>{e("geo_source")} / {e("geo_confidence")}</div>
-<div><b>Browser / OS</b>{e("browser")} / {e("os")}</div>
-<div><b>User-Agent</b><code>{e("user_agent")}</code></div>
-<div><b>Owner / project / account (organizational)</b>{e("owner_id")} / {e("project_id")} / {e("account_id")}</div>
-<div><b>Linked email / tracked link</b>{e("delivery_id")} / {e("tracked_link_id")}</div>
-</div></details>'''
 
+    kind = str(event.get("event_kind") or "")
+    names = {
+        "email_open": "Email aperta",
+        "email_click": "Link in email cliccato",
+        "tracked_url_click": "Link tracciato visitato",
+        "tracked_file_download": "File scaricato",
+    }
+    title = names.get(kind, kind)
+    subject = str(event.get("email_subject") or "").strip()
+    recipient = str(event.get("recipient") or "").strip()
+    original = str(event.get("original_url") or "").strip()
+    filename = str(event.get("download_filename") or "").strip()
+    label = str(event.get("label") or "").strip()
+    href = str(event.get("email_href") or "").strip()
+    info: list[str] = []
+    if kind.startswith("email_"):
+        info.append(
+            "<strong>Email: " + escape(subject or "Oggetto non disponibile") + "</strong>"
+        )
+        if recipient:
+            info.append("<small>Destinatario: " + escape(recipient) + "</small>")
+        if kind == "email_click" and original:
+            info.append("<small>Destinazione del link: " + escape(original) + "</small>")
+        if href.startswith("/?") and href.endswith("#inbox"):
+            info.append(
+                '<a data-v960-fragment="inbox" href="' + escape(href, quote=True)
+                + '">Apri email in Sent</a>'
+            )
+        else:
+            info.append("<small>Collegamento alla mail non disponibile nella cache Sent</small>")
+    elif kind == "tracked_file_download":
+        info.append("<strong>File: " + escape(filename or label or "Nome file non disponibile") + "</strong>")
+        if label and filename and label != filename:
+            info.append("<small>Etichetta: " + escape(label) + "</small>")
+    else:
+        info.append("<strong>URL di destinazione:</strong>")
+        parts = urlsplit(original)
+        if parts.scheme.lower() in {"http", "https"} and parts.netloc:
+            info.append('<a href="' + escape(original, quote=True) +
+                        '" target="_blank" rel="noopener noreferrer">' +
+                        escape(original) + "</a>")
+        elif original:
+            info.append("<small>" + escape(original) + "</small>")
+        else:
+            info.append("<small>Destinazione non disponibile</small>")
+        if label:
+            info.append("<small>Etichetta: " + escape(label) + "</small>")
+    location = ", ".join(
+        str(event.get(k) or "").strip()
+        for k in ("geo_city", "geo_region", "geo_country_code")
+        if str(event.get(k) or "").strip()
+    ) or "Non disponibile"
+    org = str(event.get("geo_isp") or event.get("geo_organization") or "").strip()
+    source = str(event.get("geo_source") or "unavailable")
+    status = (
+        "Solo paese ricavato dalla rete; città/operatore non determinati"
+        if source in {"edge country", "unavailable"} else
+        "Stima GeoIP locale, possibile proxy o scanner"
+    )
+    return f'''<details class="v984-event">
+<summary><strong>{escape(title)}</strong><time>{e("observed_at")}</time><span>{escape(recipient or filename or label or "")}</span><span>{e("geo_country_code")}</span></summary>
+<div class="v984-detail">
+<div class="v9898-event-context">{''.join(info)}</div>
+<div><b>IP registrato</b><code>{e("source_ip")}</code></div>
+<div><b>Localizzazione stimata</b>{escape(location)}<small>{escape(status)}</small></div>
+<div><b>ASN</b>{e("geo_asn")}</div>
+<div><b>Operatore / organizzazione</b>{escape(org or "Non disponibile")}</div>
+<div><b>Fonte GeoIP / attendibilità</b>{e("geo_source")} / {e("geo_confidence")}</div>
+<div><b>Browser / sistema operativo</b>{e("browser")} / {e("os")}</div>
+<div><b>User-Agent</b><code>{e("user_agent")}</code></div>
+<div><b>Owner / progetto / account</b>{e("owner_id")} / {e("project_id")} / {e("account_id")}</div>
+<details class="v9898-rawids"><summary>Identificativi tecnici</summary>
+<div>Delivery ID: <code>{e("delivery_id")}</code></div>
+<div>Tracked link ID: <code>{e("tracked_link_id")}</code></div>
+<div>Message-ID: <code>{e("message_id")}</code></div></details>
+</div></details>'''
 
 def render_tracking_v984(base: Any, core: Any, request: Request) -> str:
     from .webgui_v962_views import _panel
