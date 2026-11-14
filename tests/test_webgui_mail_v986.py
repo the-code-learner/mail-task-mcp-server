@@ -55,7 +55,7 @@ class MailGuiV986ContractTests(unittest.TestCase):
     def test_no_credentials_or_files_automatically_attached(self):
         self.assertIn("for(const option of select.options) option.selected=false",MAIL_SCRIPT)
         self.assertIn("0 selected",MAIL_SCRIPT) if False else None
-        self.assertIn("Stored files are not attached unless explicitly selected",MAIL_SCRIPT)
+        self.assertIn("Files in storage are never attached unless explicitly selected",MAIL_SCRIPT)
         self.assertIn("checkbox.addEventListener('change'",MAIL_SCRIPT)
         self.assertNotIn("window.fetch(",MAIL_SCRIPT)
         self.assertIn("plain:body.value||''",MAIL_SCRIPT)
