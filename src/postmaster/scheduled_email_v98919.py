@@ -131,7 +131,11 @@ class ScheduledEmailService:
         now = datetime.now(timezone.utc).isoformat()
         owner = owner_id or self.scheduler.settings.default_owner_id
         project = project_id or "scheduled-email"
-        payload = {"account_id": aid, "message": frozen, "authorized_at_utc": now,
+        sender_address = str(getattr(client.settings, "email_address", "") or "").strip()
+        if not sender_address:
+            raise SchedulerError("Sender account is missing its email identity")
+        payload = {"account_id": aid, "sender_address": sender_address,
+                   "message": frozen, "authorized_at_utc": now,
                    "authorization": "explicit_schedule", "idempotency_key": key or job_id,
                    "tracking_off_authorized": bool(tracking_off_authorized),
                    "send_at": due.isoformat()}
@@ -226,6 +230,10 @@ class ScheduledEmailService:
             payload = json.loads(row["payload_json"])
             message = payload["message"]
             client = self.mail_client(payload["account_id"])
+            if str(getattr(client.settings, "email_address", "") or "").strip().casefold() != str(
+                payload.get("sender_address") or ""
+            ).casefold():
+                raise SchedulerError("Sender account identity changed after scheduling")
             recipients = list(dict.fromkeys(message["to"] + message["cc"] + message["bcc"]))
             # A newly suppressed recipient must stop a queued send; consent at
             # scheduling is not permission to ignore subsequent suppression.
