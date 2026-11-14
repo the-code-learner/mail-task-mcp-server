@@ -2,6 +2,19 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.9 - 2026-11-14
+
+### Beta: install GeoLite2 City and ASN directly in WebUI Settings
+- New **Settings → GeoIP databases** tab shows City, ASN and paid optional ISP availability and provides a protected **Download / update GeoIP databases** action.
+- An administrator supplies their own MaxMind Account ID and license key after accepting the license terms. MaxMind requires credentials even for free GeoLite2; the license key is used for the explicit HTTPS request only and is never saved to local databases, the repository, log files or a URL.
+- Installs free GeoLite2-City and GeoLite2-ASN into their fixed configured MMDB paths in the persistent /data volume without changing Portainer YAML, installing system packages or restarting the container.
+- Secure downloader enforces fixed HTTPS MaxMind/official object-storage hosts, strips credentials on redirects, caps archive and MMDB sizes, checks exactly one expected member, validates MMDB integrity and atomically replaces valid databases. Parallel submissions are rejected.
+- No automatic network download or periodic credential storage: to update, reopen Settings and enter license credentials again; this avoids retaining third-party secrets unnecessarily.
+- GeoIP read service detects newly created databases, so historic tracking events can be enriched as soon as local MMDBs are available. GeoIP is only a network estimate and is unreliable for proxies.
+- Paid GeoIP2-ISP is not downloaded without a separate subscription. ASN database can still provide autonomous-system organization details.
+- Includes regressions for credential input validation, safe redirect rules, exact target configuration, Settings registration and no implicit installation on page render.
+- Beta only, Stable main v9.8.8, canonical Portainer YAML, persistent mail data and MCP tool catalog unchanged.
+
 ## 9.8.9-beta.8 - 2026-11-14
 
 ### Beta: human-readable Tracking context and explicit GeoIP status
