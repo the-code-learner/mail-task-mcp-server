@@ -2,6 +2,25 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.6 - 2026-11-14
+
+### Stable and Beta update channels
+- Added persistent **Stable only** (default) / **Stable + Beta** preference in Settings → Versions & updates. Release discovery, update status, filtering and SemVer ordering respect the user's selection; drafts and mismatched GitHub prerelease flags are excluded.
+- Retained preview and explicit confirmation for version changes. Beta installs use pinned immutable numeric transport tag aliases to remain compatible with the original Portainer bootstrap; stable `latest` behavior is unchanged.
+- Added gated manual Beta publication workflow with matching source version, changelog, exact-commit CI checks and immutable tag validation. The single Portainer YAML remains byte-for-byte identical to v9.8.5.
+
+### WebGUI improvements
+- Updated responsive Inbox/Sent presentation and navigation while preserving mailbox filters and safe mail reading.
+- Improved Compose with Plain/HTML/AMP selection, Visual/Code editing and optional Stored Files attachments, none selected by default.
+- Added Settings tabs for Versions & updates, Email accounts, services and diagnostics; included the existing IMAP/SMTP account add/edit/test/default/delete workflows.
+- Removed the duplicate Contacts email-account selector; corrected Tracking time-period buttons, custom date filtering and active selection behavior.
+- Preserved the 134 MCP tools, persistent data and security and authorization controls.
+
+### Verification and deployment
+- **575 regression tests passed** in GitHub Actions run #521, including Python compilation, import, original single-YAML bootstrap validation and cached-source fallback checks.
+- No changes to `postmaster-mcp.yml`, the production Portainer stack, Cloudflare settings or deployed credentials. Publishing does not directly restart an installation.
+- v9.9.0 WhatsApp functionality remains separate and is not part of this release.
+
 ## 9.8.5 - 2026-11-14
 
 ### Corrected production WebUI
