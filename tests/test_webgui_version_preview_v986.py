@@ -82,7 +82,7 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
                 "target_version":"v9.8.5",
             })
         self.assertEqual(response.status_code,200,response.text[:500])
-        self.assertIn("Confirm version change",response.text)
+        self.assertIn("Confirm update and restart",response.text)
         self.assertIn('name="preview_id" value="pv_demo_6fd25"',response.text)
         self.assertIn('name="approved" value="yes" required',response.text)
         self.assertIn('name="target_version" value="v9.8.5"',response.text)
@@ -124,6 +124,38 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
             ("update-latest","v9.8.5","wrong"),
             ("update-latest","v9.8.5","pv_demo_6fd25"),
         ])
+
+    def test_live_release_status_has_fresh_csrf_and_never_cache_headers(self):
+        from unittest.mock import patch
+        client, core, base = _client()
+        data = {"ok":True,"stable":"v9.8.8","beta":"v9.8.9-beta.1",
+                "stable_update":True,"beta_update":False,"beta_allowed":False,
+                "release_channel":"stable","current_version":"9.8.7",
+                "check_status":"ok","checked_at":"2026-11-14T14:00:00Z",
+                "interval_seconds":30}
+        with patch("postmaster.webgui_versions_v984._release_snapshot",return_value=data):
+            with client:
+                response=client.get("/dashboard/versions/status")
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.headers["cache-control"],"private, no-store")
+        self.assertEqual(response.json()["csrf"],base._csrf_value())
+        self.assertEqual(response.json()["interval_seconds"],30)
+        self.assertEqual(response.json()["beta"],"v9.8.9-beta.1")
+        self.assertFalse(response.json()["beta_allowed"])
+        self.assertEqual(core.execute_calls,[])
+
+    def test_invalid_csrf_returns_helpful_refresh_message_not_unstyled_raw_error(self):
+        client,core,base=_client()
+        with client:
+            response=client.post("/dashboard/versions/preview",data={
+                "csrf":"outdated-token","operation":"switch-version",
+                "target_version":"v9.8.8",
+            })
+        self.assertEqual(response.status_code,403)
+        self.assertIn("Session expired",response.text)
+        self.assertIn("Back to Updates",response.text)
+        self.assertEqual(core.preview_calls,[])
+        self.assertEqual(core.execute_calls,[])
 
     def test_preview_error_returns_clear_failure_without_execute(self):
         client,core,base=_client()
