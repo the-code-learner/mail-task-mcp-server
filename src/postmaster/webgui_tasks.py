@@ -348,7 +348,7 @@ def task_fragment(base: Any, request: Request) -> str:
 {_detail(base, request, project, show_completed)}{_editor(base, request, project, show_completed)}
 <section class="card wide"><div class="panel-title"><h2>Task registry</h2><div class="row"><div class="task-view-toggle"><a class="{"active" if view_mode == "agenda" else ""}" href="{agenda_url}">Agenda</a><a class="{"active" if view_mode == "calendar" else ""}" href="{calendar_url}">Calendar</a></div><span class="badge">{escape(count)}</span><a href="{toggle}"><button type="button">{escape(toggle_label)}</button></a></div></div>
 {filter_html}
-<p class="small muted"><strong>Only explicitly scheduled one-time email sends run automatically.</strong> All other tasks remain passive. An in-progress SMTP handoff may be uncertain after a restart and is never retried automatically.</p>
+<p class="small muted"><strong>No cron worker runs here.</strong> Only explicitly scheduled one-time email sends run automatically. All other tasks remain passive. An in-progress SMTP handoff may be uncertain after a restart and is never retried automatically.</p>
 {content}
 </section></div></section>'''
 
