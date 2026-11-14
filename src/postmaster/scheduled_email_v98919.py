@@ -223,7 +223,9 @@ class ScheduledEmailService:
             result = self.mail_client(payload["account_id"]).send_email(
                 **message, idempotency_key="scheduled-" + job_id,
             )
-            if not isinstance(result, dict) or result.get("ok") is False or result.get("sent") is False:
+            if (not isinstance(result, dict) or result.get("ok") is False
+                    or result.get("sent") is False
+                    or (result.get("sent") is not True and result.get("ok") is not True)):
                 raise RuntimeError("SMTP send failed or returned an unconfirmed result")
         except Exception as exc:
             log.exception("Scheduled email %s failed; not retrying automatically", job_id)
@@ -245,16 +247,9 @@ class ScheduledEmailService:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        # 'sending' from a previous process is in-doubt, never reset to
-        # scheduled. Network delivery may have happened before a crash.
-        with self.scheduler._connect() as conn:
-            now = datetime.now(timezone.utc).isoformat()
-            for row in conn.execute("SELECT id FROM jobs WHERE action_type=? AND status='sending'", (ACTION,)):
-                conn.execute(
-                    "UPDATE jobs SET status='failed',next_run_utc=NULL,last_error=?,updated_at=? WHERE id=?",
-                    ("Interrupted during SMTP handoff; delivery uncertain, no automatic retry", now, row["id"]),
-                )
-                self.scheduler._record(conn, row["id"], "email_send_uncertain_after_restart", {})
+        # In-flight sends may belong to another worker/process. Never seize or
+        # replay a 'sending' job on startup: SMTP delivery may already have
+        # occurred, so it stays in an in-doubt state for operator review.
         self._stop.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="postmaster-scheduled-email")
         self._thread.start()
