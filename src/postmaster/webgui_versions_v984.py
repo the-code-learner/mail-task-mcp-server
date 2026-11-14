@@ -93,6 +93,7 @@ def _release_snapshot(base: Any) -> dict[str, Any]:
         "bootstrap_control_supported": bootstrap_supported,
         "ok": True, "current_version": running, "release_channel": selected,
         "stable": stable, "beta": beta,
+        "release_tags": tags,
         # A user running a Beta may explicitly return to the latest Stable,
         # even though Stable is numerically older. This is a switch, not an upgrade.
         "stable_update": bool(stable and stable != active_ref and
@@ -116,6 +117,20 @@ def versions_settings(base: Any) -> str:
     csrf = _e(base._csrf_value())
     chosen_stable = ' selected' if channel == "stable" else ""
     chosen_beta = ' selected' if channel == "stable_beta" else ""
+    eligible = [tag for tag in data["release_tags"]
+                if channels.release_is_allowed(tag, channel)]
+    def exact_options(kind: str) -> str:
+        return "".join(
+            '<option value="' + _e(tag) + '">' + _e(tag) + '</option>'
+            for tag in eligible if channels.parse_release_tag(tag)[1] == kind
+        )
+    exact_select = (
+        '<option value="">Select an exact release...</option>'
+        '<optgroup label="Stable releases">' + exact_options("stable") + '</optgroup>'
+        + ('<optgroup label="Beta releases">' + exact_options("beta") + '</optgroup>'
+           if channel == channels.STABLE_AND_BETA else '')
+    )
+    exact_enabled = bool(eligible and data["check_status"] == "ok")
 
     def update_form(kind: str, target: str, enabled: bool) -> str:
         label = ("Switch to Stable" if "-beta." in str(data["current_version"])
@@ -161,6 +176,19 @@ def versions_settings(base: Any) -> str:
         f'<p class="small muted" data-v988-message="beta">{"Update available" if beta_enabled else "Enable Beta in update channel" if channel == "stable" else "No newer Beta release"}</p>'
         + update_form("beta", beta, beta_enabled) +
         '</div></div>'
+        '<section class="v988-exact-pin" aria-label="Pin an exact version">'
+        '<h4>Install or pin an exact release</h4>'
+        '<p class="small muted">Choose any published version, including older releases. '
+        'The chosen release remains pinned until explicitly changed. '
+        'A separate confirmation is required before restart.</p>'
+        '<form method="post" action="/dashboard/versions/preview" data-v988-pin>'
+        f'<input type="hidden" name="csrf" value="{csrf}">'
+        '<input type="hidden" name="operation" value="pin-version">'
+        '<label>Exact release <select name="target_version" required'
+        + ('' if exact_enabled else ' disabled') + '>'
+        + exact_select + '</select></label>'
+        '<button type="submit" class="primary" disabled>Preview &amp; pin version</button>'
+        '</form></section>'
         '<form method="post" action="/dashboard/versions/channel" data-v988-channel>'
         f'<input type="hidden" name="csrf" value="{csrf}">'
         '<label>Update channel <select name="release_channel">'
@@ -183,6 +211,12 @@ VERSIONS_STYLE = r"""
 #v984-versions .v988-release-card>strong{font-size:13px;color:var(--v970-muted)}
 #v984-versions .v988-release-version{font-size:24px;font-weight:800;letter-spacing:-.5px;margin:9px 0}
 #v984-versions .v988-release-card button:disabled{opacity:.45;cursor:not-allowed}
+#v984-versions .v988-exact-pin{margin:18px 0;padding:16px;border:1px solid var(--v970-line);border-radius:12px;background:var(--v970-surface-2)}
+#v984-versions .v988-exact-pin h4{margin:0 0 8px;font-size:15px}
+#v984-versions [data-v988-pin]{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+#v984-versions [data-v988-pin] label{display:flex;flex-direction:column;gap:5px;flex:1;min-width:205px}
+#v984-versions [data-v988-pin] select{width:100%;max-width:480px}
+#v984-versions [data-v988-pin] button:disabled{opacity:.45;cursor:not-allowed}
 #v984-versions [data-v988-channel]{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
 #v984-versions [data-v988-channel] label{display:flex;flex-direction:column;gap:5px}
 @media(max-width:720px){#v984-versions .v988-release-grid{grid-template-columns:1fr}}
@@ -241,6 +275,29 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
           kind==='stable'?'Stable is older than the current version':'Already up to date';
       }
       live.querySelector('form[data-v988-channel] [name=csrf]').value=data.csrf;
+      const pin=live.querySelector('form[data-v988-pin]');
+      if(pin){
+        const select=pin.querySelector('[name=target_version]');
+        const previous=select.value;
+        const valid=(data.release_tags||[]).filter(tag=>
+          /^v\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(tag) &&
+          (data.beta_allowed || !tag.includes('-beta.')));
+        select.replaceChildren(new Option('Select an exact release...',''));
+        for(const [name,values] of [
+          ['Stable releases',valid.filter(v=>!v.includes('-beta.'))],
+          ['Beta releases',valid.filter(v=>v.includes('-beta.'))]
+        ]){
+          if(!values.length)continue;
+          const group=document.createElement('optgroup');group.label=name;
+          values.forEach(v=>group.appendChild(new Option(v,v)));
+          select.appendChild(group);
+        }
+        select.value=valid.includes(previous)?previous:'';
+        const ready=data.check_status==='ok' && valid.length>0;
+        select.disabled=!ready;
+        pin.querySelector('[name=csrf]').value=data.csrf;
+        pin.querySelector('button').disabled=!ready||!select.value;
+      }
       return data;
     }).catch(err=>{
       root()?.querySelector('[data-v988-feedback]')?.replaceChildren(
@@ -253,17 +310,29 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});
   const main=document.querySelector('.v970-workspace > main');
   if(main)new MutationObserver(()=>{if(root())refresh()}).observe(main,{childList:true,subtree:false});
+  document.addEventListener('change',ev=>{
+    const select=ev.target.closest?.('form[data-v988-pin] select[name=target_version]');
+    if(!select)return;
+    select.form.querySelector('button').disabled=!select.value||select.disabled;
+  });
   document.addEventListener('submit',async ev=>{
-    const form=ev.target.closest?.('form[data-v988-update],form[data-v988-channel]');
+    const form=ev.target.closest?.('form[data-v988-update],form[data-v988-channel],form[data-v988-pin]');
     if(!form)return;
     ev.preventDefault();
     const clicked=form.dataset.v988Update;
     // Save the version the user actually clicked before refreshing.
-    const target=clicked?form.querySelector('[name=target_version]').value:'';
+    const pinning=form.hasAttribute('data-v988-pin');
+    const target=(clicked||pinning)?form.querySelector('[name=target_version]').value:'';
     const data=await refresh(true);
     const feedback=root()?.querySelector('[data-v988-feedback]');
     if(!data){if(feedback)feedback.textContent='Session update unavailable. Try again.';return;}
     form.querySelector('[name=csrf]').value=data.csrf;
+    if(pinning && (!target || data.check_status!=='ok' ||
+        !(data.release_tags||[]).includes(target) ||
+        (target.includes('-beta.')&&!data.beta_allowed))){
+      if(feedback)feedback.textContent='This exact release is no longer eligible. Review the list and select a version again.';
+      return;
+    }
     if(clicked && (data[clicked]!==target ||
          !(clicked==='stable'?data.stable_update:data.beta_update) ||
          (clicked==='beta'&&!data.beta_allowed) || data.check_status!=='ok')){
@@ -356,6 +425,20 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         target = str(form.get("target_version") or "").strip()
         if operation not in {"update-latest", "switch-version", "pin-version", "rollback-version"}:
             return PlainTextResponse("Unsupported update operation", status_code=400)
+        if operation == "pin-version":
+            snapshot = _release_snapshot(base)
+            if not (
+                target in snapshot.get("release_tags", [])
+                and channels.release_is_allowed(target, snapshot["release_channel"])
+                and snapshot["check_status"] == "ok"
+            ):
+                return _response_page(
+                    "Release unavailable",
+                    "<p>The selected version is not a verified published release "
+                    "for the current update channel. No changes were made.</p>"
+                    '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
+                    status=400,
+                )
         result = core.runtime_version_change_preview(
             operation=operation,
             target_version=None if operation == "update-latest" else target,
