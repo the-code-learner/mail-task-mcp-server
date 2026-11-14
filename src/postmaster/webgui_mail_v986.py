@@ -209,15 +209,19 @@ def beta_mailbox_layout(html: str) -> str:
     # Only replace the known mailbox table wrapper, leaving every form and
     # message UID link under their existing security and rendering contracts.
     html = html.replace(opening, start, 1)
-    finish = '</table></div>'
+    # Insert the new reading pane immediately before the existing pagination.
+    # Reader details can themselves contain nested tables; never split on the
+    # first "</table>" because it could belong to the safe-message inspector.
+    finish = '<div class="v960-pagination">'
     end = (
-        '</table></div></div>'
+        '</div>'
         '<section class="v989-reading-pane" aria-label="Message reading pane">'
         '<div class="v989-reader-empty">'
         '<span class="v989-reader-envelope" aria-hidden="true">✉</span>'
         '<h3>Your messages</h3><p>Select a message on the left to read it here.</p>'
         '<p>Remote images remain blocked unless explicitly approved.</p>'
         '</div></section></div>'
+        '<div class="v960-pagination">'
     )
     html = html.replace(finish, end, 1)
     return html
