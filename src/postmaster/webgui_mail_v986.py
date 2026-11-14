@@ -504,6 +504,52 @@ BETA_MAIL_STYLE = r"""
  #panel-inbox .v989-mail-workspace{grid-template-columns:minmax(260px,320px) minmax(0,1fr);height:70vh}
  #panel-inbox .v989-reading-pane .v963-detail{padding:15px!important}
 }
+/* Beta.5: explicit rows override the old table and 25px grid tracks.
+   Sender, subject, and snippet never occupy the same line. */
+@media(min-width:761px){
+ #panel-inbox .v989-mail-workspace{grid-template-columns:minmax(405px,38%) minmax(0,1fr)!important;
+  height:calc(100dvh - 225px)!important;min-height:490px}
+}
+#panel-inbox .v989-list-scroll .v986-mail-list tr.v987-message{
+ display:grid!important;grid-template-columns:6px 36px minmax(0,1fr) 62px!important;
+ grid-template-rows:36px 22px minmax(18px,auto)!important;
+ column-gap:9px!important;row-gap:2px!important;
+ min-height:105px!important;padding:13px 15px!important;align-items:start!important;
+ align-content:start!important;box-sizing:border-box!important;
+}
+#panel-inbox .v989-list-scroll .v987-indicator{grid-column:1!important;grid-row:1/4!important;
+ padding-top:9px!important}
+#panel-inbox .v989-list-scroll .v987-identity{grid-column:2/4!important;grid-row:1!important;
+ display:flex!important;align-items:center!important;align-self:start!important;
+ min-height:35px!important;gap:9px!important;overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v987-avatar{flex:0 0 34px!important;
+ width:34px!important;height:34px!important;line-height:34px!important}
+#panel-inbox .v989-list-scroll .v987-sender{display:flex!important;align-items:flex-start!important;
+ justify-content:center!important;min-width:0!important;max-width:100%!important;
+ height:34px!important;overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v987-sender strong{display:block!important;
+ width:100%!important;max-width:100%!important;line-height:34px!important;
+ white-space:nowrap!important;text-overflow:ellipsis!important;overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v987-subject{grid-column:2/5!important;grid-row:2/4!important;
+ padding:0!important;margin:0!important;margin-left:0!important;align-self:start!important;
+ display:block!important;white-space:normal!important;overflow:hidden!important;
+ max-width:100%!important;height:auto!important}
+#panel-inbox .v989-list-scroll .v987-subject>span{display:block!important;
+ line-height:20px!important;height:20px!important;font-size:12px!important;
+ white-space:nowrap!important;text-overflow:ellipsis!important;overflow:hidden!important}
+#panel-inbox .v989-list-scroll .v989-preview{display:block!important;
+ line-height:19px!important;height:19px!important;margin:2px 0 0!important;
+ white-space:nowrap!important;overflow:hidden!important;text-overflow:ellipsis!important}
+#panel-inbox .v989-list-scroll .v987-date{grid-column:4!important;grid-row:1!important;
+ align-self:start!important;justify-self:end!important;line-height:34px!important;
+ padding:0!important;margin:0!important;white-space:nowrap!important}
+#panel-inbox .v989-list-scroll{overscroll-behavior:contain!important;scrollbar-gutter:stable}
+#panel-inbox .v989-scroll-status{min-height:38px!important;padding:6px 12px!important;
+ display:flex!important;align-items:center;justify-content:center;gap:10px}
+#panel-inbox .v989-scroll-status button{font-size:11px;padding:4px 10px}
+@media(min-width:761px) and (max-width:1150px){
+ #panel-inbox .v989-mail-workspace{grid-template-columns:minmax(340px,42%) minmax(0,1fr)!important}
+}
 @media(max-width:760px){
  #panel-inbox .v989-mail-workspace{display:block;height:auto;min-height:65vh;overflow:visible}
  #panel-inbox .v989-mail-stream{border:0;min-height:60vh}
@@ -756,13 +802,19 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      .find(a=>a.textContent.toLowerCase().includes('next'));
    if(pagination)pagination.hidden=true;
    const status=workspace.querySelector('.v989-scroll-status');
+   const moreButton=document.createElement('button');
+   moreButton.type='button';moreButton.textContent='Load more';
+   moreButton.className='v989-more-button';moreButton.hidden=!nextLink;
+   const statusText=document.createElement('span');
+   if(status){status.replaceChildren(statusText,moreButton);}
    let complete=false;
    let inflight=false;
-   function setStatus(s){if(status)status.textContent=s;}
+   function setStatus(s){statusText.textContent=s;}
+   moreButton.addEventListener('click',()=>more());
    async function more(){
      if(inflight||complete||!nextLink||document.hidden)return;
      if(!workspace.isConnected)return;
-     inflight=true;loadingLists.add(workspace);
+     inflight=true;loadingLists.add(workspace);moreButton.disabled=true;
      setStatus('Loading more messages…');
      try{
        const u=new URL(nextLink.href,location.href);
@@ -797,18 +849,24 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
          .find(a=>a.textContent.toLowerCase().includes('next'));
        nextLink=found||null;
        complete=!nextLink||!extraRows.length;
+       moreButton.hidden=complete;
        updateListCounter(workspace,tbody.querySelectorAll('tr[data-v960-href]').length);
-       setStatus(complete?'All cached messages loaded':'');
+       setStatus(complete?'All cached messages loaded':'Scroll for more, or use Load more');
      }catch(err){
        setStatus('Unable to load more messages. Scroll to retry.');
-     }finally{inflight=false;loadingLists.delete(workspace);}
+     }finally{
+       inflight=false;loadingLists.delete(workspace);moreButton.disabled=false;
+     }
    }
    scroller.addEventListener('scroll',()=>{
      lastListPosition={key,top:scroller.scrollTop};
      if(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<230)more();
    },{passive:true});
    if(!nextLink)setStatus('All cached messages loaded');
-   else if(scroller.scrollHeight<=scroller.clientHeight+250)more();
+   else {
+     setStatus('Scroll for more, or use Load more');
+     if(scroller.scrollHeight<=scroller.clientHeight+250)more();
+   }
  }
  function init(){
    const inbox=document.querySelector('#panel-inbox.active');
