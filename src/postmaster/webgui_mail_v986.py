@@ -85,7 +85,7 @@ _SELECTED_MAILBOX = re.compile(
 
 _MAIL_ROW = re.compile(
     r'<tr class="(?P<classes>v963-mail-row[^"]*)" data-v960-href="(?P<href>[^"]*)">'
-    r'(?P<body>(?:<td>.*?</td>){4})</tr>', re.S,
+    r'\\s*(?P<body>(?:<td>.*?</td>\\s*){4})</tr>', re.S,
 )
 _MAIL_CELL = re.compile(r'<td>(.*?)</td>', re.S)
 
