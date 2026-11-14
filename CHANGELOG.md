@@ -2,6 +2,16 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.5 - 2026-11-14
+
+### Beta: correct visible Inbox, Sent, Spam and Drafts layout; more reliable page loading
+- Fixed overlapping sender and subject lines in the message stream, caused by the old 25px first-row CSS grid conflicting with 32px avatars. Introduced explicit sender/subject/preview tracks and a minimum 105px card with no text collision.
+- Rebalanced the desktop message-list and reading-pane split to approximately 38%/62%, with responsive behavior for narrower devices and contained scrolling.
+- Infinite scrolling now exposes a persistent **Load more** button as an accessible fallback and retry path; cache-only authenticated fragments, deduplication, scroll preservation and privacy-safe reader behavior remain in place.
+- Corrected the Versions & updates panel: while running a Beta, the previous Stable is offered as a **Switch to Stable** action rather than falsely declaring it already installed.
+- Added regression checks for the nonoverlapping row/grid geometry and independent cached pagination controls.
+- Release remains prerelease-only; Stable `main` and original canonical Portainer YAML are untouched. No change to mailbox schemas, customer data, account credentials or MCP tool schema.
+
 ## 9.8.9-beta.4 - 2026-11-14
 
 ### Beta: truthful update activation and Portainer bootstrap compatibility
