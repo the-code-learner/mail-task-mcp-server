@@ -125,30 +125,51 @@ def _activity_trend(events: list[dict[str, Any]], since: datetime, until: dateti
 
 
 def _received(base: Any, account_id: str, since: datetime, until: datetime) -> tuple[list[str], str]:
-    if not account_id:
-        return [], "Select one email account to load received mail dates."
+    """Sample received email dates for one mailbox or all configured mailboxes."""
+    if account_id:
+        account_ids = [account_id]
+    else:
+        account_ids = [
+            str(row.get("id") or "").strip()
+            for row in base.account_store().list_accounts()
+            if row.get("id")
+        ]
+    if not account_ids:
+        return [], "No email accounts configured."
     days = max(1, min(3650, (datetime.now(UTC) - since).days + 2))
-    try:
-        rows = base.mail_client(account_id).search_emails(
-            mailbox="INBOX", since_days=days, limit=100,
-        )
-    except Exception:
-        return [], "Mailbox dates are unavailable; tracking data remains independent."
-    if not isinstance(rows, list):
-        return [], "Mailbox date lookup did not return messages."
-    timestamps = []
-    for row in rows:
-        date = str(row.get("date") or "")
-        dt = _time(date)
-        if not dt:
-            try:
-                dt = parsedate_to_datetime(date)
-            except (TypeError, ValueError):
-                dt = None
-        if dt and since <= dt.astimezone(UTC) < until:
-            timestamps.append(dt.isoformat())
-    return timestamps, "Recent INBOX sample (maximum 100 messages); not a complete IMAP history."
-
+    timestamps: list[str] = []
+    unavailable = 0
+    for selected_account in dict.fromkeys(account_ids):
+        try:
+            rows = base.mail_client(selected_account).search_emails(
+                mailbox="INBOX", since_days=days, limit=100,
+            )
+        except Exception:
+            unavailable += 1
+            continue
+        if not isinstance(rows, list):
+            unavailable += 1
+            continue
+        for row in rows:
+            date = str(row.get("date") or "")
+            dt = _time(date)
+            if not dt:
+                try:
+                    dt = parsedate_to_datetime(date)
+                except (TypeError, ValueError, OverflowError):
+                    dt = None
+            if dt:
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                if since <= dt.astimezone(UTC) < until:
+                    timestamps.append(dt.isoformat())
+    note = (
+        "Recent INBOX sample (maximum 100 messages per account); "
+        "not a complete IMAP history."
+    )
+    if unavailable:
+        note += f" {unavailable} account(s) unavailable or returned invalid data."
+    return timestamps, note
 
 def _sent(base: Any, account_id: str, since: datetime, until: datetime) -> tuple[list[str], bool]:
     with base.analytics_store()._connect() as conn:

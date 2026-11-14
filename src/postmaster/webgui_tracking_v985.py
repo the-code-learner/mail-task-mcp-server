@@ -248,12 +248,12 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         +_rate("Observed email click signals",ratio(len(clicked)),
               "Unique deliveries with a click / tracked sent emails.","v985-r-click")
     )
-    received_stat=str(len(received)) if account else "—"
+    received_stat=str(len(received))
     perf=(
         _stat("Sent emails",str(len(sent))+("+" if sent_truncated else ""),
               "Tracked sent message IDs")
         +_stat("Received emails",received_stat,
-               "Recent bounded Inbox sample" if account else "Choose an email account")
+               "Recent bounded INBOX sample across selected accounts")
         +_stat("Observed opens",counts["email_open"],"Not confirmed human reads")
         +_stat("Email clicks",counts["email_click"],"Observed interaction requests")
         +_stat("Recipients with events",len(email_recipients),"Tracked email recipient identifiers")
@@ -267,7 +267,6 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         "An open event is not proof of human reading.",
     ]
     if truncated:warnings.append("At least 500 events match; displayed counts and charts may be undercounts.")
-    if not account:warnings.append("Received-mail heatmaps require a selected email account.")
     if errors:warnings.extend(errors)
     short_note=" ".join(warnings)
     recent=(
