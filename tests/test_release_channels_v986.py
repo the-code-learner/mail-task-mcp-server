@@ -152,14 +152,18 @@ class SettingsPreferenceTests(unittest.TestCase):
              patch.object(runtime_control,"beta_bootstrap_supported",return_value=True),\
              patch.object(runtime_control,"available_release_tags",
                           return_value=(["v9.8.6-beta.2","v9.8.5"],"ok")),\
-             patch.object(runtime_control,"read_control",return_value={"selector":"latest"}):
+             patch.object(runtime_control,"read_control",return_value={"selector":"latest"}),\
+             patch("postmaster.webgui_versions_v984._CATALOG_AT",0):
             html=versions_settings(base)
         self.assertIn("Update channel",html)
         self.assertIn('name="release_channel"',html)
         self.assertIn('value="stable_beta" selected',html)
         self.assertIn("Stable only",html)
         self.assertIn("Stable + Beta",html)
-        self.assertIn("v9.8.6-beta.2 · BETA",html)
+        self.assertIn("v9.8.6-beta.2",html)
+        self.assertIn("Latest Stable",html)
+        self.assertIn("Latest Beta",html)
+        self.assertIn("Update Beta",html)
         self.assertIn('action="/dashboard/versions/channel"',html)
         self.assertIn('name="csrf"',html)
 
