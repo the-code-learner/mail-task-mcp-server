@@ -129,6 +129,53 @@ class MailGuiV986ContractTests(unittest.TestCase):
                                   'class="active" href="/?ui_view=inbox&amp;mailbox=Sent#inbox">'+folder)
         return sample
 
+    def test_specific_account_mailboxes_show_real_imap_sync_button(self):
+        for folder in ("Inbox","Sent","Drafts","Spam","Trash"):
+            with self.subTest(folder=folder):
+                sample=self._sample_real_folder(folder)
+                sync_form=(
+                    '<form method="post" action="/dashboard/inbox/refresh">'
+                    '<input type="hidden" name="csrf" value="real-token">'
+                    '<input type="hidden" name="account_id" value="one">'
+                    '<input type="hidden" name="mailbox" value="'+
+                    ({"Inbox":"INBOX","Sent":"Sent","Drafts":"Drafts",
+                      "Spam":"Spam","Trash":"Trash"}[folder])+'">'
+                    '<button class="primary" type="submit">Aggiorna</button></form>'
+                )
+                sample=sample.replace(
+                    '<div class="v963-inbox-head">',
+                    '<div class="v963-inbox-head"><div class="v963-refresh">'+sync_form+'</div>',
+                    1,
+                )
+                html=modern_inbox_markup(sample, selected_account="one",
+                                         query_string="account_id=one")
+                self.assertEqual(html.count('action="/dashboard/inbox/refresh"'),1)
+                self.assertIn('class="primary v98910-sync"',html)
+                self.assertIn('↻ Refresh mail</button>',html)
+                self.assertIn('name="csrf" value="real-token"',html)
+                self.assertIn('name="account_id" value="one"',html)
+                self.assertIn('name="mailbox" value="'+
+                              ({"Inbox":"INBOX","Sent":"Sent","Drafts":"Drafts",
+                                "Spam":"Spam","Trash":"Trash"}[folder])+'"',html)
+                self.assertIn('class="v98910-stream-actions"',html)
+                self.assertIn('class="v989-mail-workspace"',html)
+                self.assertLess(html.index('v98910-stream-actions'),
+                                html.index('v989-list-scroll'))
+
+    def test_all_accounts_never_triggers_a_default_account_sync(self):
+        html=modern_inbox_markup(
+            self._sample_real_folder("Inbox").replace(
+                '<div class="v963-inbox-head">',
+                '<div class="v963-inbox-head">'
+                '<div class="v963-refresh">'
+                '<span>All accounts · cached messages</span>'
+                '<span>Select an email account above to sync it.</span></div>',
+                1,
+            ), query_string="mailbox=INBOX")
+        self.assertIn('All accounts · cached messages',html)
+        self.assertNotIn('action="/dashboard/inbox/refresh"',html)
+        self.assertNotIn('class="primary v98910-sync"',html)
+
     def test_beta_three_pane_markup_preserves_safe_mailbox_contract(self):
         sample = self._sample_real_folder("Inbox")
         result = modern_inbox_markup(sample)
