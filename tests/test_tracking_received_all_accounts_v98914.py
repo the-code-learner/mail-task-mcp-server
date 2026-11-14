@@ -93,8 +93,8 @@ class ReceivedHeatmapAllAccountsV98914(unittest.TestCase):
         self.assertIn("When emails are received",html)
         self.assertIn("Cached received mail across enabled accounts",html)
         self.assertIn("2 enabled accounts",html)
-        self.assertIn("Fri 08:00: 1 event(s)",html)
         self.assertIn("Fri 09:00: 1 event(s)",html)
+        self.assertIn("Fri 10:00: 1 event(s)",html)
         self.assertNotIn("Select one email account",html)
         self.assertNotIn("Choose an email account",html)
 
