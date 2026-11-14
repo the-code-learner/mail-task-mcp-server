@@ -52,7 +52,7 @@ def render_settings_v985(base: Any, request: Request) -> str:
         raise RuntimeError("Unexpected registered account editor markup")
     account_panel = account_panel[len(prefix):-len("</section>")]
     account_panel = re.sub(
-        r'href="/\\?ui_view=accounts&amp;edit_account=([^"]+)#accounts"',
+        r'href="/\?ui_view=accounts&amp;edit_account=([^"]+)#accounts"',
         lambda match: (
             'href="/?ui_view=system&amp;settings_tab=accounts&amp;edit_account='
             + match.group(1) + '#system"'
@@ -64,8 +64,8 @@ def render_settings_v985(base: Any, request: Request) -> str:
         'href="/?ui_view=system&amp;settings_tab=accounts#system"',
     )
     account_panel = re.sub(
-        r'(<form\\b[^>]*\\baction="/dashboard/account/(?:save|test|default|delete)"[^>]*>)',
-        r'\\1<input type="hidden" name="return_to" value="settings">',
+        r'(<form\b[^>]*\baction="/dashboard/account/(?:save|test|default|delete)"[^>]*>)',
+        r'\1<input type="hidden" name="return_to" value="settings">',
         account_panel,
     )
     current = str(request.query_params.get("settings_tab") or "versions").strip()
