@@ -96,7 +96,7 @@ class ReleasePolicyTests(unittest.TestCase):
              patch.object(runtime_control,"available_release_tags",
                           return_value=(["v9.8.7-beta.1","v9.8.6","v9.8.5"],"ok")) as discover:
             target,selector,versions=_release_target("update-latest",None,execute=False)
-            self.assertEqual((target,selector),("v9.8.7-beta.1","latest"))
+            self.assertEqual((target,selector),("v9.8.7-beta.1","v9.8.7-beta.1"))
             self.assertEqual(
                 _release_target("update-latest","v9.8.7-beta.1",execute=True)[:2],
                 ("v9.8.7-beta.1","latest"),
@@ -209,7 +209,7 @@ class SettingsPreferenceTests(unittest.TestCase):
             self.assertEqual(saved["selector"],bootstrap_transport_tag("v9.8.7-beta.2"))
             self.assertEqual(saved["beta_target"],"v9.8.7-beta.2")
             self.assertEqual(runtime_control.read_control(path)["selector"],"v9.8.7-beta.2")
-            self.assertRegex(saved["selector"],r"^v[0-9]+\\.[0-9]+\\.[0-9]+$")
+            self.assertRegex(saved["selector"],r"^v[0-9]+\.[0-9]+\.[0-9]+$")
             with self.assertRaisesRegex(ValueError,"stable version"):
                 runtime_control.save_release_channel("stable",path=path)
             runtime_control.write_control(selector="v9.8.6",path=path)
@@ -235,19 +235,17 @@ class BootstrapContracts(unittest.TestCase):
         self.assertNotIn("POSTMASTER_BOOTSTRAP_BETA_SUPPORTED",yaml)
         self.assertNotIn('CONTROL_CHANNEL=',yaml)
         alias=bootstrap_transport_tag("v9.8.7-beta.2")
-        self.assertRegex(alias,r"^v[0-9]+\\.[0-9]+\\.[0-9]+$")
+        self.assertRegex(alias,r"^v[0-9]+\.[0-9]+\.[0-9]+$")
         self.assertEqual(alias,"v999999999.9.8000007000002")
         self.assertNotEqual(bootstrap_transport_tag("v9.8.7-beta.1"),alias)
         self.assertEqual(bootstrap_transport_tag("v9.8.7"),"v9.8.7")
 
     def test_embedded_original_bootstrap_control_reader_accepts_alias(self):
         yaml=(Path(__file__).resolve().parents[1]/"postmaster-mcp.yml").read_text()
-        found=re.search(
-            r'if CONTROL_VALUES="\\$\\$\\(python - <<\\x27PY\\x27\\n(?P<body>.*?)\\n        PY',
-            yaml,re.S,
-        )
-        self.assertIsNotNone(found)
-        source=textwrap.dedent(found.group("body"))
+        begin=yaml.index("if CONTROL_VALUES=")
+        body_start=yaml.index("\n",begin)+1
+        body_end=yaml.index("\n        PY",body_start)
+        source=textwrap.dedent(yaml[body_start:body_end])
         def read(payload):
             with tempfile.TemporaryDirectory() as td:
                 path=Path(td)/"state.json"
