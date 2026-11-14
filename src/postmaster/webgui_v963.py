@@ -361,7 +361,7 @@ def render_inbox_v963(base: Any, request: Request) -> str:
         counterpart = str(row.get("to") if role == "sent" else row.get("from") or "")
         css = "v963-mail-row" + (" unread" if row.get("seen") is False else "")
         dot = '<span class="v963-unread-dot" title="Unread"></span>' if row.get("seen") is False else ""
-        rows.append(f'<tr class="{css}" data-v960-href="{escape(href, quote=True)}"><td>{dot}</td><td>{escape(counterpart)}</td><td>{escape(str(row.get("subject") or ""))}</td><td>{escape(str(row.get("date") or ""))}</td></tr>')
+        rows.append(f'<tr class="{css}" data-v960-href="{escape(href, quote=True)}"><td>{dot}</td><td>{escape(counterpart)}</td><td>{escape(str(row.get("subject") or ""))}<small class="v989-snippet-source">{escape(str(row.get("snippet") or "")[:160])}</small></td><td>{escape(str(row.get("date") or ""))}</td></tr>')
         if uid and row_uid == uid:
             try:
                 detail = _detail(base, params, account_id, mailbox, role, uid, request)
