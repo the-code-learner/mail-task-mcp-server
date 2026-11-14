@@ -298,6 +298,25 @@ class MailGuiV986ContractTests(unittest.TestCase):
                 self.assertIn('class="v989-reading-pane"',response)
                 self.assertIn('class="v989-mail-workspace"',response)
 
+    def test_beta5_message_rows_have_nonoverlapping_sender_subject_and_preview(self):
+        from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
+        self.assertIn('grid-template-rows:36px 22px minmax(18px,auto)!important', BETA_MAIL_STYLE)
+        self.assertIn('.v987-identity{grid-column:2/4!important;grid-row:1!important', BETA_MAIL_STYLE)
+        self.assertIn('.v987-subject{grid-column:2/5!important;grid-row:2/4!important', BETA_MAIL_STYLE)
+        self.assertIn('.v987-date{grid-column:4!important;grid-row:1!important', BETA_MAIL_STYLE)
+        self.assertIn('min-height:105px!important', BETA_MAIL_STYLE)
+        self.assertIn('grid-template-columns:minmax(405px,38%)', BETA_MAIL_STYLE)
+
+    def test_beta5_list_supports_scroll_loading_and_manual_retry(self):
+        self.assertIn('async function more()', MAIL_SCRIPT)
+        self.assertIn("moreButton.textContent='Load more'", MAIL_SCRIPT)
+        self.assertIn("moreButton.addEventListener('click',()=>more())", MAIL_SCRIPT)
+        self.assertIn("if(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<230)more()", MAIL_SCRIPT)
+        self.assertIn("setStatus('Unable to load more messages. Scroll to retry.')", MAIL_SCRIPT)
+        self.assertIn("if(!response.ok)throw new Error('Could not load more messages')", MAIL_SCRIPT)
+        self.assertIn("if(u.origin!==location.origin)", MAIL_SCRIPT)
+        self.assertIn("known.has(itemUid)", MAIL_SCRIPT)
+
     def test_beta_narrow_list_never_inherits_old_table_minimum_width(self):
         from postmaster.webgui_mail_v986 import BETA_MAIL_STYLE
         self.assertIn("table.v986-mail-list{display:block!important;", BETA_MAIL_STYLE)
