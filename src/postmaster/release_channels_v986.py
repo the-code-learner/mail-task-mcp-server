@@ -80,3 +80,26 @@ def newer_than(candidate: str | None, current: str | None) -> bool | None:
     if a is None or b is None:
         return None
     return a[0]>b[0]
+
+
+# The v9.8.5 Portainer YAML accepts only numeric vX.Y.Z selectors.
+# Each beta is additionally published at this deterministic, reserved numeric
+# Git tag pointing to the EXACT SAME commit as its public -beta.N release.
+# No deployment-YAML edit, source-cache mutation or privileged Docker API is needed.
+_TRANSPORT_MAJOR = 999999999
+_TRANSPORT_PART = 1000000
+
+
+def bootstrap_transport_tag(value: str) -> str:
+    """Return the numeric Git tag understood by the unmodified bootstrap."""
+    tag = canonical_tag(value)
+    parsed = parse_release_tag(tag)
+    assert parsed is not None
+    key, kind = parsed
+    if kind != "beta":
+        return tag
+    major, minor, patch, _, ordinal = key
+    if patch >= _TRANSPORT_PART or ordinal >= _TRANSPORT_PART:
+        raise ValueError("beta patch and ordinal must be below one million")
+    packed = (minor * _TRANSPORT_PART + patch) * _TRANSPORT_PART + ordinal
+    return f"v{_TRANSPORT_MAJOR}.{major}.{packed}"
