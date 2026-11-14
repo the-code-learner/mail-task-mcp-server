@@ -57,20 +57,8 @@ def _category(row: dict[str, Any]) -> str:
 
 
 def _categories(events: list[dict[str, Any]]) -> list[str]:
-    """Apply the existing provider classifier in a single batch for email clicks."""
-    clicks = [dict(row) for row in events if row.get("event_kind") == "email_click"]
-    classified = classify_click_events(clicks) if clicks else []
-    i = 0
-    categories = []
-    for event in events:
-        if event.get("event_kind") == "email_click":
-            annotated = {**event, **classified[i]}
-            categories.append(_category(annotated))
-            i += 1
-        else:
-            categories.append(_category(event))
-    return categories
-
+    """Map the detailed classification already attached to each event."""
+    return [_category(row) for row in events]
 
 def _parse_datetime(value: Any) -> datetime | None:
     try:
@@ -88,6 +76,15 @@ def _detailed_map_events(events: list[dict[str, Any]], base: Any = None) -> list
     requests and no recipient, IP or delivery identifiers are put into the map.
     """
     enriched = [dict(event) for event in events]
+    click_indices = [i for i, row in enumerate(enriched)
+                     if row.get("event_kind") == "email_click"]
+    if click_indices:
+        classified = classify_click_events([enriched[i] for i in click_indices])
+        for index, result in zip(click_indices, classified):
+            enriched[index].update(
+                provider_classification=result.get("provider_classification", "uncertain"),
+                provider_likelihood=result.get("provider_likelihood"),
+            )
     ids = list(dict.fromkeys(str(row.get("delivery_id") or "") for row in enriched
                              if row.get("event_kind") == "email_open" and row.get("delivery_id")))
     sent: dict[str, Any] = {}
