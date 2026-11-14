@@ -60,6 +60,18 @@ class TrackingContextV9898(unittest.TestCase):
         self.assertIn("message_uid=88",events[1]["email_href"])
         self.assertNotEqual(events[0]["email_href"],events[1]["email_href"])
 
+    def test_ambiguous_sent_message_id_never_opens_arbitrary_copy(self):
+        with self.base.store._connect() as conn:
+            conn.execute(
+                "INSERT INTO mailbox_cache_messages VALUES (?,?,?,?,?,?)",
+                ("a","Sent","43",43,"<same@invalid>","2026-11-13"),
+            )
+            conn.commit()
+        event={"event_kind":"email_open","account_id":"a",
+               "message_id":"<same@invalid>"}
+        attach_sent_email_links(self.base,[event])
+        self.assertNotIn("email_href",event)
+
     def test_missing_or_inbox_only_message_never_gets_false_sent_link(self):
         events=[
             {"event_kind":"email_open","account_id":"a","message_id":"<inbox-only@invalid>"},
