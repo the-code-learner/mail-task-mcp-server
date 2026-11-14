@@ -133,7 +133,7 @@ def _release_target(
             if raw_target not in {"", "latest"}:
                 raise ValueError("update-latest preview does not accept an explicit version target")
             target = versions[0]
-        requested_selector = "latest"
+        requested_selector = target if "-beta." in target else "latest"
     else:
         if not raw_target:
             raise ValueError(f"{op} requires target_version=vX.Y.Z")
