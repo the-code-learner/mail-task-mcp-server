@@ -262,7 +262,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    return '<!doctype html>\n<html amp4email>\n<head>\n<meta charset="utf-8">\n'
      +'<script async src="https://cdn.ampproject.org/v0.js"><\/script>\n'
      +'<style amp4email-boilerplate>body{visibility:hidden}</style>\n'
-     +'</head>\n<body>\n'+content+'\n</body>\n</html>';
+     +'<\/head>\n<body>\n'+content+'\n<\/body>\n<\/html>';
  }
  function setupEditor(editor){
    if(states.has(editor))return;
@@ -360,7 +360,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    choices.className='v986-file-choices';
    const info=document.createElement('p');
    info.className='v986-attachment-info';
-   info.textContent='Stored files are not attached unless explicitly selected here.';
+   info.textContent='Files in storage are never attached unless explicitly selected here.';
    const refresh=()=>{
      const n=Array.from(select.selectedOptions).length;
      summary.textContent='Attachments · '+n+' selected';
