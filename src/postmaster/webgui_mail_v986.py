@@ -384,9 +384,33 @@ MAIL_STYLE = r"""
 
 BETA_MAIL_STYLE = r"""
 /* Beta vertical mail client: folder sidebar is already provided by the shell. */
-#panel-inbox .v989-mail-workspace{display:grid;grid-template-columns:minmax(310px,375px) minmax(0,1fr);
- min-height:480px;height:min(76vh,860px);border:1px solid var(--v970-line);
+#panel-inbox .v989-mail-workspace{display:grid;grid-template-columns:minmax(340px,380px) minmax(0,1fr);
+ min-height:540px;height:calc(100dvh - 224px);border:1px solid var(--v970-line);
  border-radius:14px;overflow:hidden;background:var(--v970-surface);margin-top:12px}
+#panel-inbox .v960-pagination[hidden]{display:none!important}
+#panel-inbox .v989-scroll-status{flex-shrink:0;min-height:25px;
+ font-size:11px;text-align:center;color:var(--v970-muted);padding:5px 8px}
+#panel-inbox .v989-reader-source{min-width:0;max-width:100%;overflow-wrap:anywhere}
+#panel-inbox .v989-reader-source:empty{display:none}
+#panel-inbox .v989-reading-pane:has(.v963-detail) .v989-reader-empty,
+#panel-inbox .v989-reading-pane:has(.flash) .v989-reader-empty{display:none}
+#panel-inbox .v989-reader-source .v963-tech{margin-top:18px;border-top:1px solid var(--v970-line);
+ padding:12px 0;max-width:100%;min-width:0}
+#panel-inbox .v989-reader-source .v963-tech summary{font-size:12px;cursor:pointer}
+#panel-inbox .v989-reader-source .v963-tech .v963-tech-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+#panel-inbox .v989-reader-source .v963-url-table{max-height:300px;max-width:100%;
+ overflow-x:auto!important;overflow-y:auto!important;display:block}
+#panel-inbox .v989-reader-source .v963-url-table table{width:max-content;min-width:760px;
+ max-width:none;table-layout:auto}
+#panel-inbox .v989-reader-source .v963-url-table th,
+#panel-inbox .v989-reader-source .v963-url-table td{max-width:195px;min-width:90px;
+ overflow-wrap:anywhere;word-break:break-word;vertical-align:top;white-space:normal}
+#panel-inbox .v989-reader-source .v963-safe-email{overflow-x:auto;max-width:100%;
+ overflow-wrap:anywhere;font-size:13px;line-height:1.65}
+#panel-inbox .v989-reader-source .v963-safe-email pre{white-space:pre-wrap;
+ overflow-wrap:anywhere;font-family:inherit;margin:0;line-height:1.65}
+#panel-inbox .v989-reader-source .v963-inbox-head h3{font-size:18px;line-height:1.35}
+#panel-inbox .v989-reader-source .v963-inbox-head p{font-size:12px;line-height:1.5}
 #panel-inbox .v989-mail-stream{min-width:0;display:flex;flex-direction:column;
  border-right:1px solid var(--v970-line);overflow:hidden}
 #panel-inbox .v989-stream-header{display:flex;justify-content:space-between;align-items:center;gap:8px;
@@ -433,7 +457,7 @@ BETA_MAIL_STYLE = r"""
 #panel-inbox .v989-list-scroll .v987-message.v989-selected{background:var(--v970-accent-soft)!important;
  box-shadow:inset 3px 0 var(--v970-accent)}
 #panel-inbox .v989-list-scroll .v987-unread-label{display:none}
-#panel-inbox .v989-reading-pane{min-width:0;min-height:0;overflow:auto;position:relative;
+#panel-inbox .v989-reading-pane{min-width:0;min-height:0;max-width:100%;overflow:auto;position:relative;
  background:var(--v970-surface)}
 #panel-inbox .v989-reader-empty{max-width:340px;margin:clamp(80px,15vh,170px) auto;
  text-align:center;padding:18px;color:var(--v970-muted)}
