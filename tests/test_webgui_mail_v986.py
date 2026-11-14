@@ -73,6 +73,21 @@ class MailGuiV986ContractTests(unittest.TestCase):
         self.assertIn('data-v960-fragment="inbox"',html)
         self.assertIn(">Refresh</button>",html)
 
+    def test_selected_global_sender_replaces_duplicate_compose_account_selector(self):
+        sender = (
+            '<label>Sender account <select name="account_id">'
+            '<option value="one" selected>Primary</option>'
+            '<option value="two">Support</option>'
+            '</select></label>'
+        )
+        html = INBOX.replace('</section>', sender+'</section>')
+        selected = modern_inbox_markup(html, selected_account="one")
+        self.assertIn("Sending with the email account selected", selected)
+        self.assertNotIn("Sender account <select", selected)
+        self.assertIn('type="hidden" name="account_id" value="one"', selected)
+        all_scope = modern_inbox_markup(html)
+        self.assertIn("Sender account <select", all_scope)
+
     def test_compose_refuses_partial_markup_transformations(self):
         html='<form><textarea name="body_html"></textarea></form>'
         self.assertEqual(modern_compose_markup(html),html)
