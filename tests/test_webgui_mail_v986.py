@@ -218,6 +218,22 @@ class MailGuiV986ContractTests(unittest.TestCase):
             self.assertNotIn('class="v951-toolbar"',result)
             self.assertIn('data-v960-href=',result)
 
+    def test_real_http_inbox_fragment_uses_beta_layout_not_legacy_table(self):
+        # Exercise the exact GET endpoint opened by the lazy dashboard.
+        from unittest.mock import patch
+        from starlette.testclient import TestClient
+        from postmaster import runtime
+        mock_html=self._sample_real_folder("Sent")
+        with patch.object(runtime._webgui_v963,"render_inbox_v963",return_value=mock_html):
+            response=TestClient(runtime.app).get(
+                "/dashboard/view/inbox?ui_view=inbox&account_id=one&mailbox=Sent"
+            )
+        self.assertEqual(response.status_code,200,response.text[:350])
+        self.assertIn('class="v989-mail-workspace"',response.text)
+        self.assertIn('class="v989-reading-pane"',response.text)
+        self.assertIn('class="v989-reader-source"',response.text)
+        self.assertNotIn('class="v951-toolbar"',response.text)
+
     def test_composed_renderer_keeps_every_mailbox_including_drafts(self):
         from unittest.mock import patch
         from starlette.requests import Request
