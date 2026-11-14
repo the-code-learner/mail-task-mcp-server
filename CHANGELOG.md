@@ -12,6 +12,7 @@ Postmaster MCP follows Semantic Versioning for stable releases. Every stable rel
 - Reduces displayed coordinates to approximately 0.1 degree; map marker data does not expose raw IP addresses, recipient email addresses or user agents.
 - Preserves all v9.8.9-beta.14 received-mail cache and heatmap fixes, the stable Portainer YAML and the existing account policies.
 - Adds privacy, classification, coordinate-validation and Overview regression tests.
+- Beta publication is gated on successful v9 runtime tests for the exact candidate commit and uses the existing beta release workflow.
 
 ## 9.8.9-beta.14 - 2026-11-14
 
