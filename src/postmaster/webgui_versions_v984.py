@@ -37,22 +37,45 @@ def version_summary(base: Any) -> str:
         '<a href="/?ui_view=system#system">Versions & updates</a></div>'
         '<div class="v984-release-grid">'
         f'<div><small>Installed version</small><strong>{_e(current)}</strong></div>'
-        f'<div><small>Latest stable</small><strong>{_e(latest)}</strong></div>'
+        f'<div><small>Latest eligible update</small><strong>{_e(latest)}</strong></div>'
         f'<div><small>Update status</small><strong>{_e(state)}</strong></div>'
         f'<div><small>Requested selector</small><strong>{_e(selector)}</strong></div></div>'
-        f'<p class="small muted">Last successful check: {_e(checked)}. Only published stable releases appear; draft PRs cannot be installed as stable updates.</p>'
+        f'<p class="small muted">Last successful check: {_e(checked)}. '
+        'The selected update channel determines eligible releases. '
+        'Draft PRs are never installable updates.</p>'
         '</section>'
     )
 
 
 def versions_settings(base: Any) -> str:
-    versions, lookup = runtime_control.stable_release_tags()
+    channel = runtime_control.preferred_release_channel()
+    versions, lookup = runtime_control.available_release_tags(channel=channel)
     build = base.build_status()
     running = str(build.get("version") or "unknown") if isinstance(build, dict) else "unknown"
     selector = runtime_control.read_control().get("selector") or str(
         build.get("requested_version") or "latest"
     ) if isinstance(build, dict) else "unknown"
-    options = "".join(f'<option value="{_e(v)}">{_e(v)}</option>' for v in versions)
+    options = "".join(
+        f'<option value="{_e(v)}">{_e(v)}'
+        f'{" · BETA" if "-beta." in v else " · Stable"}</option>'
+        for v in versions
+    )
+    chosen_stable=' selected' if channel=="stable" else ""
+    chosen_beta=' selected' if channel=="stable_beta" else ""
+    pref_form=(
+        '<form method="post" action="/dashboard/versions/channel">'
+        f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
+        '<label>Update channel <select name="release_channel">'
+        f'<option value="stable"{chosen_stable}>Stable only</option>'
+        f'<option value="stable_beta"{chosen_beta}>Stable + Beta</option>'
+        '</select></label>'
+        '<button type="submit">Save update preference</button>'
+        '</form>'
+        '<p class="small muted">Stable only is the default. Beta releases are opt-in '
+        'prereleases and may contain unfinished functionality. Choosing a channel '
+        'changes which updates are shown, not the installed build. '
+        'A version change always requires a separate preview and confirmation.</p>'
+    )
     if not versions:
         selector_control = '<div class="notice">Release discovery unavailable; version selection is disabled.</div>'
     else:
@@ -60,12 +83,12 @@ def versions_settings(base: Any) -> str:
             '<form method="post" action="/dashboard/versions/preview">'
             f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
             '<label>Action <select name="operation">'
-            '<option value="update-latest">Update to latest stable</option>'
+            '<option value="update-latest">Update to latest allowed release</option>'
             '<option value="switch-version">Switch to selected version</option>'
             '<option value="pin-version">Pin selected version</option>'
             '<option value="rollback-version">Roll back to selected version</option>'
             '</select></label>'
-            '<label>Target stable release <select name="target_version">'
+            '<label>Target eligible release <select name="target_version">'
             f'{options}</select></label>'
             '<button class="primary" type="submit">Preview change</button>'
             '</form>'
@@ -74,7 +97,9 @@ def versions_settings(base: Any) -> str:
         '<section class="card wide" id="v984-versions">'
         '<h3>Versions & updates</h3>'
         f'<p>Installed: <strong>{_e(running)}</strong> · Selected runtime: <strong>{_e(selector)}</strong></p>'
-        f'<p class="small muted">Verified release list: {_e(lookup)}. GitHub draft and prerelease versions are excluded.</p>'
+        f'<p class="small muted">Release check: {_e(lookup)}. '
+        'Draft releases are always excluded; Beta is shown only when selected.</p>'
+        f'{pref_form}'
         f'{selector_control}'
         '<p class="small muted">Preview and explicit confirmation are mandatory. '
         'A confirmed change is handled by the existing version selector and process restart mechanism; '
@@ -214,7 +239,26 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
             'Reconnect and verify the installed build after restart.</p>',
         )
 
+    async def save_channel(req: Request) -> Response:
+        form,error=await base._verified_form(req)
+        if error is not None:
+            return error
+        chosen=str(form.get("release_channel") or "").strip()
+        try:
+            runtime_control.save_release_channel(chosen)
+        except (ValueError,OSError) as exc:
+            return _response_page(
+                "Update preference not saved",
+                f'<p>{_e(str(exc))}</p>'
+                '<p><a href="/?ui_view=system&settings_tab=versions#system">Back to Settings</a></p>',
+                status=400,
+            )
+        return RedirectResponse(
+            "/?ui_view=system&settings_tab=versions#system",status_code=303,
+        )
+
     i = next((i for i, route in enumerate(app.router.routes) if isinstance(route, Mount)),
              len(app.router.routes))
     app.router.routes.insert(i, Route("/dashboard/versions/preview", preview, methods=["POST"]))
     app.router.routes.insert(i+1, Route("/dashboard/versions/execute", execute, methods=["POST"]))
+    app.router.routes.insert(i+2, Route("/dashboard/versions/channel", save_channel, methods=["POST"]))
