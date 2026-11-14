@@ -346,6 +346,13 @@ def global_tracking_network_events(
                             "geo_isp","geo_organization","geo_label","geo_source","geo_confidence"):
                     if fresh.get(key) and not event.get(key):
                         event[key] = fresh[key]
+                if "local" in str(fresh.get("geo_source") or ""):
+                    # Old edge-only fields were retained on disk; the display
+                    # now has stronger LOCAL evidence. Keep evidence storage
+                    # immutable and update only this read-only projection.
+                    for key in ("geo_label", "geo_source", "geo_confidence"):
+                        if fresh.get(key):
+                            event[key] = fresh[key]
     return {
         "ok": True, "events": rows, "returned": len(rows), "offset": skip,
         "retention": "no_automatic_expiry",
