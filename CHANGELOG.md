@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9-beta.19 - 2026-11-15
+
+### Explicitly authorized autonomous one-time scheduled email sending
+- Adds **Schedule send** with a local date/time to the Inbox compose editor; retains immediate Send and Save draft.
+- The existing MCP **send_email** command accepts optional `send_at` and `schedule_timezone`; a scheduled call authorizes one exact future message and queues it without sending immediately or increasing the MCP tool count.
+- Schedules are persisted as a dedicated `scheduled_email_send` action in the existing task manager's SQLite registry. An application-lifespan worker processes only this action; reminders, generic email metadata tasks and every other legacy task remain passive.
+- A SQLite immediate transaction atomically claims each due send before SMTP. Duplicate compose submissions with the same key reuse the job; no automatic retries follow unknown SMTP outcomes or worker crashes (potentially interrupted sends stay marked `sending` for review).
+- Source account, recipients, subject and body are frozen at schedule time. Suppressed recipients and sender policy are checked before queueing and before sending. The existing fresh tracking-OFF approval boundary applies when scheduling, not at dispatch.
+- Jobs remain visible in Tasks and can be paused/resumed while unsent, or cancelled before claim. Authorized messages cannot be rewritten by the generic task editor or marked complete without SMTP.
+- Supports new-message scheduling only. Stored-file attachments are deliberately rejected until immutable attachment snapshotting is available; persistent file links in the body are supported. No Portainer YAML changes.
+
 ## 9.8.9-beta.18 - 2026-11-15
 
 ### Rich tracking classification and country-level map fallback
