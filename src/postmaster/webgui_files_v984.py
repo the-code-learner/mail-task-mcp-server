@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 from typing import Any
+from xml.etree import ElementTree
+from zipfile import BadZipFile, ZipFile
 from urllib.parse import quote
 
 from starlette.requests import Request
@@ -15,6 +18,57 @@ from .webgui_mail_files_v971 import (
 
 _TEXT_LIKE = {"application/json", "application/xml", "application/x-yaml", "application/yaml"}
 _CSP = "default-src 'none'; sandbox; frame-ancestors 'self'"
+# Browser PDF viewers cannot reliably run inside an iframe/CSP sandbox:
+# embed only exact PDF MIME with same-origin framing; all other types retain
+# the original sandbox. Built-in PDF viewers isolate PDF execution.
+_PDF_CSP = "frame-ancestors 'self'"
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+_DOCX_NS = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+_MAX_DOCX_XML = 3_000_000
+
+
+def _docx_preview_text(content: bytes) -> bytes:
+    """Extract readable, inert text from a small OOXML Word document.
+
+    No external renderer, remote requests, or macros. Bound compressed and
+    decompressed sizes before parsing so storage previews cannot unzip bombs.
+    """
+    if len(content) > 2_000_000:
+        raise ValueError("Word file is too large to preview")
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            if len(archive.infolist()) > 1000:
+                raise ValueError("Word document contains too many ZIP entries")
+            info = archive.getinfo("word/document.xml")
+            if info.file_size > _MAX_DOCX_XML:
+                raise ValueError("Word document XML is too large")
+            with archive.open(info) as document:
+                raw = document.read(_MAX_DOCX_XML + 1)
+            if len(raw) > _MAX_DOCX_XML:
+                raise ValueError("Word document XML is too large")
+        xml = ElementTree.fromstring(raw)
+    except (BadZipFile, KeyError, ElementTree.ParseError, RuntimeError, OSError) as exc:
+        raise ValueError("Word file is invalid or cannot be previewed") from exc
+
+    paragraphs: list[str] = []
+    for paragraph in xml.iter(_DOCX_NS + "p"):
+        parts: list[str] = []
+        for node in paragraph.iter():
+            if node.tag == _DOCX_NS + "t" and node.text:
+                parts.append(node.text)
+            elif node.tag == _DOCX_NS + "tab":
+                parts.append("\t")
+            elif node.tag in (_DOCX_NS + "br", _DOCX_NS + "cr"):
+                parts.append("\n")
+        if parts:
+            paragraphs.append("".join(parts))
+        if len(paragraphs) >= 6000:
+            break
+    text = "\n".join(paragraphs).strip()
+    if not text:
+        text = "This Word document contains no extractable paragraph text."
+    return text[:400_000].encode("utf-8", errors="replace")
+
 
 
 def preview_supported(media_type: str) -> bool:
@@ -24,7 +78,7 @@ def preview_supported(media_type: str) -> bool:
     than being served inline with a potentially executable content type.
     """
     media = str(media_type or "").split(";", 1)[0].strip().lower()
-    return _preview_supported(media) or media in _TEXT_LIKE
+    return _preview_supported(media) or media in _TEXT_LIKE or media == _DOCX
 
 
 def preview_file(base: Any, request: Request) -> Response:
@@ -47,7 +101,18 @@ def preview_file(base: Any, request: Request) -> Response:
             status_code=415,
             headers={"Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff"},
         )
-    if media.startswith("text/") or media in _TEXT_LIKE:
+    if media == _DOCX:
+        try:
+            content = _docx_preview_text(content)
+        except ValueError:
+            return PlainTextResponse(
+                "Word document cannot be safely previewed. Use Download.",
+                status_code=415,
+                headers={"Cache-Control": "private, no-store",
+                         "X-Content-Type-Options": "nosniff"},
+            )
+        media = "text/plain; charset=utf-8"
+    elif media.startswith("text/") or media in _TEXT_LIKE:
         content = content.decode("utf-8", errors="replace").encode("utf-8")
         media = "text/plain; charset=utf-8"
     return Response(
@@ -57,7 +122,7 @@ def preview_file(base: Any, request: Request) -> Response:
             "Content-Disposition": _content_disposition("inline", str(meta.get("filename") or file_id)),
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
-            "Content-Security-Policy": _CSP,
+            "Content-Security-Policy": _PDF_CSP if media == "application/pdf" else _CSP,
             "Referrer-Policy": "no-referrer",
         },
     )
