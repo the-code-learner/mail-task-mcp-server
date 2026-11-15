@@ -69,7 +69,9 @@ class ComposeRichEditorContracts(unittest.TestCase):
         self.assertIn("key==='background-color'", MAIL_SCRIPT)
         self.assertNotIn("new Function(", MAIL_SCRIPT)
         self.assertNotIn("eval(", MAIL_SCRIPT)
-        self.assertIn("if(!/^https:", MAIL_SCRIPT)
+        self.assertIn("if(!url||!/^https:", MAIL_SCRIPT)
+        self.assertIn("'FORM','IMG','SVG'", MAIL_SCRIPT)
+        self.assertIn("Visual preview stays read-only", MAIL_SCRIPT)
         self.assertIn("if(!GOOD.has(child.tagName))", MAIL_SCRIPT)
 
     def test_amp_components_are_code_only_and_source_is_preserved(self):
