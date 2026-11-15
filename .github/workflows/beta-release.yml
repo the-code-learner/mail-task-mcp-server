@@ -24,6 +24,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Enforce single-trunk beta releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          test "$GITHUB_REF" = "refs/heads/main" || {
+            echo "Beta publication is allowed only from main. Merge a tested PR first." >&2
+            exit 1
+          }
+          git fetch --no-tags origin main
+          MAIN_SHA="$(git rev-parse origin/main)"
+          test "$MAIN_SHA" = "$GITHUB_SHA" || {
+            echo "Main has moved; beta must publish the current main commit." >&2
+            exit 1
+          }
+          echo "Single-trunk verified: beta candidate is exactly main ($GITHUB_SHA)."
+
       - name: Verify explicit beta version and release notes
         env:
           REQUESTED_BETA: ${{ inputs.version }}

@@ -39,6 +39,19 @@ class GeoIPV984Tests(unittest.TestCase):
             self.assertEqual(result["geo_confidence"], "low")
             self.assertFalse(geoip_status()["external_lookup"])
 
+    def test_local_database_appearing_after_startup_is_detected(self):
+        with TemporaryDirectory() as td, patch.dict(os.environ, {
+            "POSTMASTER_GEOIP_CITY_DB": td + "/GeoLite2-City.mmdb",
+            "POSTMASTER_GEOIP_ASN_DB": td + "/GeoLite2-ASN.mmdb",
+            "POSTMASTER_GEOIP_ISP_DB": td + "/GeoIP2-ISP.mmdb",
+        }):
+            from postmaster import tracking_geoip_v984
+            with patch.object(tracking_geoip_v984, "_reader", return_value=object()):
+                self.assertFalse(geoip_status()["city_database_available"])
+                Path(td, "GeoLite2-City.mmdb").write_bytes(b"fixture")
+                self.assertTrue(geoip_status()["city_database_available"])
+                self.assertFalse(geoip_status()["asn_database_available"])
+
     def test_raw_ip_and_organizational_metadata_are_persisted_indefinitely(self):
         with TemporaryDirectory() as td, patch.dict(os.environ, {
             "POSTMASTER_GEOIP_CITY_DB": td + "/missing-city.mmdb",

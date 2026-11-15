@@ -29,6 +29,8 @@ VALID_JOB_STATUSES = {
     "paused",
     "completed",
     "failed",
+    "sending",
+    "cancelled",
 }
 
 
@@ -255,11 +257,14 @@ class SchedulerEngine:
             profile_count = conn.execute(
                 "SELECT COUNT(*) FROM execution_profiles WHERE enabled=1"
             ).fetchone()[0]
+        email_service = getattr(self, "autonomous_scheduled_email_service_v98919", None)
         return {
             "ok": True,
-            "mode": "task_registry_only",
-            "registry_only": True,
-            "autonomous_execution": False,
+            "mode": "autonomous_scheduled_email_only" if email_service else "task_registry_only",
+            "registry_only": not bool(email_service),
+            "autonomous_execution": bool(email_service),
+            "autonomous_action_types": ["scheduled_email_send"] if email_service else [],
+            "autonomous_worker_alive": bool(email_service and email_service.status()["worker_alive"]),
             "db_path": self.settings.db_path,
             "worker_alive": False,
             "owners": owner_count,
@@ -748,6 +753,8 @@ class SchedulerEngine:
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send":
+                raise SchedulerError("Authorized scheduled email content cannot be edited; cancel and schedule a new message")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs are immutable; create a new job instead")
 
@@ -804,9 +811,12 @@ class SchedulerEngine:
 
     def pause_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
-            row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute("SELECT status,action_type FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] != "scheduled":
+                raise SchedulerError("Email already claimed or terminal; cannot pause")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs cannot be paused")
             conn.execute(
@@ -818,9 +828,12 @@ class SchedulerEngine:
 
     def resume_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] != "paused":
+                raise SchedulerError("Only a paused unsent email can be resumed")
             if row["status"] == "completed":
                 raise SchedulerError("Completed jobs cannot be resumed")
             next_run = self._next_run(
@@ -908,6 +921,8 @@ class SchedulerEngine:
                 row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
                 if not row:
                     raise SchedulerError(f"Unknown job: {job_id}")
+                if row["action_type"] == "scheduled_email_send":
+                    raise SchedulerError("Scheduled email is handled only by its autonomous worker")
                 if row["status"] not in {"scheduled", "waiting_approval"}:
                     raise SchedulerError(
                         f"Task cannot be completed from status {row['status']}"
@@ -934,12 +949,15 @@ class SchedulerEngine:
 
     def delete_job(self, job_id: str) -> dict[str, Any]:
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
-                "SELECT id, owner_id, project_id, title FROM jobs WHERE id=?",
+                "SELECT id, owner_id, project_id, title, action_type, status FROM jobs WHERE id=?",
                 (job_id,),
             ).fetchone()
             if not row:
                 raise SchedulerError(f"Unknown job: {job_id}")
+            if row["action_type"] == "scheduled_email_send" and row["status"] == "sending":
+                raise SchedulerError("Cannot delete email while SMTP delivery may be in progress")
             self._record(conn, job_id, "deleted", dict(row))
             conn.execute("DELETE FROM jobs WHERE id=?", (job_id,))
         return {"ok": True, "deleted_job_id": job_id}

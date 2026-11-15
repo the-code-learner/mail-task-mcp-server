@@ -1,0 +1,80 @@
+name: beta.15 exact-commit release dispatch
+
+on:
+  push:
+    branches:
+      - beta/v9.8.9-beta.15-world-map
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: beta15-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify candidate version
+        run: |
+          test "$(cat VERSION)" = "9.8.9-beta.15"
+          grep -q '^## 9.8.9-beta.15 - ' CHANGELOG.md
+
+      - name: Wait for the exact commit regression run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for attempt in $(seq 1 50); do
+            CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.15-world-map" --jq '.object.sha')"
+            if [ "$CURRENT" != "$GITHUB_SHA" ]; then
+              echo "Candidate advanced; newer workflow will handle publication."
+              exit 0
+            fi
+            gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > /tmp/beta15-checks.json
+            RESULT="$(python - <<'PY'
+          import json
+          rows=json.load(open('/tmp/beta15-checks.json'))['check_runs']
+          checks=[x for x in rows if x.get('name')=='v9 runtime tests / test']
+          if any(x.get('conclusion')=='success' for x in checks):
+              print('success')
+          elif any(x.get('conclusion') in ('failure','cancelled','timed_out','action_required') for x in checks):
+              print('failure')
+          else:
+              print('pending')
+          PY
+            )"
+            if [ "$RESULT" = "success" ]; then
+              echo "Exact-commit CI passed: $GITHUB_SHA"
+              break
+            fi
+            if [ "$RESULT" = "failure" ]; then
+              echo "Exact-commit runtime tests failed, refusing release."
+              exit 1
+            fi
+            if [ "$attempt" -eq 50 ]; then
+              echo "CI result not available in time, refusing release."
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Dispatch official gated beta publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.15-world-map" --jq '.object.sha')"
+          test "$CURRENT" = "$GITHUB_SHA"
+          if gh release view v9.8.9-beta.15 >/dev/null 2>&1; then
+            echo "Beta already published; not duplicating release."
+            exit 0
+          fi
+          gh workflow run beta-release.yml \
+            --ref beta/v9.8.9-beta.15-world-map \
+            -f version=9.8.9-beta.15
+          echo "Official beta-release.yml dispatched with exact-commit CI gate."

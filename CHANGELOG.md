@@ -2,6 +2,232 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.9 - 2026-11-15
+
+### Stable release — consolidated and verified 9.8.9 beta series
+- Promotes the validated `v9.8.9-beta.19` application code to the stable 9.8.9 channel, including fixes and features accumulated through beta.1–beta.19. This is a source release, not an automatic production deployment.
+- **Autonomous scheduled email:** one-time email scheduling from the Inbox composer or existing MCP `send_email(send_at=..., schedule_timezone=...)`; persistent scheduler tasks and a lifecycle-managed worker. Only explicitly authorized `scheduled_email_send` executes autonomously, without a second confirmation at the due time. All other tasks remain passive.
+- **Safety:** atomic claim and at-most-once SMTP attempt, idempotent scheduling, cancellation/pause while pending, recipient/suppression checks and sender identity pinning. An interrupted or ambiguous SMTP outcome is never retried automatically. Tracking-off consent, when required, is obtained when scheduling. Scheduled attachments require immutable snapshots and are not yet available; stored-file links can be included in email bodies.
+- **Tracking Overview:** self-hosted interactive vector world map with zoom-adaptive, class-coloured markers, nearby-point selection, detailed classification reuse, and explicit country-level fallback for uncertain GeoIP coordinates. Period/account filtering and received-mail aggregate statistics fixes retained.
+- **Settings:** exact Stable/Beta version pinning, channel controls, account administration and update flows. Additional tracking and GeoIP improvements from the beta series are retained.
+- Tested: the full runtime regression suite passed for beta.19; a live scheduled email was successfully dispatched autonomously and observed in the recipient mailbox on 2026-11-15. Stable candidate requires its own CI before merge.
+- Maintains the existing Portainer single-YAML deployment unchanged. No automatic update or restart of running instances is performed by publishing this release.
+
+## 9.8.9-beta.19 - 2026-11-15
+
+### Explicitly authorized autonomous one-time scheduled email sending
+- Adds **Schedule send** with a local date/time to the Inbox compose editor; retains immediate Send and Save draft.
+- The existing MCP **send_email** command accepts optional `send_at` and `schedule_timezone`; a scheduled call authorizes one exact future message and queues it without sending immediately or increasing the MCP tool count.
+- Schedules are persisted as a dedicated `scheduled_email_send` action in the existing task manager's SQLite registry. An application-lifespan worker processes only this action; reminders, generic email metadata tasks and every other legacy task remain passive.
+- A SQLite immediate transaction atomically claims each due send before SMTP. Duplicate compose submissions with the same key reuse the job; no automatic retries follow unknown SMTP outcomes or worker crashes (potentially interrupted sends stay marked `sending` for review).
+- Source account, recipients, subject and body are frozen at schedule time. Suppressed recipients and sender policy are checked before queueing and before sending. The existing fresh tracking-OFF approval boundary applies when scheduling, not at dispatch.
+- Jobs remain visible in Tasks and can be paused/resumed while unsent, or cancelled before claim. Authorized messages cannot be rewritten by the generic task editor or marked complete without SMTP.
+- The beta release is gated on the complete runtime regression suite for the exact branch commit.
+- Supports new-message scheduling only. Stored-file attachments are deliberately rejected until immutable attachment snapshotting is available; persistent file links in the body are supported. No Portainer YAML changes.
+
+## 9.8.9-beta.18 - 2026-11-15
+
+### Rich tracking classification and country-level map fallback
+- Uses the tracking provider classification for clicks and the existing detailed open-classification rules for tracked opens. Google image-proxy requests more than 60 seconds after delivery remain identified as likely human via proxy, without presenting a proxy location as the recipient.
+- Retrieves matching sent timestamps in one bounded local query when needed; no external API or location lookup is performed.
+- Keeps coherent, valid observed GeoIP positions. If country coordinates are inconsistent or absent, uses a country-level representative position from a bundled Natural Earth public-domain dataset, with deterministic small category/event-type offsets.
+- Preserves markers rather than discarding BE/NL proxy events because their provider coordinates appear in the United States. Discloses which points were approximately placed by country and counts truly unlocated records separately.
+- Keeps the beta.17 zoom-scaled markers, overlaps chooser and all previous beta features, tests and guarded version pinning.
+- Regression tests cover stable country placement, inconsistent BE/US coordinates, missing-country behavior and the detailed human-via-proxy timing classification.
+- Portainer single-YAML deployment unchanged.
+
+## 9.8.9-beta.17 - 2026-11-14
+
+### Refinements to self-hosted geographical tracking map
+- Compensates the SVG marker radii as the world viewBox zooms so that geographic points remain legible but no longer grow into oversized bubbles. Reset restores the original radii.
+- Reduces marker stroke and opacity for dense activity regions; supplies explicit stable category colours to avoid unintended theme overrides.
+- When markers overlap in the rendered viewport, shows an accessible selection list of nearby locations instead of losing the hidden markers to the one on top.
+- Uses text-only DOM APIs for map details and overlap choices to avoid injecting tracking metadata as HTML.
+- Preserves existing period, account, owner/project and event filters, privacy policy, self-hosted geography, exact-version pin selector and v9.8.9-beta.16 behaviour.
+- Adds regression tests covering adaptive marker scaling, category styles and safe overlap selection.
+- Adds locally bundled Natural Earth country bounding boxes for conservative GeoIP consistency checking: a `BE` record with coordinates in the United States is excluded from the map as unreliable, not moved to Belgium. Unknown/unresolved locations are counted separately.
+- Adds explicit tests for plausible Belgium coordinates and contradictory Belgium/United States coordinates.
+- No changes to the original Portainer single-YAML deployment.
+
+## 9.8.9-beta.16 - 2026-11-14
+
+### Restore exact Stable/Beta release pinning in Settings
+- Restores an exact-version drop-down under Settings → Versions & updates, listing verified published Stable releases and eligible Beta releases in the chosen update channel.
+- Supports explicit pinning and downgrades to any listed release via the existing CSRF-protected, server-side pending preview and second explicit confirmation before restart.
+- The 30-second release catalog refresh retains a selected tag if it remains eligible; stale, missing, or channel-forbidden targets are rejected before preview.
+- Retains the two latest-version update cards, the full v9.8.9-beta.15 world map and received-mail fixes, and the original single-YAML Portainer deployment unchanged.
+- Adds regression tests for stable-only channel exclusion, available release selection, and live refresh preservation.
+
+## 9.8.9-beta.15 - 2026-11-14
+
+### Beta: self-hosted geographical tracking overview
+- Adds a locally bundled Natural Earth vector world map to Tracking Overview, without third-party map tiles, geolocation lookups or external dependencies.
+- Uses the existing persisted GeoIP latitude/longitude and conservative opening/click classifications, with four categories: likely human, proxy/provider, scanner/bot and unknown; no observed email fetch is asserted to prove human reading.
+- Adds coloured location markers, approximate position grouping, category filters, zoom, pan and click/keyboard-accessible details compatible with dynamically loaded Tracking fragments.
+- Reuses existing account, owner/project, event and statistics-period filters; the view is a bounded event sample and reports events without coordinates rather than inventing their location.
+- Reduces displayed coordinates to approximately 0.1 degree; map marker data does not expose raw IP addresses, recipient email addresses or user agents.
+- Preserves all v9.8.9-beta.14 received-mail cache and heatmap fixes, the stable Portainer YAML and the existing account policies.
+- Adds privacy, classification, coordinate-validation and Overview regression tests.
+- Beta publication is gated on successful v9 runtime tests for the exact candidate commit and uses the existing beta release workflow.
+
+## 9.8.9-beta.14 - 2026-11-14
+
+### Beta: restore received-mail heatmap and statistics for All accounts
+- Fixes a regression in the Tracking Overview that showed **When emails are received** as a blank grid with **Select one email account** whenever the global filter was **All accounts**.
+- Aggregates received-mail dates from the **existing synchronized mailbox caches** of all enabled email accounts. Mailboxes are identified by their actual **received** role, so differing provider Inbox names work; sent messages and disabled accounts are excluded.
+- The combined received-mail metric and hourly/day heatmap now respect the selected statistics period, without starting IMAP sessions or silently choosing a default account.
+- Explicit selection of a single email account preserves the existing per-account live Inbox sample behavior.
+- Displays a clear cache-scoped note, and caps read-only sampled messages at 20,000 with a disclosure if exceeded. No unseen or uncached email is counted.
+- Tests cover enabled/disabled accounts, different Inbox provider names, overlapping UIDs, exclusion of Sent, selected-account filtering, period windows and full Tracking rendering.
+- Beta-only, Stable main v9.8.8, canonical Portainer YAML, persistent mail records and MCP tools unchanged.
+
+## 9.8.9-beta.13 - 2026-11-14
+
+### Beta: reliable Tracking period feedback and correct GeoIP availability
+- Tracking statistics can take seconds to aggregate from multiple sources. Switching between 24 hours, 7 days, 28 days, 90 days or a custom date range now immediately displays a visible **Loading [period] statistics…** state, with a spinner, accessible status and clear pending period indicator.
+- The previous report stays visible until the new fragment has loaded; rapid successive selections cancel outdated requests. Failed tracking loads preserve working controls and show a **Retry** button instead of replacing the dashboard with an error fragment.
+- The global fragment loader retains explicit forced reloads for period links and custom-date GET submissions; selection becomes authoritative only when the requested report is returned.
+- GeoIP availability messaging now distinguishes **required free City + ASN** databases from the separate **optional paid ISP** database. If City and ASN are working, it reports them as active and describes optional ISP as additional enrichment rather than falsely claiming all local databases are unavailable.
+- Partial City/ASN installs receive a specific missing-required-database message; absent free databases retain a clear installation recommendation in Settings.
+- Regression tests check period links preserve account/owner filters, async in-flight behavior, error retry, and all four local GeoIP availability combinations.
+- Prerelease only; stable v9.8.8, existing Portainer YAML, user data and 134 MCP tools unchanged.
+
+## 9.8.9-beta.12 - 2026-11-14
+
+### Beta: health-aware return following version changes
+- The branded update screen now waits at least **15 seconds** rather than redirecting unconditionally after ten seconds.
+- Afterwards, it polls the authenticated, no-cache `GET /dashboard/versions/status` endpoint every three seconds and redirects to Dashboard Settings only when the **actual running version equals the approved target version**. HTTP availability from an old release does not count as success.
+- During a container restart or slow download, the update screen remains visible and reports that Postmaster is restarting. A persistent manual Dashboard link remains available.
+- Bounded per-request timeout, no-store credentials-aware GET, and no duplicate version-change POST. In the no-JavaScript case the user is offered a manual link rather than a premature timed meta refresh.
+- Adds regression checks for 15-second minimum, exact build matching, no-cache polling, abort handling and removal of unconditional redirects.
+- Beta-only changes, without modifying Stable v9.8.8, Portainer YAML, persistent volumes or MCP tools.
+
+## 9.8.9-beta.11 - 2026-11-14
+
+### Beta: MaxMind GeoLite2 download authentication and actionable error diagnostics
+- Fixes the GeoIP database downloader's overzealous redirect handler: the MaxMind HTTP Basic authorization header is retained only for redirects between explicitly approved official MaxMind download hosts, while it is removed before following the signed Cloudflare R2 storage URL. Unauthorized hosts are still rejected.
+- Download failures now distinguish GeoLite2-City vs GeoLite2-ASN and report the HTTP status with **the failing stage** (MaxMind account/database permissions versus Cloudflare R2 transfer), rather than incorrectly assuming all HTTP 401/403 responses mean a bad key.
+- Safely extracts known machine-readable MaxMind error codes such as `PERMISSION_REQUIRED` when present. Never displays raw error bodies, signed redirect query strings, Account IDs, license keys, Authorization headers or remote responses in the UI.
+- Messages distinguish authorization failures from database permission/subscription, rate limits, service interruptions and signed-link/network filtering.
+- Regression tests cover preserving MaxMind auth over official HTTPS redirects, removing it on R2, rejecting unapproved redirects, 401/403/404/429/503 diagnostics and never exposing signed tokens or secrets.
+- Account ID and license key are still supplied only in the explicitly confirmed Settings → GeoIP action, never persisted. Existing City/ASN databases are protected by atomic validation.
+- Existing beta.10 single-account IMAP Refresh remains available. Beta only; Stable v9.8.8, Portainer YAML, persistent volumes and MCP tool schemas are unchanged.
+
+## 9.8.9-beta.10 - 2026-11-14
+
+### Beta: visible IMAP Refresh for a selected email account
+- For a **specific email account** selected in the global header, the Inbox, Sent, Drafts, Spam and Trash message-list headers now expose a prominent **Refresh mail** button. This submits the existing server-side CSRF-verified `/dashboard/inbox/refresh` action to synchronize the requested mailbox from IMAP, then returns to its updated message list.
+- The original sync form is moved from the legacy header into the message list toolbar, never duplicated; the account ID, exact provider mailbox and CSRF field stay intact.
+- The button displays **Syncing…** and disables repeat submissions while the request is in progress. No background IMAP sync is initiated when navigating between folders.
+- **All accounts** remains a read-only combined cached view with no implicit mass-IMAP sync. Selecting a particular account reveals the refresh action.
+- Tests exercise the final two-pane renderer and the exact sync form for Inbox, Sent, Drafts, Spam and Trash, alongside unchanged All accounts behavior.
+- Beta only. Stable main, canonical Portainer YAML, mail data and MCP tool schemas remain unchanged.
+
+## 9.8.9-beta.9 - 2026-11-14
+
+### Beta: install GeoLite2 City and ASN directly in WebUI Settings
+- New **Settings → GeoIP databases** tab shows City, ASN and paid optional ISP availability and provides a protected **Download / update GeoIP databases** action.
+- An administrator supplies their own MaxMind Account ID and license key after accepting the license terms. MaxMind requires credentials even for free GeoLite2; the license key is used for the explicit HTTPS request only and is never saved to local databases, the repository, log files or a URL.
+- Installs free GeoLite2-City and GeoLite2-ASN into their fixed configured MMDB paths in the persistent /data volume without changing Portainer YAML, installing system packages or restarting the container.
+- Secure downloader enforces fixed HTTPS MaxMind/official object-storage hosts, strips credentials on redirects, caps archive and MMDB sizes, checks exactly one expected member, validates MMDB integrity and atomically replaces valid databases. Parallel submissions are rejected.
+- No automatic network download or periodic credential storage: to update, reopen Settings and enter license credentials again; this avoids retaining third-party secrets unnecessarily.
+- GeoIP read service detects newly created databases, so historic tracking events can be enriched as soon as local MMDBs are available. GeoIP is only a network estimate and is unreliable for proxies.
+- Paid GeoIP2-ISP is not downloaded without a separate subscription. ASN database can still provide autonomous-system organization details.
+- Includes regressions for credential input validation, safe redirect rules, exact target configuration, Settings registration and no implicit installation on page render.
+- Beta only, Stable main v9.8.8, canonical Portainer YAML, persistent mail data and MCP tool catalog unchanged.
+
+## 9.8.9-beta.8 - 2026-11-14
+
+### Beta: human-readable Tracking context and explicit GeoIP status
+- Recent Activity and all tracking-event views now show meaningful **file names**, exact **destination URLs**, and, for tracked email opens/clicks, the **email subject, recipient and click destination** instead of relying only on opaque tracked-link and delivery IDs.
+- When a tracked email Message-ID can be uniquely resolved to an existing cached Sent message, the event provides an **Open email in Sent** action. The account ID, provider-specific Sent mailbox and IMAP UID are verified from the local mailbox cache; ambiguous same-UID messages from other accounts are never linked.
+- Technical identifiers remain available behind a collapsed disclosure; URL display escapes untrusted data and clickable destinations allow only HTTP(S) schemes.
+- Tracking shows whether local City/ASN/ISP **MaxMind MMDB** resources exist and actionable configuration paths. Without them it explicitly reports country-only edge evidence instead of inventing a city or ISP.
+- Existing events can be enriched on read when a local database becomes available, without contacting third-party IP lookup services or rewriting stored evidence. Proxy/network estimates never assert the recipient's location.
+- Added SQL integration and presentation tests for file names, tracked email subjects, exact URLs, safe cached Sent deep links, and absent-source handling.
+- Beta only, no modification to the original Portainer YAML or Stable v9.8.8. No automatic download of copyrighted/licensed GeoIP databases, no changes to tracking collection, secrets or MCP tool schemas.
+
+## 9.8.9-beta.7 - 2026-11-14
+
+### Beta: All accounts means a real combined mail client
+- The global `All accounts` email selector now shows a **single combined view** of cached mail from every enabled account, instead of silently falling back to the default account. The selected mailbox (Inbox, Sent, Drafts, Spam) remains the current category across accounts.
+- Accounts may call special folders differently (e.g. Sent, Sent Items, Junk). Their actual IMAP mailboxes are resolved using cached mailbox **roles**, without assuming the same provider folder name.
+- Added globally ordered, safely parameterized SQL pagination for the aggregate cache; filters, unread status and infinite scrolling operate on the combined result.
+- Every message preserves its account ID, original mailbox and UID in its authenticated reader URL. Identical UIDs in different accounts cannot collide, and safe reader/reply/forward/draft actions use the correct source account.
+- Each combined-list card displays the source account label. Selecting an explicit account restricts the list to that account again.
+- In All accounts mode, manual IMAP refresh is not misdirected to the default account. It instructs the user to select a specific account before refreshing; the combined view remains read-only and cache-backed.
+- Added tests for two accounts sharing UIDs, different Sent/Spam provider folder names, global date sorting and pagination, and safe source-account reader routing.
+- Beta-only source release: Stable `main` v9.8.8 and canonical Portainer YAML unchanged; no automatic IMAP polling, sends, account secrets or tool schema changes.
+
+## 9.8.9-beta.6 - 2026-11-14
+
+### Beta: readable email cards and ten-second update return
+- Replaced fragile CSS grid positioning inside message table rows with **normal vertical flex flow**: sender, subject and snippet now occupy separate stacked lines regardless of old inherited table styling. Avatar, unread dot and date are independently positioned and do not push or overlap the text. Applies to Inbox, Sent, Drafts and Spam.
+- Kept the existing protected two-pane safe mail reader, folder transitions and authenticated infinite-scroll loading from beta.5.
+- After the explicitly approved update POST, return a fully styled **Postmaster update countdown page** (10 seconds) that automatically navigates back to the dashboard Settings/Versions view. Includes a no-JavaScript meta-refresh fallback and direct return link.
+- Countdown never retries or repeats the version-change POST, and clearly explains that the installed build must be verified after the container comes back online.
+- Added regression tests checking stacked mail card structure, countdown content, correct target and no duplicate execution.
+- Prerelease only, Stable v9.8.8, canonical Portainer YAML, mailbox data and all 134 MCP tool schemas remain unchanged.
+
+## 9.8.9-beta.5 - 2026-11-14
+
+### Beta: correct visible Inbox, Sent, Spam and Drafts layout; more reliable page loading
+- Fixed overlapping sender and subject lines in the message stream, caused by the old 25px first-row CSS grid conflicting with 32px avatars. Introduced explicit sender/subject/preview tracks and a minimum 105px card with no text collision.
+- Rebalanced the desktop message-list and reading-pane split to approximately 38%/62%, with responsive behavior for narrower devices and contained scrolling.
+- **Fixed folder navigation (Inbox → Sent → Drafts → Spam):** these sidebar links were incorrectly classified as ordinary `data-v962-nav` links, causing the lazy router to skip requests when the Inbox view was already loaded. Folder changes now always request the correct mailbox fragment, display a loading overlay over stale content, and update the visible folder only after a successful response.
+- Infinite scrolling also exposes a persistent **Load more** button as an accessible fallback and retry path; cache-only authenticated fragments, deduplication, scroll preservation and privacy-safe reader behavior remain in place.
+- Corrected the Versions & updates panel: while running a Beta, the previous Stable is offered as a **Switch to Stable** action rather than falsely declaring it already installed.
+- Added regression checks for the nonoverlapping row/grid geometry and independent cached pagination controls.
+- Release remains prerelease-only; Stable `main` and original canonical Portainer YAML are untouched. No change to mailbox schemas, customer data, account credentials or MCP tool schema.
+
+## 9.8.9-beta.4 - 2026-11-14
+
+### Beta: truthful update activation and Portainer bootstrap compatibility
+- Distinguishes **persisted update intent** from the **version actually running** in `runtime_status`. The new `update_activation_status`, `update_activation_verified`, `bootstrap_control_supported` and `update_activation_warning` fields detect a selected Beta when a legacy container command is still running the Stable build.
+- Both WebUI and MCP show an actionable warning rather than incorrectly implying an update finished when the actual process version differs from the selector.
+- WebUI versions panel displays the selected target and running build mismatch and distinguishes an unverified legacy Portainer bootstrap from an installation still awaiting container activation.
+- The runtime version-change execution response explicitly reports `installation_verified: false` at execution time. Only a subsequent runtime status check may confirm the new build.
+- The Portainer migration is intentionally distributed **separately** as a redacted user-specific YAML preserving the volumes, account settings and secure download bootstrap. On bootstrap startup it reads the same persistent control file as WebUI/MCP, accepts immutable numeric Beta aliases and one-shot Stable refs, and preserves the original source-download safety checks.
+- Once the updated Portainer stack has been redeployed (without removing named volumes), future version selections made via WebUI/MCP can activate during a full container restart; changing the deployed container command requires a one-time stack redeploy, not just a Restart.
+- This Beta does not modify the public repository's canonical Portainer YAML, tracked links, message data, passwords or the 134 MCP tools. Stable main remains at v9.8.8.
+
+## 9.8.9-beta.3 - 2026-11-14
+
+### Beta: fix why the mail WebUI did not change after installation
+- Fixed the **actual runtime composition boundary**: `runtime.py` installed the new Inbox renderer but subsequently overwrote `v960.render_inbox` with the original v9.6.3 renderer. All lazy WebUI mailbox requests then bypassed the Beta layout entirely, even though isolated HTML transformation tests were green.
+- The final shared runtime renderer now calls the existing secure cache-backed v9.6.3 message reader and explicitly applies `modern_inbox_markup` before returning HTML. Inbox, Sent, Spam, Drafts and Trash use the same working list/reader/infinite-scroll Beta interface.
+- Added regression tests against the **final runtime-installed renderer**, not only isolated formatting utilities; they check the actual `v960` and `v951` entry points and each folder. This prevents the exact overwrite regression from recurring.
+- No remote message resources are loaded automatically, no email is sent or drafts auto-dispatched, and the unchanged original Portainer YAML is retained.
+- This remains an opt-in prerelease with a separate immutable numeric transport alias. The Stable branch stays at 9.8.8.
+
+## 9.8.9-beta.2 - 2026-11-14
+
+### Beta: coherent mail client in every folder
+- Fixed **Inbox, Sent, Spam, Drafts and Trash** to use the same two-column mail workspace inside the shared folder sidebar. The safe message reader now renders as a sibling of the message list instead of inside a table row, preventing the old full-width/full-screen message layout and excessive whitespace.
+- Removed the duplicate account, mailbox, subject, keyword and day-range filter toolbar from the email workspace; global account selection, sidebar folders and the search bar remain in place. Kept contextual All and Unread filters.
+- Added real infinite scrolling to the list pane: reaching the bottom fetches the next **same-origin authenticated cached mailbox page**, appends new message cards without duplicating UIDs, retains list position and preserves per-message navigation; no automatic IMAP sync or remote message content loads.
+- Constrained message content, full text and technical evidence tables to the reading pane with wrapping and independently scrolling diagnostics; the evidence remains accessible and safe-mail blocking is unchanged.
+- Mobile layouts show a focused list/reader view without the legacy fixed full-screen overlay; drafts remain non-sending until an authorized explicit draft/send action.
+- Regression coverage for folder-independent layout, nested technical evidence, safe reader, filter scoping, pagination and infinite-scroll contracts.
+
+### Prerelease boundaries
+- Beta only; stable 9.8.8 and `main` remain unchanged. Installation requires Stable + Beta opt-in and explicit update approval.
+- Existing 134 MCP tools and original Portainer `postmaster-mcp.yml` remain unchanged.
+
+## 9.8.9-beta.1 - 2026-11-14
+
+### Beta: familiar three-pane email client
+- Introduced an experimental desktop layout modeled on established mail-client interaction patterns: folder sidebar, message-list cards and a persistent reading pane to the right. Narrow/mobile screens switch to a focused list-or-message mode.
+- Message list presents sender initials, display name, subject, short text snippet from the **existing local mailbox cache** when available, readable local time/date and distinct unread/selected states.
+- Selecting a message uses the existing authenticated lazy Inbox fragment and moves the **already-rendered safe reader** to the reading pane, preserving protected remote-image behavior, Reply/Reply all/Forward, source inventory and existing compose and draft actions.
+- No remote image fetching, automatic message sending, synthetic previews, background MIME preloads, new IMAP synchronization, account permission bypass or changes to the 134 MCP tool schemas.
+- The original Inbox cache remains the source of the list; link-based navigation, keyboard support, progressive loading, pagination, global account selector and provider mailbox navigation remain intact.
+- New regression checks cover split-pane shell, cached snippets, message links and legacy fallbacks.
+
+### Beta-only rollout
+- The source version is explicitly 9.8.9-beta.1 and must be published as a **GitHub prerelease** with a paired immutable numeric transport alias using the gated Beta workflow. Stable v9.8.8 and its existing deployment remain unchanged.
+- No change to `postmaster-mcp.yml` is necessary. Installing this Beta requires opting into Stable + Beta and an explicit update approval.
+
 ## 9.8.8 - 2026-11-14
 
 ### WebUI version update controls

@@ -6,6 +6,7 @@ version change without CSRF-verified preview and separate explicit confirmation.
 from __future__ import annotations
 
 from html import escape
+import os
 from datetime import UTC, datetime
 import threading
 import time
@@ -82,10 +83,22 @@ def _release_snapshot(base: Any) -> dict[str, Any]:
     build = base.build_status()
     running = str(build.get("version") or "unknown") if isinstance(build, dict) else "unknown"
     selected = runtime_control.preferred_release_channel()
+    wanted = str(runtime_control.read_control().get("selector") or "latest")
+    active_ref = "v" + running.removeprefix("v") if running != "unknown" else "unknown"
+    mismatch = wanted != "latest" and wanted != active_ref
+    bootstrap_supported = os.getenv("POSTMASTER_BOOTSTRAP_CONTROL_V2", "").lower() == "true"
     return {
+        "selected_target": wanted,
+        "activation_mismatch": mismatch,
+        "bootstrap_control_supported": bootstrap_supported,
         "ok": True, "current_version": running, "release_channel": selected,
         "stable": stable, "beta": beta,
-        "stable_update": channels.newer_than(stable, running) is True,
+        "release_tags": tags,
+        # A user running a Beta may explicitly return to the latest Stable,
+        # even though Stable is numerically older. This is a switch, not an upgrade.
+        "stable_update": bool(stable and stable != active_ref and
+                              (channels.newer_than(stable, running) is True or
+                               "-beta." in running)),
         "beta_update": (selected == channels.STABLE_AND_BETA and
                         channels.newer_than(beta, running) is True),
         "beta_allowed": selected == channels.STABLE_AND_BETA,
@@ -104,9 +117,24 @@ def versions_settings(base: Any) -> str:
     csrf = _e(base._csrf_value())
     chosen_stable = ' selected' if channel == "stable" else ""
     chosen_beta = ' selected' if channel == "stable_beta" else ""
+    eligible = [tag for tag in data["release_tags"]
+                if channels.release_is_allowed(tag, channel)]
+    def exact_options(kind: str) -> str:
+        return "".join(
+            '<option value="' + _e(tag) + '">' + _e(tag) + '</option>'
+            for tag in eligible if channels.parse_release_tag(tag)[1] == kind
+        )
+    exact_select = (
+        '<option value="">Select an exact release...</option>'
+        '<optgroup label="Stable releases">' + exact_options("stable") + '</optgroup>'
+        + ('<optgroup label="Beta releases">' + exact_options("beta") + '</optgroup>'
+           if channel == channels.STABLE_AND_BETA else '')
+    )
+    exact_enabled = bool(eligible and data["check_status"] == "ok")
 
     def update_form(kind: str, target: str, enabled: bool) -> str:
-        label = "Update Stable" if kind == "stable" else "Update Beta"
+        label = ("Switch to Stable" if "-beta." in str(data["current_version"])
+                 else "Update Stable") if kind == "stable" else "Update Beta"
         disabled = "" if enabled else " disabled"
         return (
             '<form method="post" action="/dashboard/versions/preview" '
@@ -121,6 +149,15 @@ def versions_settings(base: Any) -> str:
     return (
         '<section class="card wide" id="v984-versions" data-v988-updates>'
         '<h3>Updates</h3>'
+        '<p class="small muted" data-v9894-activation '
+        + ('style="display:block"' if data["activation_mismatch"] else 'style="display:none"') + '>'
+        + (('Update not active: running ' + _e(data["current_version"])
+            + ', selected ' + _e(data["selected_target"])
+            + ('. The Portainer bootstrap may not support WebUI/MCP updates. '
+               'Update the stack command before retrying.'
+               if not data["bootstrap_control_supported"]
+               else '. Waiting for a completed container bootstrap.'))
+           if data["activation_mismatch"] else '') + '</p>'
         f'<p>Installed: <strong data-v988-current>{_e(data["current_version"])}</strong>'
         f' · Runtime: <strong>{_e(selector)}</strong></p>'
         '<p class="small muted">Postmaster checks the latest Stable and Beta '
@@ -130,7 +167,7 @@ def versions_settings(base: Any) -> str:
         '<div class="v988-release-card">'
         '<strong>Latest Stable</strong>'
         f'<div class="v988-release-version" data-v988-version="stable">{_e(stable or "Unavailable")}</div>'
-        f'<p class="small muted" data-v988-message="stable">{"Update available" if stable_enabled else "No newer Stable release"}</p>'
+        f'<p class="small muted" data-v988-message="stable">{"Switch back to Stable" if stable_enabled and "-beta." in data["current_version"] else "Update available" if stable_enabled else "Latest Stable already installed" if stable == "v" + data["current_version"].removeprefix("v") else "Stable is older than the current version"}</p>'
         + update_form("stable", stable, stable_enabled) +
         '</div>'
         '<div class="v988-release-card">'
@@ -139,6 +176,19 @@ def versions_settings(base: Any) -> str:
         f'<p class="small muted" data-v988-message="beta">{"Update available" if beta_enabled else "Enable Beta in update channel" if channel == "stable" else "No newer Beta release"}</p>'
         + update_form("beta", beta, beta_enabled) +
         '</div></div>'
+        '<section class="v988-exact-pin" aria-label="Pin an exact version">'
+        '<h4>Install or pin an exact release</h4>'
+        '<p class="small muted">Choose any published version, including older releases. '
+        'The chosen release remains pinned until explicitly changed. '
+        'A separate confirmation is required before restart.</p>'
+        '<form method="post" action="/dashboard/versions/preview" data-v988-pin>'
+        f'<input type="hidden" name="csrf" value="{csrf}">'
+        '<input type="hidden" name="operation" value="pin-version">'
+        '<label>Exact release <select name="target_version" required'
+        + ('' if exact_enabled else ' disabled') + '>'
+        + exact_select + '</select></label>'
+        '<button type="submit" class="primary" disabled>Preview &amp; pin version</button>'
+        '</form></section>'
         '<form method="post" action="/dashboard/versions/channel" data-v988-channel>'
         f'<input type="hidden" name="csrf" value="{csrf}">'
         '<label>Update channel <select name="release_channel">'
@@ -161,6 +211,12 @@ VERSIONS_STYLE = r"""
 #v984-versions .v988-release-card>strong{font-size:13px;color:var(--v970-muted)}
 #v984-versions .v988-release-version{font-size:24px;font-weight:800;letter-spacing:-.5px;margin:9px 0}
 #v984-versions .v988-release-card button:disabled{opacity:.45;cursor:not-allowed}
+#v984-versions .v988-exact-pin{margin:18px 0;padding:16px;border:1px solid var(--v970-line);border-radius:12px;background:var(--v970-surface-2)}
+#v984-versions .v988-exact-pin h4{margin:0 0 8px;font-size:15px}
+#v984-versions [data-v988-pin]{display:flex;align-items:end;gap:12px;flex-wrap:wrap}
+#v984-versions [data-v988-pin] label{display:flex;flex-direction:column;gap:5px;flex:1;min-width:205px}
+#v984-versions [data-v988-pin] select{width:100%;max-width:480px}
+#v984-versions [data-v988-pin] button:disabled{opacity:.45;cursor:not-allowed}
 #v984-versions [data-v988-channel]{display:flex;gap:10px;align-items:end;flex-wrap:wrap}
 #v984-versions [data-v988-channel] label{display:flex;flex-direction:column;gap:5px}
 @media(max-width:720px){#v984-versions .v988-release-grid{grid-template-columns:1fr}}
@@ -184,6 +240,17 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
       current=data;last=Date.now();
       const live=root();if(!live)return data;
       live.querySelector('[data-v988-current]').textContent=data.current_version;
+      const activation=live.querySelector('[data-v9894-activation]');
+      if(activation){
+        activation.style.display=data.activation_mismatch?'block':'none';
+        activation.textContent=data.activation_mismatch
+          ? 'Update not active: running '+data.current_version+
+            ', selected '+data.selected_target+
+            (!data.bootstrap_control_supported
+              ? '. The Portainer bootstrap may not support WebUI/MCP updates. Update the stack command before retrying.'
+              : '. Waiting for a completed container bootstrap.')
+          : '';
+      }
       live.querySelector('[data-v988-check]').textContent='Last check: '+(data.checked_at||'Never')+' · '+data.check_status;
       for(const kind of ['stable','beta']) {
         const value=data[kind]||'';
@@ -194,14 +261,43 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
         const enabled=Boolean(allowed && newer && value && data.check_status==='ok');
         form.querySelector('[name=target_version]').value=value;
         form.querySelector('[name=csrf]').value=data.csrf;
-        form.querySelector('button').disabled=!enabled;
+        const button=form.querySelector('button');
+        button.disabled=!enabled;
+        if(kind==='stable')button.textContent=data.current_version.includes('-beta.')
+          ?'Switch to Stable':'Update Stable';
         live.querySelector('[data-v988-message="'+kind+'"]').textContent=
           !allowed?'Enable Stable + Beta to install prereleases':
           !value?'No published '+kind+' release':
           data.check_status!=='ok'?'Release lookup unavailable; retrying':
-          enabled?'Update available':'Already up to date';
+          enabled?(kind==='stable'&&data.current_version.includes('-beta.')?'Switch back to Stable':'Update available'):
+          kind==='stable'&&!data.current_version.includes('-beta.')&&
+            value==='v'+data.current_version.replace(/^v/,'')?'Latest Stable already installed':
+          kind==='stable'?'Stable is older than the current version':'Already up to date';
       }
       live.querySelector('form[data-v988-channel] [name=csrf]').value=data.csrf;
+      const pin=live.querySelector('form[data-v988-pin]');
+      if(pin){
+        const select=pin.querySelector('[name=target_version]');
+        const previous=select.value;
+        const valid=(data.release_tags||[]).filter(tag=>
+          /^v\d+\.\d+\.\d+(?:-beta\.[1-9]\d*)?$/.test(tag) &&
+          (data.beta_allowed || !tag.includes('-beta.')));
+        select.replaceChildren(new Option('Select an exact release...',''));
+        for(const [name,values] of [
+          ['Stable releases',valid.filter(v=>!v.includes('-beta.'))],
+          ['Beta releases',valid.filter(v=>v.includes('-beta.'))]
+        ]){
+          if(!values.length)continue;
+          const group=document.createElement('optgroup');group.label=name;
+          values.forEach(v=>group.appendChild(new Option(v,v)));
+          select.appendChild(group);
+        }
+        select.value=valid.includes(previous)?previous:'';
+        const ready=data.check_status==='ok' && valid.length>0;
+        select.disabled=!ready;
+        pin.querySelector('[name=csrf]').value=data.csrf;
+        pin.querySelector('button').disabled=!ready||!select.value;
+      }
       return data;
     }).catch(err=>{
       root()?.querySelector('[data-v988-feedback]')?.replaceChildren(
@@ -214,17 +310,29 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
   document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh(true)});
   const main=document.querySelector('.v970-workspace > main');
   if(main)new MutationObserver(()=>{if(root())refresh()}).observe(main,{childList:true,subtree:false});
+  document.addEventListener('change',ev=>{
+    const select=ev.target.closest?.('form[data-v988-pin] select[name=target_version]');
+    if(!select)return;
+    select.form.querySelector('button').disabled=!select.value||select.disabled;
+  });
   document.addEventListener('submit',async ev=>{
-    const form=ev.target.closest?.('form[data-v988-update],form[data-v988-channel]');
+    const form=ev.target.closest?.('form[data-v988-update],form[data-v988-channel],form[data-v988-pin]');
     if(!form)return;
     ev.preventDefault();
     const clicked=form.dataset.v988Update;
     // Save the version the user actually clicked before refreshing.
-    const target=clicked?form.querySelector('[name=target_version]').value:'';
+    const pinning=form.hasAttribute('data-v988-pin');
+    const target=(clicked||pinning)?form.querySelector('[name=target_version]').value:'';
     const data=await refresh(true);
     const feedback=root()?.querySelector('[data-v988-feedback]');
     if(!data){if(feedback)feedback.textContent='Session update unavailable. Try again.';return;}
     form.querySelector('[name=csrf]').value=data.csrf;
+    if(pinning && (!target || data.check_status!=='ok' ||
+        !(data.release_tags||[]).includes(target) ||
+        (target.includes('-beta.')&&!data.beta_allowed))){
+      if(feedback)feedback.textContent='This exact release is no longer eligible. Review the list and select a version again.';
+      return;
+    }
     if(clicked && (data[clicked]!==target ||
          !(clicked==='stable'?data.stable_update:data.beta_update) ||
          (clicked==='beta'&&!data.beta_allowed) || data.check_status!=='ok')){
@@ -317,6 +425,20 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         target = str(form.get("target_version") or "").strip()
         if operation not in {"update-latest", "switch-version", "pin-version", "rollback-version"}:
             return PlainTextResponse("Unsupported update operation", status_code=400)
+        if operation == "pin-version":
+            snapshot = _release_snapshot(base)
+            if not (
+                target in snapshot.get("release_tags", [])
+                and channels.release_is_allowed(target, snapshot["release_channel"])
+                and snapshot["check_status"] == "ok"
+            ):
+                return _response_page(
+                    "Release unavailable",
+                    "<p>The selected version is not a verified published release "
+                    "for the current update channel. No changes were made.</p>"
+                    '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
+                    status=400,
+                )
         result = core.runtime_version_change_preview(
             operation=operation,
             target_version=None if operation == "update-latest" else target,
@@ -386,11 +508,85 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
             )
-        return _response_page(
-            "Version change scheduled",
-            f'<p>Target release: <strong>{_e(result.get("target_version_ref"))}</strong></p>'
-            '<p>Postmaster will restart through the existing runtime selector. '
-            'Reconnect and verify the installed build after restart.</p>',
+        # Wait at least 15 seconds, then verify the actual running build.
+        # A simple HTTP 200 is not sufficient: the old runtime might still
+        # answer during restart. Never submit the update POST a second time.
+        return HTMLResponse(
+            '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Updating Postmaster MCP</title>'
+            '<style>html{color-scheme:dark}*{box-sizing:border-box}'
+            'body{margin:0;min-height:100dvh;display:grid;place-items:center;'
+            'background:#101b2a;color:#edf3ff;font-family:Inter,system-ui,Arial,sans-serif}'
+            'main{width:min(500px,calc(100vw - 32px));padding:38px 30px;'
+            'border:1px solid #34465f;border-radius:16px;text-align:center;'
+            'background:#172437;box-shadow:0 18px 44px #070f1d55}'
+            '.mark{display:inline-grid;place-items:center;width:64px;height:64px;'
+            'margin-bottom:15px;border-radius:17px;background:#274574;'
+            'color:#a4c8ff;font-size:32px}h1{font-size:23px;margin:0 0 12px}'
+            'p{line-height:1.6;color:#adbed5;font-size:14px}'
+            'strong{color:#eff5ff}.seconds{font-weight:750;color:#8ab5ff}'
+            '.bar{height:6px;background:#283c57;border-radius:6px;overflow:hidden;'
+            'margin:23px 0}.bar>span{display:block;height:100%;width:100%;'
+            'background:#6598ee;transform-origin:left;transition:transform 1s linear}'
+            'a{color:#9ac2ff}a:focus-visible{outline:2px solid #9ac2ff;outline-offset:3px}'
+            '</style></head><body>'
+            '<main role="status" aria-live="polite">'
+            '<div class="mark" aria-hidden="true">✉</div>'
+            '<h1>Updating Postmaster MCP</h1>'
+            '<p>Update scheduled for <strong id="target-version">' +
+            _e(result.get("target_version_ref")) +
+            '</strong>. The container is restarting.</p>'
+            '<p id="update-status">Checking the installed build in '
+            '<span id="countdown" class="seconds">15</span> seconds…</p>'
+            '<div class="bar" aria-hidden="true"><span id="progress"></span></div>'
+            '<p><a href="/?ui_view=system&amp;settings_tab=versions#system">'
+            'Return to dashboard now</a></p>'
+            '<p>The dashboard will open automatically only once the requested '
+            'build is running. No update operation will be repeated.</p>'
+            '<noscript><p>Automatic status checks require JavaScript. '
+            'You may return manually using the link above.</p></noscript>'
+            '</main>'
+            '<script>(()=>{"use strict";'
+            'const target=document.getElementById("target-version").textContent.trim();'
+            'const status=document.getElementById("update-status");'
+            'const counter=document.getElementById("countdown");'
+            'const progress=document.getElementById("progress");'
+            'const dashboard="/?ui_view=system&settings_tab=versions#system";'
+            'const minimumMs=15000;const start=Date.now();'
+            'let complete=false,checking=false,lastCheck=0;'
+            'const normalize=s=>String(s||"").trim().replace(/^v/,"");'
+            'async function check(){'
+            'if(complete||checking)return;checking=true;'
+            'const controller=new AbortController();'
+            'const timeout=setTimeout(()=>controller.abort(),4000);'
+            'try{'
+            'const response=await fetch("/dashboard/versions/status?update_health="+Date.now(),{'
+            'method:"GET",credentials:"same-origin",cache:"no-store",'
+            'headers:{"Accept":"application/json"},signal:controller.signal});'
+            'if(!response.ok)throw new Error("Health not available");'
+            'const data=await response.json();'
+            'const running=normalize(data.current_version);'
+            'if(data.ok===true&&running===normalize(target)){'
+            'complete=true;status.textContent="New version verified. Opening dashboard…";'
+            'location.replace(dashboard);return;}'
+            'status.textContent="Waiting for the requested version…"+'
+            '(running?" Currently running: "+running+".":"");'
+            '}catch(_e){status.textContent="Waiting for Postmaster to restart…";}'
+            'finally{clearTimeout(timeout);checking=false;}'
+            '}'
+            'const tick=()=>{if(complete)return;'
+            'const elapsed=Date.now()-start;'
+            'const remaining=Math.max(0,Math.ceil((minimumMs-elapsed)/1000));'
+            'if(remaining>0){counter.textContent=String(remaining);'
+            'progress.style.transform="scaleX("+(remaining/15)+")";}'
+            'else{progress.style.transform="scaleX(0)";'
+            'if(!lastCheck||Date.now()-lastCheck>=3000){'
+            'lastCheck=Date.now();check();}}'
+            'setTimeout(tick,250);};tick();})();</script></body></html>',
+            headers={"Cache-Control": "private, no-store",
+                     "Referrer-Policy": "no-referrer",
+                     "X-Content-Type-Options": "nosniff"},
         )
 
     async def save_channel(req: Request) -> Response:

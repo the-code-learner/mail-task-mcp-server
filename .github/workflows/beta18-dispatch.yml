@@ -1,0 +1,78 @@
+name: beta.18 validated release dispatch
+
+on:
+  push:
+    branches:
+      - beta/v9.8.9-beta.18-map-fallback
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: beta18-validated-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify candidate metadata
+        run: |
+          test "$(cat VERSION)" = "9.8.9-beta.18"
+          grep -q '^## 9.8.9-beta.18 - ' CHANGELOG.md
+      - name: Wait for successful exact-commit regression tests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for attempt in $(seq 1 50); do
+            CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.18-map-fallback" --jq '.object.sha')"
+            if [ "$CURRENT" != "$GITHUB_SHA" ]; then
+              echo "Branch advanced; this run must not publish an outdated commit."
+              exit 0
+            fi
+            gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > /tmp/postmaster-checks.json
+            RESULT="$(python - <<'PY'
+          import json
+          runs=json.load(open('/tmp/postmaster-checks.json'))['check_runs']
+          tests=[r for r in runs if r.get('name')=='v9 runtime tests / test']
+          if any(r.get('conclusion')=='success' for r in tests):
+              print('success')
+          elif any(r.get('conclusion') in ('failure','cancelled','timed_out','action_required') for r in tests):
+              print('failure')
+          else:
+              print('pending')
+          PY
+            )"
+            if [ "$RESULT" = "success" ]; then
+              echo "Exact beta candidate passed runtime CI"
+              break
+            fi
+            if [ "$RESULT" = "failure" ]; then
+              echo "Runtime CI failed; release forbidden"
+              exit 1
+            fi
+            if [ "$attempt" -eq 50 ]; then
+              echo "CI did not finish; release forbidden"
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: Dispatch established beta release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/beta/v9.8.9-beta.18-map-fallback" --jq '.object.sha')"
+          test "$CURRENT" = "$GITHUB_SHA"
+          if gh release view v9.8.9-beta.18 >/dev/null 2>&1; then
+            echo "Already released"
+            exit 0
+          fi
+          gh workflow run beta-release.yml \
+            --ref beta/v9.8.9-beta.18-map-fallback \
+            -f version=9.8.9-beta.18

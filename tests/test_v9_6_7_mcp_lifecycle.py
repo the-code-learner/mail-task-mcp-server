@@ -505,7 +505,7 @@ class ReleaseBoundaryV967Tests(unittest.TestCase):
         self.assertNotIn('name="set_amp_account_state"', source)
 
     def test_release_metadata_requirements_and_single_yaml_boundary(self):
-        version = tuple(int(part) for part in (ROOT / "VERSION").read_text().strip().split("."))
+        version = tuple(int(part) for part in (ROOT / "VERSION").read_text().strip().split("-beta.", 1)[0].split("."))
         self.assertGreaterEqual(version, (9, 6, 7))
         self.assertIn("## 9.6.7 - 2026-08-23", (ROOT / "CHANGELOG.md").read_text())
         # v9.8.6 intentionally versions the single canonical Portainer YAML;

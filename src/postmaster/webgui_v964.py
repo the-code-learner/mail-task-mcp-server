@@ -201,6 +201,46 @@ async def compose_send(base: Any, request: Request):
     # but it is executed here so the same POST/CSRF token is verified only once.
     if payload["compose_action"] == "draft":
         return _save_draft(base, form, payload)
+    if payload["compose_action"] == "schedule":
+        if payload["thread_mode"] != "send":
+            return _result_redirect(form, {"ok": False,
+                "error": "Scheduling currently supports new messages only"}, "Email scheduled")
+        service = getattr(base, "scheduled_email_service_v98919", None)
+        if service is None:
+            return _result_redirect(form, {"ok": False,
+                "error": "Scheduled email worker is unavailable"}, "Email scheduled")
+        when = str(form.get("scheduled_send_at") or "").strip()
+        if not when:
+            return _result_redirect(form, {"ok": False,
+                "error": "Select a date and time before scheduling"}, "Email scheduled")
+        try:
+            job = service.schedule(
+                account_id=payload["account_id"] or "",
+                send_at=when,
+                timezone_name=str(form.get("scheduled_timezone") or "Europe/Rome"),
+                idempotency_key=payload["idempotency_key"],
+                message={
+                    "to": payload["to"], "cc": payload["cc"], "bcc": payload["bcc"],
+                    "subject": payload["subject"], "body": payload["body"],
+                    "body_html": payload["body_html"], "body_amp": payload["body_amp"],
+                    "attachments": payload["attachments"],
+                    "track_opens": payload["track_opens"],
+                    "campaign_id": payload["campaign_id"],
+                    "newsletter_mode": payload["newsletter_mode"],
+                    "unsubscribe_url": payload["unsubscribe_url"],
+                    "unsubscribe_email": payload["unsubscribe_email"],
+                    "one_click_unsubscribe": payload["one_click_unsubscribe"],
+                    "automatic_unsubscribe": payload["automatic_unsubscribe"],
+                    "dsn_notify_success": payload["dsn_notify_success"],
+                },
+            )
+        except Exception as exc:
+            return _result_redirect(form, {"ok": False, "error": str(exc)}, "Email scheduled")
+        return _result_redirect(
+            form, {"ok": True},
+            "Email scheduled for " + str(job.get("next_run_utc") or when)
+            + " · Task " + str(job["id"]),
+        )
 
     client = base.mail_client(payload["account_id"])
     mode = str(payload["thread_mode"])

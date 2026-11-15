@@ -85,6 +85,38 @@ def _local_runtime_status(base: Any, legacy_build_status: Any) -> dict[str, Any]
             status = legacy_build_status()
         result = dict(status) if isinstance(status, dict) else {"ok": True}
 
+    # The control file expresses INTENT; only the bootstrapped source VERSION
+    # proves activation. In legacy Portainer stacks the container bootstrap
+    # never reads that control file and silently resumes the Stable release.
+    selected = _runtime_selector(result)
+    active = str(result.get("version") or "unknown").strip()
+    active_ref = "v" + active.removeprefix("v") if active != "unknown" else "unknown"
+    bootstrap_reads_control = os.getenv("POSTMASTER_BOOTSTRAP_CONTROL_V2", "").lower() == "true"
+    if selected == "latest":
+        activation = "following_stable"
+    elif selected == active_ref:
+        activation = "active"
+    elif not bootstrap_reads_control:
+        activation = "bootstrap_unverified"
+    else:
+        activation = "pending_activation"
+    result["bootstrap_control_supported"] = bootstrap_reads_control
+    result["update_activation_status"] = activation
+    result["update_target_version"] = selected
+    result["update_activation_verified"] = activation == "active"
+    if activation == "bootstrap_unverified":
+        result["update_activation_warning"] = (
+            "The selected release differs from the running version and the "
+            "container bootstrap has not advertised runtime-control support. "
+            "The command embedded in the Portainer stack may be outdated; "
+            "updating the selector alone cannot install this release."
+        )
+    elif activation == "pending_activation":
+        result["update_activation_warning"] = (
+            "The selected release is not running yet. Confirm that the container "
+            "completed a full bootstrap restart and check runtime_status again."
+        )
+
     result.update(
         {
             "version_capability": "9.6.7",
@@ -319,6 +351,8 @@ def install_runtime_v967(
                 "runtime_version_action": op,
                 "approval_required": False,
                 "version_change_applied": True,
+                "installation_verified": False,
+                "bootstrap_control_supported": os.getenv("POSTMASTER_BOOTSTRAP_CONTROL_V2", "").lower() == "true",
                 "target_version_ref": target,
                 "requested_selector": requested_selector,
                 "runtime_control": control,

@@ -135,7 +135,26 @@ SCRIPT = r'''
       row.onkeydown=ev=>{if((ev.key==='Enter'||ev.key===' ')&&!ev.target.closest('a,button,input,form,select,textarea')){ev.preventDefault();go();}};
     });
     root.querySelectorAll('form[data-v960-send]').forEach(form => {
-      if (!form.dataset.v962SendBound) { form.dataset.v962SendBound='1'; form.addEventListener('submit',()=>form.querySelectorAll('button[type="submit"]').forEach(b=>b.disabled=true)); }
+      if (!form.dataset.v962SendBound) {
+        form.dataset.v962SendBound='1';
+        form.addEventListener('submit',event=>{
+          // Preserve clicked Send / Save draft / Schedule send action before
+          // disabling submit buttons. Disabled submitters are omitted by
+          // browser form-data construction after submit listeners run.
+          const submitter=event.submitter;
+          if(submitter?.name==='compose_action'){
+            let hidden=form.querySelector('input[data-v98919-submit-action]');
+            if(!hidden){
+              hidden=document.createElement('input');hidden.type='hidden';
+              hidden.name='compose_action';hidden.dataset.v98919SubmitAction='1';
+              form.appendChild(hidden);
+            }
+            hidden.value=submitter.value;
+            submitter.removeAttribute('name');
+          }
+          form.querySelectorAll('button[type="submit"]').forEach(b=>b.disabled=true);
+        });
+      }
     });
   }
   function bindAll(root=document) { bindDetails(root); bindProjectSlug(root); bindReader(root); }
@@ -154,6 +173,40 @@ SCRIPT = r'''
     const controller = new AbortController(); controllers.set(view, controller);
     const generation = (generations.get(view) || 0) + 1; generations.set(view, generation);
     const started = performance.now();
+    // Tracking reports can take several seconds to aggregate. Announce
+    // pending requests immediately instead of leaving period chips inert.
+    // The previously selected period remains authoritative until new data
+    // actually arrive; a fast second click cancels the first request.
+    const trackingPending = view==='tracking' && target.dataset.v962Loaded==='1';
+    if(trackingPending){
+      target.setAttribute('aria-busy','true');
+      target.classList.add('v98913-tracking-loading');
+      let banner=target.querySelector('[data-v98913-tracking-loading]');
+      if(!banner){
+        banner=document.createElement('div');
+        banner.dataset.v98913TrackingLoading='1';
+        banner.className='v98913-tracking-loading-banner';
+        banner.setAttribute('role','status');
+        banner.setAttribute('aria-live','polite');
+        const head=target.querySelector('.v985-tracking-periods');
+        if(head)head.insertAdjacentElement('afterend',banner);
+        else target.prepend(banner);
+      }
+      const chosen=new URL(url,location.href).searchParams.get('period')||'7d';
+      const descriptions={'24h':'24 hours','7d':'7 days','28d':'28 days',
+        '90d':'90 days',custom:'custom date range'};
+      banner.textContent='Loading '+(descriptions[chosen]||chosen)+' statistics…';
+      target.querySelectorAll('a[data-v985-period]').forEach(a=>{
+        a.classList.toggle('is-pending',a.dataset.v985Period===chosen);
+      });
+    }
+    const loadingFolder = view==='inbox' && target.dataset.v962Loaded === '1' &&
+      new URL(url,location.href).searchParams.get('mailbox') !==
+      target.dataset.v989LoadedMailbox;
+    if(loadingFolder){
+      target.setAttribute('aria-busy','true');
+      target.classList.add('v989-folder-loading');
+    }
     try {
       const endpoint=fragmentUrl(view,url);
       const prefetched=safeToWarm(view,url) ? warmCache.get(endpoint) : null;
@@ -174,6 +227,10 @@ SCRIPT = r'''
       // Preserve the v9.6.1 active-fragment invariant during replacement.
       if (target.classList.contains('active')) next.classList.add('active');
       next.dataset.v962Loaded='1';
+      if(view==='inbox'){
+        next.dataset.v989LoadedMailbox=new URL(url,location.href).searchParams.get('mailbox')||'INBOX';
+      }
+      next.removeAttribute('aria-busy');
       const line=document.createElement('div'); line.className='v962-perfline';
       line.textContent='Fragment ' + (performance.now()-started).toFixed(1) + ' ms' + (timing ? ' · ' + timing : '');
       next.insertBefore(line,next.firstChild);
@@ -182,6 +239,26 @@ SCRIPT = r'''
       if (push) history.pushState({v962:view},'',url);
     } catch (err) {
       if (err && err.name === 'AbortError') return;
+      // Preserve previously loaded Tracking statistics and allow a retry.
+      // Replacing the fragment with a bare error loses the period controls.
+      if(view==='tracking' && trackingPending){
+        target.removeAttribute('aria-busy');
+        target.classList.remove('v98913-tracking-loading');
+        target.querySelectorAll('a[data-v985-period]').forEach(a=>
+          a.classList.remove('is-pending'));
+        const banner=target.querySelector('[data-v98913-tracking-loading]');
+        if(banner){
+          banner.textContent='Could not load the selected period. ';
+          const retry=document.createElement('button');
+          retry.type='button';
+          retry.textContent='Retry';
+          retry.addEventListener('click',()=>load(view,url,false,true));
+          banner.appendChild(retry);
+        }
+        return;
+      }
+      target.classList.remove('v989-folder-loading');
+      target.removeAttribute('aria-busy');
       target.innerHTML='<div class="flash">Could not load this dashboard fragment. <button type="button" data-v962-retry>Retry</button></div>';
       const retry=target.querySelector('[data-v962-retry]'); if(retry) retry.onclick=()=>load(view,url,false,true);
     } finally {
@@ -208,8 +285,13 @@ SCRIPT = r'''
     const explicit = a.hasAttribute('data-v962-nav') || a.hasAttribute('data-v960-fragment') || views.has((u.hash||'').slice(1));
     if (!explicit) return;
     ev.preventDefault();
-    const isNav=a.hasAttribute('data-v962-nav');
-    load(view,u.toString(),true,!isNav);
+    // Folder links are *not* normal view navigation. All four mail folders
+    // share "inbox", but each must fetch its own mailbox fragment. Previously
+    // isNav=true skipped loading because panel-inbox was already marked loaded,
+    // changing only the URL/active tab while leaving stale Inbox/Sent messages.
+    const isFolder=a.hasAttribute('data-v985-mailbox');
+    const isNav=a.hasAttribute('data-v962-nav') && !isFolder;
+    load(view,u.toString(),true,isFolder || !isNav);
   });
 
   document.addEventListener('submit', ev => {

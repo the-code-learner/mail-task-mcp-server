@@ -407,6 +407,65 @@ class MailboxCacheStore:
         messages = [self._public_message(row, include_body=False) for row in rows]
         return {"messages": messages, "total": total, "page": page, "page_size": page_size}
 
+    def query_messages_across_accounts(
+        self,
+        *,
+        account_mailboxes: list[tuple[str, str]],
+        page: int = 1,
+        page_size: int = 25,
+        subject: str = "",
+        text: str = "",
+        unread_only: bool = False,
+        since_days: int = 90,
+    ) -> dict[str, Any]:
+        """Read one globally ordered cache page, never IMAP, for allowed accounts.
+
+        Each pair is an enabled account ID and its actual provider mailbox.
+        Parameters are bound in SQL; caller must supply only authorized pairs.
+        """
+        pairs = list(dict.fromkeys(
+            (str(a), str(m)) for a, m in account_mailboxes if a and m
+        ))
+        page = max(1, int(page))
+        page_size = max(1, min(int(page_size), 100))
+        if not pairs:
+            return {"messages": [], "total": 0, "page": page, "page_size": page_size}
+        clauses = ["(" + " OR ".join("(account_id=? AND mailbox=?)" for _ in pairs) + ")"]
+        values: list[Any] = [value for pair in pairs for value in pair]
+        subject_value = (subject or "").strip().casefold()
+        text_value = (text or "").strip().casefold()
+        if subject_value:
+            clauses.append("lower(subject) LIKE ?")
+            values.append(f"%{subject_value}%")
+        if text_value:
+            clauses.append("(lower(subject) LIKE ? OR lower(from_text) LIKE ? OR "
+                           "lower(to_text) LIKE ? OR lower(cc_text) LIKE ? OR "
+                           "lower(snippet) LIKE ? OR lower(body_text) LIKE ?)")
+            values.extend([f"%{text_value}%"] * 6)
+        if unread_only:
+            clauses.append("seen=0")
+        if since_days >= 0:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=min(int(since_days), 3650))).isoformat()
+            clauses.append("(date_value IS NULL OR date_value='' OR date_value>=?)")
+            values.append(cutoff)
+        where = " AND ".join(clauses)
+        with self._connect() as conn:
+            total = int(conn.execute(
+                f"SELECT COUNT(*) FROM mailbox_cache_messages WHERE {where}", values
+            ).fetchone()[0])
+            rows = conn.execute(
+                f"SELECT * FROM mailbox_cache_messages WHERE {where} "
+                "ORDER BY date_value DESC, account_id ASC, mailbox ASC, uid_int DESC "
+                "LIMIT ? OFFSET ?",
+                (*values, page_size, (page - 1) * page_size),
+            ).fetchall()
+        messages = [
+            {**self._public_message(row, include_body=False),
+             "account_id": str(row["account_id"])}
+            for row in rows
+        ]
+        return {"messages": messages, "total": total, "page": page, "page_size": page_size}
+
     @staticmethod
     def _public_message(row: sqlite3.Row | dict[str, Any], *, include_body: bool) -> dict[str, Any]:
         value = dict(row)

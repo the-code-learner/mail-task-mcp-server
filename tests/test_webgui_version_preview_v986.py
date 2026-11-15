@@ -119,11 +119,36 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
         self.assertEqual(denied.status_code,400)
         self.assertEqual(invalid.status_code,400)
         self.assertEqual(approved.status_code,200,approved.text[:500])
-        self.assertIn("Version change scheduled",approved.text)
+        self.assertIn("Updating Postmaster MCP",approved.text)
+        self.assertIn('<span id="countdown" class="seconds">15</span>',approved.text)
+        self.assertIn('const minimumMs=15000',approved.text)
+        self.assertIn('location.replace(dashboard)',approved.text)
+        self.assertIn('v9.8.5',approved.text)
+        self.assertIn('no-store',approved.headers.get("Cache-Control",""))
+        self.assertNotIn('Version change scheduled</h1>',approved.text)
         self.assertEqual(core.execute_calls,[
             ("update-latest","v9.8.5","wrong"),
             ("update-latest","v9.8.5","pv_demo_6fd25"),
         ])
+
+    # Exact-SHA publication guard: wait >=15s and only redirect on the confirmed target build.
+    def test_restart_countdown_never_resubmits_the_update_post(self):
+        client,core,base=_client()
+        with client:
+            approved=client.post("/dashboard/versions/execute",data={
+                "csrf":base._csrf_value(),"approved":"yes",
+                "operation":"update-latest","target_version":"v9.8.5",
+                "preview_id":"pv_demo_6fd25",
+            })
+        self.assertEqual(approved.status_code,200)
+        self.assertIn('setTimeout(tick,250)',approved.text)
+        self.assertIn('fetch("/dashboard/versions/status?update_health="',approved.text)
+        self.assertNotIn('meta http-equiv="refresh"',approved.text)
+        self.assertIn('running===normalize(target)',approved.text)
+        self.assertIn('cache:"no-store"',approved.text)
+        self.assertIn('controller.abort()',approved.text)
+        self.assertNotIn('fetch("/dashboard/versions/execute"',approved.text)
+        self.assertEqual(len(core.execute_calls),1)
 
     def test_live_release_status_has_fresh_csrf_and_never_cache_headers(self):
         from unittest.mock import patch

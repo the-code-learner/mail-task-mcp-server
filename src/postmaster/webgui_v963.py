@@ -322,8 +322,17 @@ def _detail(base: Any, params: dict[str, str], account_id: str, mailbox: str, ro
 
 
 def render_inbox_v963(base: Any, request: Request) -> str:
-    accounts, account_id = _selected(base, request)
-    params = _params(request, account_id)
+    accounts, fallback_account_id = _selected(base, request)
+    valid_accounts = {v953._account_id(a) for a in accounts if v953._account_id(a)}
+    explicit_account = (request.query_params.get("account_id") or
+                        request.query_params.get("account") or "").strip()
+    # The global scopebar explicitly advertises an empty account selection as
+    # "All accounts". An empty selection must never silently mean "default".
+    all_accounts = not explicit_account
+    account_id = fallback_account_id if all_accounts else (
+        explicit_account if explicit_account in valid_accounts else None
+    )
+    params = _params(request, None if all_accounts else account_id)
     flash = escape(str(request.query_params.get("v963_result") or ""))
     if not account_id:
         return f'''<section class="tab-panel" id="panel-inbox" data-panel="inbox"><div class="v951-pagehead"><div><h2>Inbox</h2><p>Fresh installation: configure an email account before mailbox sync. No email is sent by onboarding.</p></div></div>{_proxy_card(base)}</section>'''
@@ -343,42 +352,117 @@ def render_inbox_v963(base: Any, request: Request) -> str:
         params["mailbox"] = mailbox
     role = _role(catalog, mailbox)
     page = int(params["page"])
-    query = store.query_messages(
-        account_id=account_id,
-        mailbox=mailbox,
-        page=page,
-        page_size=25,
-        subject=params.get("subject", ""),
-        text=params.get("text", ""),
-        unread_only=params.get("unread_only") == "1",
-        since_days=int(params["since_days"]),
-    )
+    if all_accounts:
+        # IMAP special folder paths vary per account, even when "Sent" or
+        # "Drafts" has the same sidebar label. Resolve by authoritative
+        # cached role and never use a different mailbox as a fallback.
+        account_pairs: list[tuple[str, str]] = []
+        for account in accounts:
+            candidate_id = v953._account_id(account)
+            if not candidate_id:
+                continue
+            candidate_catalog = store.list_mailboxes(candidate_id)
+            if not candidate_catalog and role == "received":
+                try:
+                    registered = base.account_store().get_account(candidate_id)
+                    candidate_catalog = [{"name": str(
+                        registered.get("inbox_mailbox") or "INBOX"), "role": "received"}]
+                except Exception:
+                    candidate_catalog = [{"name": "INBOX", "role": "received"}]
+            matching = next(
+                (str(entry.get("name")) for entry in candidate_catalog
+                 if str(entry.get("role") or "") == role and entry.get("name")),
+                None,
+            )
+            if not matching:
+                matching = next(
+                    (str(entry.get("name")) for entry in candidate_catalog
+                     if str(entry.get("name") or "") == mailbox), None
+                )
+            if matching:
+                account_pairs.append((candidate_id, matching))
+        query = store.query_messages_across_accounts(
+            account_mailboxes=account_pairs,
+            page=page, page_size=25,
+            subject=params.get("subject", ""), text=params.get("text", ""),
+            unread_only=params.get("unread_only") == "1",
+            since_days=int(params["since_days"]),
+        )
+    else:
+        query = store.query_messages(
+            account_id=account_id,
+            mailbox=mailbox,
+            page=page,
+            page_size=25,
+            subject=params.get("subject", ""),
+            text=params.get("text", ""),
+            unread_only=params.get("unread_only") == "1",
+            since_days=int(params["since_days"]),
+        )
     rows: list[str] = []
+    selected_detail = ""
     uid = (request.query_params.get("message_uid") or "").strip()
+    selected_message_account = (request.query_params.get("message_account_id") or "").strip()
+    selected_message_mailbox = (request.query_params.get("message_mailbox") or "").strip()
     for row in query["messages"]:
         row_uid = str(row.get("uid") or "")
-        href = _href(params, message_uid=row_uid, compose_mode=None, full_html=None, full_html_intent=None)
+        row_account = str(row.get("account_id") or account_id)
+        row_mailbox = str(row.get("mailbox") or mailbox)
+        row_params = dict(params)
+        if all_accounts:
+            row_params.update(message_account_id=row_account, message_mailbox=row_mailbox)
+        href = _href(row_params, message_uid=row_uid, compose_mode=None,
+                     full_html=None, full_html_intent=None)
         counterpart = str(row.get("to") if role == "sent" else row.get("from") or "")
         css = "v963-mail-row" + (" unread" if row.get("seen") is False else "")
         dot = '<span class="v963-unread-dot" title="Unread"></span>' if row.get("seen") is False else ""
-        rows.append(f'<tr class="{css}" data-v960-href="{escape(href, quote=True)}"><td>{dot}</td><td>{escape(counterpart)}</td><td>{escape(str(row.get("subject") or ""))}</td><td>{escape(str(row.get("date") or ""))}</td></tr>')
-        if uid and row_uid == uid:
+        account_label = v953._account_label(next(
+            (a for a in accounts if v953._account_id(a) == row_account), {}
+        )) if all_accounts else ""
+        badge = (f'<small class="v989-account-origin">{escape(account_label)}</small>'
+                 if all_accounts and account_label else "")
+        rows.append(f'<tr class="{css}" data-v960-href="{escape(href, quote=True)}"><td>{dot}</td><td>{escape(counterpart)}</td><td>{escape(str(row.get("subject") or ""))}<small class="v989-snippet-source">{escape(str(row.get("snippet") or "")[:160])}</small>{badge}</td><td>{escape(str(row.get("date") or ""))}</td></tr>')
+        is_selected = (
+            uid and row_uid == uid and
+            (not all_accounts or
+             (row_account == selected_message_account and
+              row_mailbox == selected_message_mailbox))
+        )
+        if is_selected:
             try:
-                detail = _detail(base, params, account_id, mailbox, role, uid, request)
+                detail = _detail(base, row_params, row_account, row_mailbox, role, uid, request)
             except Exception as exc:
                 detail = f'<div class="flash danger">Could not open message: {escape(type(exc).__name__ + ": " + str(exc))}</div>'
-            rows.append(f'<tr class="v960-inline-detail"><td colspan="4">{detail}</td></tr>')
-    state = store.state(account_id, mailbox)
+            # Beta split view: keep the reader OUTSIDE the message table.
+            # Invalid tr/td nesting caused browsers to move or stretch the
+            # entire message and diagnostics into a full-width table row.
+            selected_detail = detail
+    state = store.state(account_id, mailbox) if not all_accounts else {}
     csrf = escape(str(base._csrf_value()), quote=True)
+    if all_accounts:
+        refresh_control = (
+            '<span class="v963-chip" title="Cache-only combined view">'
+            'All accounts · cached messages</span>'
+            '<span class="small muted">Select an email account above to sync it.</span>'
+        )
+    else:
+        refresh_control = (
+            f'<span class="v963-chip">{escape(_elapsed_label(str(state.get("last_sync_at") or "")))}</span>'
+            '<form method="post" action="/dashboard/inbox/refresh">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<input type="hidden" name="account_id" value="{escape(account_id, quote=True)}">'
+            f'<input type="hidden" name="mailbox" value="{escape(mailbox, quote=True)}">'
+            '<button class="primary" type="submit">Aggiorna</button></form>'
+        )
     previous = f'<a data-v960-fragment="inbox" href="{escape(_href(params, page=page-1, message_uid=None), quote=True)}">← Previous</a>' if page > 1 else ""
     next_link = f'<a data-v960-fragment="inbox" href="{escape(_href(params, page=page+1, message_uid=None), quote=True)}">Next →</a>' if page * 25 < int(query["total"]) else ""
     checked = " checked" if params.get("unread_only") == "1" else ""
     table = '<div class="scroll"><table class="v960-mail-table"><thead><tr><th></th><th>' + ("To" if role == "sent" else "From") + '</th><th>Subject</th><th>Date</th></tr></thead><tbody>' + ("".join(rows) or '<tr><td colspan="4" class="muted">No cached messages matched. Use Aggiorna for an explicit incremental sync.</td></tr>') + '</tbody></table></div>'
     return f'''
-<section class="tab-panel" id="panel-inbox" data-panel="inbox"><div class="v963-inbox-head"><div><h2>Inbox</h2><p>Cache-first mailbox view · IMAP remains source of truth · Safe Email is the default.</p></div><div class="v963-refresh"><span class="v963-chip">{escape(_elapsed_label(str(state.get('last_sync_at') or '')))}</span><form method="post" action="/dashboard/inbox/refresh"><input type="hidden" name="csrf" value="{csrf}"><input type="hidden" name="account_id" value="{escape(account_id, quote=True)}"><input type="hidden" name="mailbox" value="{escape(mailbox, quote=True)}"><button class="primary" type="submit">Aggiorna</button></form></div></div>
+<section class="tab-panel" id="panel-inbox" data-panel="inbox"><div class="v963-inbox-head"><div><h2>Inbox</h2><p>Cache-first mailbox view · IMAP remains source of truth · Safe Email is the default.</p></div><div class="v963-refresh">{refresh_control}</div></div>
 {f'<div class="flash">{flash}</div>' if flash else ''}{_mailbox_tabs(params, catalog, mailbox)}
-<form method="get" action="/" class="v951-toolbar" data-v960-fragment="inbox"><input type="hidden" name="ui_view" value="inbox"><input type="hidden" name="page" value="1"><label>Account {v953._account_select(accounts, account_id)}</label><label>Mailbox {v953._mailbox_select(available, mailbox)}</label><label>Subject <input name="subject" value="{escape(params.get('subject',''), quote=True)}"></label><label>Text <input name="text" value="{escape(params.get('text',''), quote=True)}"></label><label>Since days <input type="number" min="1" max="3650" name="since_days" value="{escape(params['since_days'], quote=True)}"></label><label><input type="checkbox" name="unread_only" value="1"{checked}> unread only</label><button type="submit">Filter cache</button></form>
-{table}<div class="v960-pagination"><span>{previous}</span><span class="small muted">Page {page} · {int(query['total'])} cached result(s)</span><span>{next_link}</span></div>{_proxy_card(base)}
+<form method="get" action="/" class="v951-toolbar" data-v960-fragment="inbox"><input type="hidden" name="ui_view" value="inbox"><input type="hidden" name="page" value="1"><label>Account {v953._account_select(accounts, None if all_accounts else account_id, include_all=True)}</label><label>Mailbox {v953._mailbox_select(available, mailbox)}</label><label>Subject <input name="subject" value="{escape(params.get('subject',''), quote=True)}"></label><label>Text <input name="text" value="{escape(params.get('text',''), quote=True)}"></label><label>Since days <input type="number" min="1" max="3650" name="since_days" value="{escape(params['since_days'], quote=True)}"></label><label><input type="checkbox" name="unread_only" value="1"{checked}> unread only</label><button type="submit">Filter cache</button></form>
+{table}<div class="v989-reader-source">{selected_detail}</div><div class="v960-pagination"><span>{previous}</span><span class="small muted">Page {page} · {int(query['total'])} cached result(s)</span><span>{next_link}</span></div>{_proxy_card(base)}
 </section>'''
 
 

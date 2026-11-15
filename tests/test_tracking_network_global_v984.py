@@ -28,28 +28,42 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
                 conn.executescript("""
                 CREATE TABLE tracking_opens (
                     id INTEGER PRIMARY KEY, account_id TEXT,recipient TEXT,
-                    delivery_id TEXT, user_agent TEXT,browser TEXT,os TEXT,
+                    delivery_id TEXT,campaign_id TEXT, user_agent TEXT,browser TEXT,os TEXT,
                     client_source TEXT,metadata_confidence TEXT
                 );
                 CREATE TABLE tracking_clicks (
                     id INTEGER PRIMARY KEY,account_id TEXT, recipient TEXT,
-                    delivery_id TEXT, link_id TEXT, user_agent TEXT,
+                    delivery_id TEXT, campaign_id TEXT, link_id TEXT, link_occurrence_id TEXT, user_agent TEXT,
                     browser TEXT,os TEXT,client_source TEXT,metadata_confidence TEXT
                 );
                 CREATE TABLE generic_tracking_links (
-                    id TEXT PRIMARY KEY, label TEXT, target_type TEXT, destination_host TEXT NOT NULL DEFAULT ''
+                    id TEXT PRIMARY KEY, label TEXT, target_type TEXT,
+                    destination_host TEXT NOT NULL DEFAULT '',destination_url TEXT,
+                    download_filename TEXT
                 );
+                CREATE TABLE tracking_campaigns (id TEXT PRIMARY KEY,subject TEXT);
+                CREATE TABLE tracking_deliveries (id TEXT PRIMARY KEY,campaign_id TEXT,message_id TEXT);
+                CREATE TABLE tracking_links (
+                    id TEXT PRIMARY KEY,message_id TEXT,original_url TEXT,anchor_text TEXT
+                );
+                INSERT INTO tracking_campaigns VALUES ('camp-1','Email subject');
+                INSERT INTO tracking_deliveries VALUES ('del-1','camp-1','<sent@example.invalid>'),
+                    ('del-2','camp-1','<sent2@example.invalid>');
+                INSERT INTO tracking_links VALUES ('occ-1','<sent2@example.invalid>',
+                    'https://example.com/report','View report');
                 CREATE TABLE generic_tracking_clicks (
                     id INTEGER PRIMARY KEY, tracked_link_id TEXT,
                     user_agent TEXT, browser TEXT, os TEXT,
                     client_source TEXT,metadata_confidence TEXT
                 );
                 INSERT INTO tracking_opens VALUES
-                    (1,'mail-1','recipient@example.com','del-1','ExampleClient','Browser','OS','pixel','low');
+                    (1,'mail-1','recipient@example.com','del-1','camp-1','ExampleClient','Browser','OS','pixel','low');
                 INSERT INTO tracking_clicks VALUES
-                    (2,'mail-2','other@example.net','del-2','click-1','ClientClick','Browser','OS','link','medium');
-                INSERT INTO generic_tracking_links(id,label,target_type,destination_host) VALUES
-                    ('link-1','File URL','stored_file','example.com');
+                    (2,'mail-2','other@example.net','del-2','camp-1','click-1','occ-1','ClientClick','Browser','OS','link','medium');
+                INSERT INTO generic_tracking_links(id,label,target_type,destination_host,
+                    destination_url,download_filename) VALUES
+                    ('link-1','File URL','stored_file','example.com',
+                     NULL,'Quarterly Report.pdf');
                 INSERT INTO generic_tracking_clicks VALUES
                     (3,'link-1','Downloader','Browser','OS','link','medium');
                 """)
@@ -81,6 +95,11 @@ class TrackingMCPGlobalV984Tests(unittest.TestCase):
             )
             self.assertEqual(global_result["events"][0]["source_ip"],"2001:4860:4860::8888")
             self.assertEqual(global_result["access_scope"],"MCP_instance_global")
+            events={event["event_kind"]:event for event in global_result["events"]}
+            self.assertEqual(events["email_open"]["email_subject"],"Email subject")
+            self.assertEqual(events["email_click"]["original_url"],"https://example.com/report")
+            self.assertEqual(events["email_click"]["message_id"],"<sent2@example.invalid>")
+            self.assertEqual(events["tracked_file_download"]["download_filename"],"Quarterly Report.pdf")
             self.assertEqual(
                 [x["event_kind"] for x in global_tracking_network_events(analytics,account_id="mail-2")["events"]],
                 ["email_click"],

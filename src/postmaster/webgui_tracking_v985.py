@@ -21,6 +21,9 @@ from .webgui_tracking_v984 import (
 from .webgui_links_v984 import render_tracked_links_v984
 from .webgui_world_map_v987 import render_world_map, WORLD_MAP_STYLE, WORLD_MAP_SCRIPT
 from .webgui_v962_views import _panel
+from .tracking_presentation_v9898 import attach_sent_email_links
+from .tracking_geoip_v984 import geoip_status
+from .tracking_received_cache_v98914 import cached_received_dates
 
 
 EVENT_TYPES=(
@@ -219,13 +222,21 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     except Exception as exc:
         events,truncated=[],False
         errors.append("Tracking event query unavailable: "+type(exc).__name__)
+    attach_sent_email_links(base,events)
     try:sent,sent_truncated=_sent(base,account,start,finish)
     except Exception as exc:
         sent,sent_truncated=[],False
         errors.append("Sent history unavailable: "+type(exc).__name__)
-    try:received,received_note=_received(base,account,start,finish)
+    try:
+        if account:
+            # Keep the existing single-account live sample behavior.
+            received,received_note=_received(base,account,start,finish)
+        else:
+            # All accounts must not return an empty heatmap merely because no
+            # account_id was selected. Use the union of already synced Inboxes.
+            received,received_note=cached_received_dates(base,"",start,finish)
     except Exception as exc:
-        received,received_note=[],"Mail search currently unavailable"
+        received,received_note=[],"Received-mail cache currently unavailable"
         errors.append("Received history unavailable: "+type(exc).__name__)
     counts=Counter(str(e.get("event_kind") or "") for e in events)
     email_rows=[e for e in events if str(e.get("event_kind") or "").startswith("email_")]
@@ -249,12 +260,12 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         +_rate("Observed email click signals",ratio(len(clicked)),
               "Unique deliveries with a click / tracked sent emails.","v985-r-click")
     )
-    received_stat=str(len(received)) if account else "—"
+    received_stat=str(len(received))
     perf=(
         _stat("Sent emails",str(len(sent))+("+" if sent_truncated else ""),
               "Tracked sent message IDs")
         +_stat("Received emails",received_stat,
-               "Recent bounded Inbox sample" if account else "Choose an email account")
+               "Recent bounded Inbox sample" if account else "Cached received mail across enabled accounts")
         +_stat("Observed opens",counts["email_open"],"Not confirmed human reads")
         +_stat("Email clicks",counts["email_click"],"Observed interaction requests")
         +_stat("Recipients with events",len(email_recipients),"Tracked email recipient identifiers")
@@ -268,7 +279,6 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         "An open event is not proof of human reading.",
     ]
     if truncated:warnings.append("At least 500 events match; displayed counts and charts may be undercounts.")
-    if not account:warnings.append("Received-mail heatmaps require a selected email account.")
     if errors:warnings.extend(errors)
     short_note=" ".join(warnings)
     recent=(
@@ -303,7 +313,7 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     if tab=="overview":
         content=(
             '<div class="v985-tracking-two">'+recent+performances+'</div>'
-            +render_world_map(events,truncated=truncated)
+            +render_world_map(events,truncated=truncated,base=base)
             +'<div class="v985-tracking-heatmaps">'+heat+'</div>'
             +_activity_trend(events,start,finish)
         )
@@ -331,6 +341,49 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
     base_params={k:v for k,v in request.query_params.items() if k!="tracking_tab"}
     base_params.update(ui_view="tracking",tracking_tab="links")
     new_link_url="/?"+urlencode(base_params)+"#tracking"
+    geo=geoip_status()
+    has_city=bool(geo.get("city_database_available"))
+    has_asn=bool(geo.get("asn_database_available"))
+    has_isp=bool(geo.get("isp_database_available"))
+    # ISP is a separate paid edition, not a prerequisite for functional
+    # GeoLite2 City + ASN. A single missing optional DB must never trigger
+    # "local databases unavailable" while tracking displays city and ASN.
+    if has_city and has_asn:
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="ready">'
+            '<strong>GeoIP: City and ASN databases active</strong>'
+            '<p>City, region and autonomous-system organization are estimated '
+            'from local MaxMind databases. Network location may identify a '
+            'proxy or scanner, not the email recipient.</p>'
+            + ('<small>Optional ISP database not installed; City and ASN '
+               'geolocation remain available.</small>' if not has_isp else
+               '<small>Optional ISP database active.</small>')
+            + '</div>'
+        )
+    elif has_city or has_asn:
+        missing_required=[
+            name for name,present in (("City",has_city),("ASN",has_asn))
+            if not present
+        ]
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="partial">'
+            '<strong>GeoIP: local databases partially installed</strong>'
+            '<p>Some network location information is available. '
+            'Install the missing free GeoLite2 database from Settings → '
+            'GeoIP databases to enable both City and ASN estimates.</p>'
+            '<small>Missing required: '+_e(', '.join(missing_required))+'</small>'
+            '</div>'
+        )
+    else:
+        geo_hint=(
+            '<div class="v9898-geo-notice" data-geoip-status="missing">'
+            '<strong>GeoIP: free City and ASN databases not installed</strong>'
+            '<p>Only the country signalled by the network may be available. '
+            'Install GeoLite2-City and GeoLite2-ASN using Settings → '
+            'GeoIP databases; no external IP lookups are performed. '
+            'A proxy location is not necessarily the recipient location.</p>'
+            '</div>'
+        )
     notice=''.join('<p>'+_e(w)+'</p>' for w in warnings)
     html=(
         '<div class="v985-tracking">'
@@ -342,7 +395,7 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
         +'<p class="v985-tracking-dates">'+_e(
             f'{start.astimezone(_ZONE):%d %b %Y %H:%M} – {finish.astimezone(_ZONE):%d %b %Y %H:%M} Europe/Rome'
         )+'</p>'
-        +_tabs(request,tab)+_advanced_filters(request)+content
+        +_tabs(request,tab)+_advanced_filters(request)+geo_hint+content
         +'<div class="v985-tracking-disclaimer">'+notice+'</div>'
         '</div>'
     )
@@ -350,6 +403,23 @@ def render_tracking_v985(base: Any, core: Any, request: Request) -> str:
 
 
 TRACKING_STYLE=r"""
+.v9898-geo-notice{border:1px solid var(--v970-line);border-radius:9px;
+ padding:11px 14px;margin:11px 0 14px;background:var(--v970-surface);
+ color:var(--v970-text);font-size:12px}
+.v9898-geo-notice strong{display:block;font-size:12px;margin-bottom:4px}
+.v9898-geo-notice p{margin:4px 0 7px;line-height:1.55;color:var(--v970-muted)}
+.v9898-geo-notice small{font-size:10px;color:var(--v970-muted)}
+.v984-event .v9898-event-context{grid-column:1/-1;
+ border-bottom:1px solid var(--v970-line);padding-bottom:10px;
+ display:flex;flex-direction:column;gap:4px}
+.v984-event .v9898-event-context strong{font-size:13px}
+.v984-event .v9898-event-context a{color:#9fc2ff;
+ text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.v984-event .v9898-event-context small{font-size:11px;color:var(--v970-muted)}
+.v984-event .v9898-rawids{grid-column:1/-1}
+.v984-event .v9898-rawids summary{cursor:pointer;font-size:10px;
+ color:var(--v970-muted)}
+
 .v985-tracking{max-width:1600px;margin:auto}
 .v985-tracking-head{display:flex;justify-content:space-between;gap:15px;align-items:center;margin:5px 0 18px}
 .v985-tracking-head h2{font-size:22px;margin:0;letter-spacing:-.5px}
@@ -361,6 +431,20 @@ TRACKING_STYLE=r"""
 .v985-tracking-periods button,.v985-tracking-periods .v985-period{border:1px solid var(--v970-line);border-radius:7px;background:var(--v970-surface);
  color:var(--v970-text);padding:6px 11px;text-decoration:none;display:inline-flex;align-items:center;min-height:33px}
 .v985-tracking-periods .v985-period.selected{background:#345ec2!important;border-color:#345ec2!important;color:white!important}
+/* Period loading does not overwrite the previous result until the new
+   request completes. This matters for reports with slow cache aggregation. */
+.v98913-tracking-loading-banner{margin:8px 0 11px;padding:9px 12px;
+ display:flex;align-items:center;gap:12px;border-radius:8px;
+ color:var(--v970-text);background:var(--v970-surface-2);
+ border:1px solid var(--v970-line);font-size:12px}
+.v98913-tracking-loading-banner:before{content:'';width:13px;height:13px;
+ flex:0 0 13px;border:2px solid var(--v970-accent);border-top-color:transparent;
+ border-radius:50%;animation:v98913spin .9s linear infinite}
+@keyframes v98913spin{to{transform:rotate(360deg)}}
+.v98913-tracking-loading-banner button{padding:4px 9px;border-radius:6px}
+.v985-tracking-periods .v985-period.is-pending{outline:2px solid var(--v970-accent);
+ outline-offset:2px;opacity:.82}
+.v98913-tracking-loading .v985-tracking-periods .v985-period{cursor:progress}
 .v985-tracking-periods label{display:flex;gap:4px;align-items:center;font-size:10px}
 .v985-tracking-periods input{padding:5px!important;min-height:30px}
 .v985-tracking-dates{font-size:10px;color:var(--v970-muted);margin:6px 0 18px}
