@@ -22,9 +22,10 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <label>Message format <select data-v986-format aria-label="Message format">
 <option value="plain">Plain text</option><option value="html">HTML</option>
 <option value="amp">AMP for Email</option></select></label>
+<div class="v986-composer-head-actions"><button type="button" data-v986-upload-image title="Upload PNG, JPEG, GIF or WebP to Postmaster Files" hidden>Upload image</button>
 <div class="v986-composer-modes" role="group" aria-label="Editor mode">
 <button type="button" data-v986-editor-mode="visual" aria-pressed="true" class="active">Visual</button>
-<button type="button" data-v986-editor-mode="code" aria-pressed="false">Code</button></div></div>
+<button type="button" data-v986-editor-mode="code" aria-pressed="false">Code</button></div></div></div>
 <div class="v986-rich-toolbar" role="toolbar" aria-label="Text formatting" hidden>
 <div class="v986-toolbar-group v986-typography">
 <select data-v986-rich-font aria-label="Font family" title="Font family">
@@ -431,6 +432,9 @@ MAIL_STYLE = r"""
 .v986-composer-editor-head{display:flex;align-items:end;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .v986-composer-editor-head>label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700}
 .v986-composer-editor-head select{min-width:180px;padding:7px;border-radius:7px}
+.v986-composer-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v986-composer-head-actions [data-v986-upload-image]{min-height:34px;font-size:12px}
+.v986-composer-head-actions [data-v986-upload-image][hidden]{display:none!important}
 .v986-composer-modes{display:flex;gap:3px;border:1px solid var(--v970-line);border-radius:8px;padding:3px}
 .v986-composer-modes button{padding:6px 12px;background:transparent;border:0!important;border-radius:6px!important;
  color:var(--v970-muted)}
@@ -901,6 +905,8 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      code.hidden=mode!=='code';
      const tools=editor.querySelector('.v986-rich-toolbar');
      if(tools)tools.hidden=mode!=='visual'||format==='plain'||lockedAMP||lockedHTML;
+     const uploadAction=editor.querySelector('[data-v986-upload-image]');
+     if(uploadAction)uploadAction.hidden=format==='plain';
      const ampTools=editor.querySelector('[data-v986-amp-toolbar]');
      if(ampTools)ampTools.hidden=mode!=='code'||format!=='amp';
      if(lockedAMP && mode==='visual')say('This AMP document has interactive components: Visual is read-only to protect its source. Use Code to edit.');
@@ -982,6 +988,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    }));
    const imagePicker=editor.querySelector('[data-v986-rich-image-file]');
    const pickImage=()=>{if(format==='plain'){say('Choose HTML or AMP first.');return;}imagePicker?.click();};
+   editor.querySelector('[data-v986-upload-image]')?.addEventListener('click',pickImage);
    imagePicker?.addEventListener('change',async()=>{
      const file=imagePicker.files?.[0];
      imagePicker.value='';
