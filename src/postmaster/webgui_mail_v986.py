@@ -986,6 +986,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        command(cmd,val);
      }else command(cmd);
    }));
+   const uploadedImages=[];
    const imagePicker=editor.querySelector('[data-v986-rich-image-file]');
    const pickImage=()=>{if(format==='plain'){say('Choose HTML or AMP first.');return;}imagePicker?.click();};
    editor.querySelector('[data-v986-upload-image]')?.addEventListener('click',pickImage);
@@ -1025,6 +1026,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        const alt=window.prompt('Accessible description of the image',file.name)||file.name;
        const url=escapeText(result.image_url);
        const description=escapeText(alt.slice(0,200));
+       uploadedImages.push({url,width,height,description});
        save();
        if(targetFormat==='amp'&&format==='amp'){
          const fragment='<amp-img src="'+url+'" width="'+width+'" height="'+height+
@@ -1048,8 +1050,8 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      }else if(btn.dataset.v986RichInsert==='image')pickImage();
    }));
    const ampSnippets={
-     'amp-img':{tag:'',html:'<amp-img src="https://example.com/image.jpg" width="600" height="300" layout="responsive" alt="Image description"></amp-img>'},
-     'amp-carousel':{tag:'amp-carousel',html:'<amp-carousel width="600" height="300" layout="responsive" type="slides">\n<amp-img src="https://example.com/one.jpg" width="600" height="300" layout="responsive" alt="First image"></amp-img>\n<amp-img src="https://example.com/two.jpg" width="600" height="300" layout="responsive" alt="Second image"></amp-img>\n</amp-carousel>'},
+     'amp-img':{tag:'',html:''},
+     'amp-carousel':{tag:'amp-carousel',html:''},
      'amp-accordion':{tag:'amp-accordion',html:'<amp-accordion><section><h2>Section title</h2><p>Section content</p></section></amp-accordion>'},
      'amp-selector':{tag:'amp-selector',html:'<amp-selector><div option="a">Option A</div><div option="b">Option B</div></amp-selector>'},
      'amp-form':{tag:'amp-form',html:'<form method="post" action-xhr="https://example.com/endpoint" target="_top"><label>Name <input type="text" name="name" required></label><button type="submit">Submit</button></form>'}
@@ -1057,8 +1059,18 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    editor.querySelectorAll('[data-v986-amp-insert]').forEach(btn=>btn.addEventListener('click',()=>{
      if(format!=='amp'||mode!=='code')return;
      if(btn.dataset.v986AmpInsert==='amp-img'){pickImage();return;}
-     const snippet=ampSnippets[btn.dataset.v986AmpInsert];
+     let snippet=ampSnippets[btn.dataset.v986AmpInsert];
      if(!snippet)return;
+     if(btn.dataset.v986AmpInsert==='amp-carousel'){
+       if(uploadedImages.length<2){
+         say('Upload at least two images to Postmaster Files before inserting an AMP carousel.');return;
+       }
+       const elements=uploadedImages.slice(-2).map(image=>
+         '<amp-img src="'+image.url+'" width="'+image.width+'" height="'+image.height+
+         '" layout="responsive" alt="'+image.description+'"></amp-img>').join('\n');
+       snippet={...snippet,html:'<amp-carousel width="600" height="300" layout="responsive" type="slides">\n'+
+         elements+'\n</amp-carousel>'};
+     }
      let source=code.value||ampTemplate('');
      if(snippet.tag && !new RegExp('custom-element=["\\x27]'+snippet.tag+'["\\x27]','i').test(source)){
        const script='<script async custom-element="'+snippet.tag+'" src="https://cdn.ampproject.org/v0/'+snippet.tag+'-0.1.js"><\/script>\n';
