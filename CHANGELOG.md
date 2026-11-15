@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.2 - 2026-11-15
+
+### Retrocompatible task scheduling/completion timestamps
+- Adds two **nullable** persistent scheduler fields: `scheduled_for_utc` (original planned execution) and `completed_at_utc` (recorded completion time). The existing `next_run_utc` remains unchanged, including `NULL` for finished one-time jobs.
+- An additive SQLite migration automatically introduces the fields on existing `/data/scheduler.db` databases without deleting or rewriting job identities, statuses, payloads, last-run timestamps, or execution history. Migrates recoverable original one-shot due dates from first recorded scheduling events or legacy `schedule_value`; recovers actual completed timestamps only from explicit completion history. Unknown dates remain `NULL` rather than being fabricated.
+- All newly created passive jobs and one-time autonomous email sends preserve their original scheduled UTC date; manual completions and successful scheduled-email sends record their actual completion time separately.
+- The monthly and weekly calendars place completed events on the original scheduled day when known, retaining faded project colours and displaying the actual completion clock time when recorded. Legacy rows without a recoverable planned date retain the former last-run visual fallback.
+- Changes are backward compatible with existing task MCP operations and UI; no existing field has been removed, and no extra autonomous task type is enabled.
+- Regression suite covers migration from the original jobs table schema, migration reruns, real at-most-once simulated scheduled email transitions and prior calendar fallbacks.
+- Builds entirely from merged `main` under the single-trunk beta release policy. No changes to the Portainer single-YAML deployment.
+
 ## 9.8.10-beta.1 - 2026-11-15
 
 ### Historical completed tasks visible in the calendar
