@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.5 - 2026-11-15
+
+### Files upload drawer and Chrome-compatible in-browser previews
+- Fixes the Files **Upload file** action displaying only the translucent overlay: the legacy dashboard auto-collapsible wrapper no longer captures the modern upload panel. Upload now opens as an explicit standalone accessible sidebar with a close button, backdrop dismiss and Escape support. The multipart form retains file, owner/project, description, tags and CSRF fields.
+- Restores **PDF previews in Chrome** with its built-in PDF viewer: only the PDF iframe and PDF response avoid the sandbox restrictions that block native PDF rendering. PDF remains served authenticated with inline Content-Disposition, same-origin frame-ancestors policy, no-store, nosniff and no-referrer headers.
+- Replaces the white/blank text iframe with a dark-theme readable text viewer built using DOM textContent, not executable HTML. JSON is pretty-printed where valid. Text, CSS, HTML-as-inert-text and XML remain safe and never require downloading.
+- Adds media-specific image, audio and video preview surfaces and a visible fallback for unsupported or failed previews. Opening another file cancels a pending text fetch and clears prior media; an explicit Download and open-in-new-tab alternative remain available.
+- Adds **read-only DOCX text preview** by extracting plain paragraph text from bounded Office Open XML using the Python standard library, without executing macros, downloading files or calling external services. Invalid/oversized DOCX files remain download-only; full document pagination/layout is not reproduced.
+- Prevents duplicate upload accordions and restores upload overlay positioning under both full-page and fragment routes. Adds regressions for upload wrapper, PDF security headers, text/XSS, DOCX extraction and zip-bomb bounds, file scope, controls and existing previews.
+- Includes all `9.8.10-beta.4` and stable `9.8.9` functionality; ships through the same `main` trunk. No changes to MCP contracts, stored files or Portainer YAML.
+
 ## 9.8.10-beta.4 - 2026-11-15
 
 ### Files manager redesign: preview first, without downloading
