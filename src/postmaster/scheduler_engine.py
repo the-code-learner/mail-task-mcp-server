@@ -168,6 +168,8 @@ class SchedulerEngine:
                     approval_mode TEXT NOT NULL,
                     status TEXT NOT NULL,
                     next_run_utc TEXT,
+                    scheduled_for_utc TEXT,
+                    completed_at_utc TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     last_run_utc TEXT,
@@ -193,6 +195,66 @@ class SchedulerEngine:
                     ON job_history(job_id, id DESC);
                 """
             )
+            self._migrate_job_dates(conn)
+
+    def _migrate_job_dates(self, conn: sqlite3.Connection) -> None:
+        """Additive migration. Preserve existing job IDs/status, dates and payloads.
+
+        Historical executions are read only; do not invent a completion time
+        from updated_at, which also changes on pause/resume/metadata updates.
+        """
+        existing = {str(row["name"]) for row in conn.execute("PRAGMA table_info(jobs)")}
+        for column in ("scheduled_for_utc", "completed_at_utc"):
+            if column not in existing:
+                conn.execute(f"ALTER TABLE jobs ADD COLUMN {column} TEXT")
+        # One-off original deadlines survive after next_run_utc was cleared.
+        # The initial scheduled event is first priority, because schedule_value
+        # can be changed by later edits.
+        missing = conn.execute(
+            """SELECT id,schedule_type,schedule_value,timezone,next_run_utc,
+                      status,last_run_utc
+               FROM jobs WHERE scheduled_for_utc IS NULL"""
+        ).fetchall()
+        for row in missing:
+            first = conn.execute(
+                """SELECT result_json FROM job_history
+                   WHERE job_id=? AND event_type IN ('created','email_send_scheduled')
+                   ORDER BY id ASC LIMIT 1""", (row["id"],),
+            ).fetchone()
+            when = None
+            if first:
+                try:
+                    when = json.loads(first["result_json"]).get("next_run_utc")
+                except (ValueError, TypeError, AttributeError):
+                    pass
+            # A recurring job without initial history still has an active
+            # next-run; its original first due time cannot be reconstructed.
+            if not when and row["schedule_type"] == "once":
+                try:
+                    when = _iso_utc(_parse_iso(row["schedule_value"], row["timezone"]).astimezone(timezone.utc))
+                except (ValueError, TypeError, SchedulerError):
+                    pass
+            if not when and row["status"] not in ("completed", "failed", "cancelled"):
+                when = row["next_run_utc"]
+            if when:
+                conn.execute("UPDATE jobs SET scheduled_for_utc=? WHERE id=?",
+                             (when, row["id"]))
+        # Completed_at_utc denotes observed completion, not the SMTP claim
+        # timestamp. Only exact completion events are trusted.
+        completed = conn.execute(
+            "SELECT id FROM jobs WHERE status='completed' AND completed_at_utc IS NULL"
+        ).fetchall()
+        for row in completed:
+            history = conn.execute(
+                """SELECT occurred_at_utc FROM job_history
+                   WHERE job_id=?
+                     AND event_type IN ('completed_by_user','email_send_completed',
+                                        'completed','job_completed')
+                   ORDER BY id DESC LIMIT 1""", (row["id"],),
+            ).fetchone()
+            if history and history["occurred_at_utc"]:
+                conn.execute("UPDATE jobs SET completed_at_utc=? WHERE id=?",
+                             (history["occurred_at_utc"], row["id"]))
 
     def _seed_defaults(self) -> None:
         """Seed registry metadata without requiring any configured mailbox."""
@@ -625,8 +687,9 @@ class SchedulerEngine:
                     id, owner_id, project_id, title, description, action_type,
                     execution_profile_id, payload_json, schedule_type, schedule_value,
                     timezone, approval_mode, status, next_run_utc,
-                    created_at, updated_at, last_run_utc, last_error
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, NULL, NULL)
+                    created_at, updated_at, last_run_utc, last_error,
+                    scheduled_for_utc, completed_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?, NULL, NULL, ?, NULL)
                 """,
                 (
                     job_id,
@@ -644,6 +707,7 @@ class SchedulerEngine:
                     _iso_utc(next_run),
                     now,
                     now,
+                    _iso_utc(next_run),
                 ),
             )
             self._record(
@@ -790,6 +854,7 @@ class SchedulerEngine:
                 UPDATE jobs
                 SET title=?, description=?, payload_json=?, schedule_type=?, schedule_value=?,
                     timezone=?, approval_mode=?, status='scheduled', next_run_utc=?,
+                    scheduled_for_utc=?, completed_at_utc=NULL,
                     updated_at=?, last_error=NULL
                 WHERE id=?
                 """,
@@ -801,6 +866,7 @@ class SchedulerEngine:
                     new_schedule_value,
                     new_timezone,
                     new_approval,
+                    _iso_utc(next_run),
                     _iso_utc(next_run),
                     _iso_utc(_now_utc()),
                     job_id,
@@ -892,13 +958,17 @@ class SchedulerEngine:
         conn.execute(
             """
             UPDATE jobs
-            SET status=?, next_run_utc=?, last_run_utc=?, updated_at=?, last_error=NULL
+            SET status=?, next_run_utc=?, last_run_utc=?, updated_at=?,
+                completed_at_utc=CASE WHEN ?='completed' THEN ? ELSE completed_at_utc END,
+                last_error=NULL
             WHERE id=?
             """,
             (
                 new_status,
                 next_run_iso,
                 _iso_utc(now),
+                _iso_utc(now),
+                new_status,
                 _iso_utc(now),
                 row["id"],
             ),
