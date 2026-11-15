@@ -146,7 +146,7 @@ class FileManagerV98104Tests(unittest.TestCase):
         for media in ("application/pdf", "image/png", "text/plain",
                       "application/json", "application/xml", "audio/mpeg"):
             self.assertTrue(preview_supported(media), media)
-        for media in ("application/zip", "text/html-untrusted-binary",
+        for media in ("application/zip", "application/x-msdownload",
                       "application/octet-stream"):
             self.assertFalse(preview_supported(media), media)
         self.assertIn('data-pm-preview-supported="0"', files_fragment(self.base, request()))
