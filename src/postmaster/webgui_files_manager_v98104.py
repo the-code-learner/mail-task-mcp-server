@@ -41,9 +41,9 @@ STYLE = r'''
 #panel-files .pm-drive-file-icon.pm-drive-pdf{color:#e6a1a2;background:color-mix(in srgb,#c75458 15%,var(--card));border-color:color-mix(in srgb,#c75458 36%,var(--line))}
 #panel-files .pm-drive-file-icon.pm-drive-image{color:#80c9ad;background:color-mix(in srgb,#268668 18%,var(--card))}
 #panel-files .pm-drive-file-icon.pm-drive-text{color:#8fcde8;background:color-mix(in srgb,#2686b5 14%,var(--card))}
-#panel-files .pm-drive-file-title-wrap{min-width:0}
-#panel-files .pm-drive-title{font-size:12px;line-height:1.45;font-weight:750;color:var(--text);overflow-wrap:anywhere}
-#panel-files .pm-drive-file-sub{font-size:10px;color:var(--muted);line-height:1.55;margin-top:3px;overflow-wrap:anywhere}
+#panel-files .pm-drive-file-title-wrap{display:block;min-width:0}
+#panel-files .pm-drive-title{display:block;font-size:12px;line-height:1.45;font-weight:750;color:var(--text);overflow-wrap:anywhere}
+#panel-files .pm-drive-file-sub{display:block;font-size:10px;color:var(--muted);line-height:1.55;margin-top:3px;overflow-wrap:anywhere}
 #panel-files .pm-drive-project{font-size:11px;line-height:1.4}
 #panel-files .pm-drive-project .project-scope{display:inline-flex;white-space:normal;text-align:left;max-width:100%;overflow-wrap:anywhere}
 #panel-files .pm-drive-size{font-size:12px;white-space:nowrap;color:var(--muted)}
