@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.4 - 2026-11-15
+
+### Files manager redesign: preview first, without downloading
+- Replaces the older crowded Small-file store cards/table with a compact, responsive file-manager page inspired by mainstream cloud drives, with readable filenames, type icons, project scopes, human-readable sizes, local search across names/tags/descriptions, sorting and list/grid views.
+- **Preview is the primary file action.** Clicking a filename or row opens an in-page details drawer with an inline authenticated preview for supported PDFs, images, text, JSON, XML and supported audio/video formats. The existing preview endpoint remains accessible in a separate tab, so the user does not need to download a file to inspect it. Unsupported/unsafe formats show metadata and an explicit preview-unavailable message rather than attempting to execute content.
+- The download action is clearly separate and explicit. Other actions, including Copy file ID and CSRF-protected Delete with confirmation, are grouped into a secondary menu. Old v9.7 behavior that turned the entire file row into a download link no longer applies to the new manager.
+- File upload is available in a focused, dismissible side drawer with bounded fields, preserving owner/project, description and tags, file-size limits and the original authenticated upload route.
+- Keeps safe inline MIME allowlisting, inert text rendering of HTML/XML/JSON, CSP sandbox protection, no-store/no-sniff response headers, project filtering, legacy CRUD endpoints and all 134 existing MCP commands. File bytes never leave the existing file store pathways.
+- Adds regression tests covering authenticated inline previews, separate download links, supported and unsupported MIME types, scoped file inventories, escaping of untrusted filenames and descriptions, upload/delete contracts and dynamic lazy-fragment UI controls.
+- Integrated on the single `main` trunk after full runtime CI. No data migrations, changes to tracking/task behavior, or Portainer single-YAML modifications.
+
 ## 9.8.10-beta.3 - 2026-11-15
 
 ### Cleaner calendar outside-month backlog
