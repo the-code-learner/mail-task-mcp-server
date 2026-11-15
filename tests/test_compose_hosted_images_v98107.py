@@ -179,7 +179,7 @@ class HostedComposeImagesTests(unittest.TestCase):
         image = self.upload().json()
         path = urlsplit(image["image_url"]).path
         self.assertEqual(self.http.get(path).status_code, 200)
-        self.files.delete_file(image["file_id"])
+        self.files.delete(image["file_id"])
         self.assertEqual(self.http.get(path).status_code, 404)
 
     def test_wrong_or_invalid_image_token_not_found(self):
