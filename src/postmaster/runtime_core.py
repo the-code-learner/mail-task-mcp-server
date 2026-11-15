@@ -123,7 +123,7 @@ def tracking_status():
     if isinstance(base, dict) and base.get("ok"):
         base["link_tracking"] = link_store().status()
         base["link_tracking"]["provider_classification_query_time"] = True
-        base["event_types"] = ["pixel", "amp_xhr", "link"]
+        base["event_types"] = ["pixel", "hosted_image", "amp_xhr", "link"]
     return base
 
 mcp.remove_tool("tracking_status")
