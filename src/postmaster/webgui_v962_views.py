@@ -379,6 +379,11 @@ def render_view(base: Any, core: Any, request: Request, view: str) -> str:
         return _wrap_section_by_heading(html, heading, key="knowledge-editor", force_open=bool((request.query_params.get("edit_knowledge") or "").strip()))
     if view == "files":
         html = files_fragment(proxy, request)
+        # The modern Files page owns its upload drawer. The legacy heading
+        # scanner would wrap the inner <section> in a second <details>,
+        # hiding its form behind the overlay.
+        if 'class="pm-drive-root"' in html:
+            return html
         return _wrap_section_by_heading(html, "Upload file", key="files-upload")
     if view == "scheduler":
         html = task_fragment(proxy, request)

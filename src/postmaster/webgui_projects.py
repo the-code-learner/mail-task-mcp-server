@@ -165,31 +165,7 @@ def files_fragment(base: Any, request: Request) -> str:
       <div class="pm-drive-summary"><strong>{total}</strong> stored globally · {_file_size_label(logical)} logical storage{scope_hint}<br>
       <span class="small muted">{len(files)} loaded for browsing · Per-file limit: {escape(file_limit)}. Project filtering is WebGUI-only.</span></div>
     </div>
-    <details class="pm-drive-upload">
-      <summary class="pm-drive-primary">＋ Upload file</summary>
-      <div class="pm-drive-upload-shade" data-pm-upload-shade aria-hidden="true"></div>
-      <section class="pm-drive-upload-pane" aria-label="Upload file">
-        <header><h3>Upload file</h3><button type="button" class="pm-drive-close" data-pm-close-upload aria-label="Close upload">✕</button></header>
-        <p class="small muted">The file is saved in Postmaster storage and stays accessible through MCP.</p>
-        <form method="post" action="/dashboard/files/upload" enctype="multipart/form-data">
-          <input type="hidden" name="csrf" value="{csrf}">
-          <div class="pm-drive-drop">
-            <div class="pm-drive-drop-title">Choose a file for storage</div>
-            <div class="small muted">Maximum {escape(file_limit)} per file</div>
-            <input type="file" name="file" required aria-label="File to upload">
-          </div>
-          <div class="pm-drive-field"><label for="pm-drive-owner">Owner</label>
-            <select id="pm-drive-owner" name="owner_id" required>{owner_options(owners, selected_owner)}</select></div>
-          <div class="pm-drive-field"><label for="pm-drive-project">Project</label>
-            <select id="pm-drive-project" name="project_id">{project_options(projects, project)}</select></div>
-          <div class="pm-drive-field"><label for="pm-drive-description">Description (optional)</label>
-            <input id="pm-drive-description" type="text" name="description" maxlength="1000"></div>
-          <div class="pm-drive-field"><label for="pm-drive-tags">Tags (comma separated)</label>
-            <input id="pm-drive-tags" type="text" name="tags" placeholder="cv, outreach, approved"></div>
-          <button class="pm-drive-primary pm-drive-upload-submit" type="submit">Upload to storage</button>
-        </form>
-      </section>
-    </details>
+    <button type="button" class="pm-drive-primary" data-pm-open-upload aria-haspopup="dialog" aria-expanded="false">＋ Upload file</button>
   </div>
   <div class="pm-drive-main">
     <div class="pm-drive-toolbar">
@@ -216,6 +192,28 @@ def files_fragment(base: Any, request: Request) -> str:
       <span>{len(files)} shown · {total} stored globally</span></div>
     <p class="pm-drive-status" data-pm-status role="status" aria-live="polite"></p>
   </div>
+  <div class="pm-drive-upload-shade" data-pm-upload-shade aria-hidden="true" hidden></div>
+        <aside class="pm-drive-upload-pane" data-pm-upload-pane role="dialog" aria-modal="true" aria-label="Upload file" hidden>
+          <header><h3>Upload file</h3><button type="button" class="pm-drive-close" data-pm-close-upload aria-label="Close upload">✕</button></header>
+          <p class="small muted">The file is saved in Postmaster storage and stays accessible through MCP.</p>
+          <form method="post" action="/dashboard/files/upload" enctype="multipart/form-data">
+            <input type="hidden" name="csrf" value="{csrf}">
+            <div class="pm-drive-drop">
+              <div class="pm-drive-drop-title">Choose a file for storage</div>
+              <div class="small muted">Maximum {escape(file_limit)} per file</div>
+              <input type="file" name="file" required aria-label="File to upload">
+            </div>
+            <div class="pm-drive-field"><label for="pm-drive-owner">Owner</label>
+              <select id="pm-drive-owner" name="owner_id" required>{owner_options(owners, selected_owner)}</select></div>
+            <div class="pm-drive-field"><label for="pm-drive-project">Project</label>
+              <select id="pm-drive-project" name="project_id">{project_options(projects, project)}</select></div>
+            <div class="pm-drive-field"><label for="pm-drive-description">Description (optional)</label>
+              <input id="pm-drive-description" type="text" name="description" maxlength="1000"></div>
+            <div class="pm-drive-field"><label for="pm-drive-tags">Tags (comma separated)</label>
+              <input id="pm-drive-tags" type="text" name="tags" placeholder="cv, outreach, approved"></div>
+            <button class="pm-drive-primary pm-drive-upload-submit" type="submit">Upload to storage</button>
+          </form>
+        </aside>
   <div class="pm-drive-preview-shade" data-pm-preview-shade hidden></div>
   <aside class="pm-drive-preview-pane" data-pm-preview-pane hidden
     role="dialog" aria-modal="true" aria-label="Stored file preview">
@@ -224,8 +222,13 @@ def files_fragment(base: Any, request: Request) -> str:
     <div class="pm-drive-preview-name" data-pm-detail-name></div>
     <div class="pm-drive-preview-description" data-pm-detail-description></div>
     <div class="pm-drive-preview-stage">
-      <iframe class="pm-drive-preview-frame" data-pm-preview-frame title="Preview of stored file" sandbox
-        referrerpolicy="no-referrer" loading="lazy" hidden></iframe>
+      <div class="pm-drive-preview-loading" data-pm-preview-loading hidden>Loading file preview…</div>
+      <iframe class="pm-drive-preview-frame" data-pm-preview-frame title="PDF preview"
+        referrerpolicy="no-referrer" loading="eager" hidden></iframe>
+      <pre class="pm-drive-preview-text" data-pm-preview-text tabindex="0" hidden></pre>
+      <img class="pm-drive-preview-image" data-pm-preview-image alt="Stored file preview" hidden>
+      <audio class="pm-drive-preview-audio" data-pm-preview-audio controls preload="none" hidden></audio>
+      <video class="pm-drive-preview-video" data-pm-preview-video controls preload="none" playsinline hidden></video>
       <div class="pm-drive-preview-unavailable" data-pm-preview-unavailable hidden>
         In-browser preview is unavailable for this file type. The file remains
         stored securely. Use Download to open it in a compatible app.
