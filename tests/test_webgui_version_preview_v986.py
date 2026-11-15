@@ -90,6 +90,100 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
         self.assertEqual(core.preview_calls,[("update-latest",None)])
         self.assertEqual(core.execute_calls,[])
 
+    def test_update_preview_returns_accessible_popup_fragment_without_executing(self):
+        client, core, base = _client()
+        with client:
+            response = client.post(
+                "/dashboard/versions/preview",
+                headers={"X-Postmaster-Preview-Modal": "1"},
+                data={"csrf": base._csrf_value(), "operation": "switch-version",
+                      "target_version": "v9.8.5"},
+            )
+        self.assertEqual(response.status_code, 200, response.text[:500])
+        self.assertNotIn("<!doctype html>", response.text.lower())
+        self.assertIn('class="pm-vconfirm-overlay"', response.text)
+        self.assertIn('role="dialog" aria-modal="true"', response.text)
+        self.assertIn('data-vconfirm-dismiss', response.text)
+        self.assertIn('name="preview_id" value="pv_demo_6fd25"', response.text)
+        self.assertIn('name="approved" value="yes" required', response.text)
+        self.assertIn('name="csrf" value="csrf-v986-check"', response.text)
+        self.assertIn('action="/dashboard/versions/execute"', response.text)
+        self.assertIn('Currently installed', response.text)
+        self.assertIn('Selected release', response.text)
+        self.assertIn('5 min 0 sec', response.text)
+        self.assertIn("no-store", response.headers["cache-control"])
+        self.assertEqual(response.headers["vary"], "X-Postmaster-Preview-Modal")
+        self.assertEqual(core.execute_calls, [])
+
+    def test_fallback_confirmation_is_dark_and_usable_without_javascript(self):
+        client, core, base = _client()
+        with client:
+            response = client.post("/dashboard/versions/preview", data={
+                "csrf": base._csrf_value(), "operation": "update-latest",
+            })
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<!doctype html>", response.text.lower())
+        self.assertIn("pm-vconfirm-card", response.text)
+        self.assertIn("role=\"dialog\"", response.text)
+        self.assertIn("background:#172538", response.text)
+        self.assertIn("style-src 'unsafe-inline'", response.headers["content-security-policy"])
+        self.assertIn("default-src 'none'", response.headers["content-security-policy"])
+        self.assertIn("form-action 'self'", response.headers["content-security-policy"])
+        self.assertNotIn("<script", response.text)
+        self.assertIn("Confirm update &amp; restart", response.text)
+        self.assertEqual(core.execute_calls, [])
+
+    def test_popup_preview_never_weakens_the_second_explicit_approval(self):
+        client, core, base = _client()
+        with client:
+            preview = client.post("/dashboard/versions/preview",
+                headers={"X-Postmaster-Preview-Modal": "1"},
+                data={"csrf": base._csrf_value(), "operation": "update-latest"})
+            denied = client.post("/dashboard/versions/execute", data={
+                "csrf": base._csrf_value(), "operation": "update-latest",
+                "target_version": "v9.8.5", "preview_id": "pv_demo_6fd25",
+            })
+        self.assertEqual(preview.status_code, 200)
+        self.assertEqual(denied.status_code, 400)
+        self.assertEqual(core.execute_calls, [])
+
+    def test_popup_escapes_untrusted_version_metadata(self):
+        client, core, base = _client()
+        original = core.runtime_version_change_preview
+        def malicious_preview(*, operation, target_version=None):
+            result = original(operation=operation, target_version=target_version)
+            result["action_preview"]["current_build"] = '<script>alert("bad")</script>'
+            result["action_preview"]["current_version"] = '<img src=x onerror=bad()>'
+            return result
+        core.runtime_version_change_preview = malicious_preview
+        with client:
+            response = client.post("/dashboard/versions/preview",
+                headers={"X-Postmaster-Preview-Modal": "1"},
+                data={"csrf": base._csrf_value(), "operation": "update-latest"})
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("<script>", response.text)
+        self.assertNotIn("<img src=x", response.text)
+        self.assertIn("&lt;script&gt;", response.text)
+        self.assertIn("&lt;img src=x", response.text)
+
+    def test_dashboard_script_opens_modal_only_for_version_preview(self):
+        from postmaster.webgui_versions_v984 import (
+            VERSIONS_SCRIPT, VERSION_CONFIRM_STYLE,
+        )
+        for token in (
+            "X-Postmaster-Preview-Modal",
+            "displayVersionModal(markup,submitter)",
+            "data-vconfirm-consent",
+            "submit.disabled=!approve.checked",
+            "ev.key==='Escape'",
+            "ev.key!=='Tab'",
+            "dismissVersionModal()",
+            "body:new FormData(form)",
+        ):
+            self.assertIn(token, VERSIONS_SCRIPT + VERSION_CONFIRM_STYLE)
+        self.assertIn("HTMLFormElement.prototype.submit.call(form)", VERSIONS_SCRIPT)
+        self.assertNotIn('fetch("/dashboard/versions/execute"', VERSIONS_SCRIPT)
+
     def test_preview_is_read_only_and_csrf_protected(self):
         client,core,base=_client()
         with client:
