@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.6 - 2026-11-15
+
+### Safer, clearer update confirmation popup
+- Replaces the browser-default standalone confirmation screen for Stable/Beta updates and exact-version pinning with an accessible **dark in-dashboard modal**. Current version and requested release are shown prominently with a clear warning that applying the selected version restarts Postmaster.
+- The confirmation explicitly displays its server-side expiration and diagnostic build/selector information in an optional technical-details section; it offers a distinct Cancel link, close control, backdrop/Escape dismissal, tab-focus trapping and keyboard-accessible consent checkbox.
+- The restart action remains an **independent, explicit, CSRF-verified form POST**. The pending preview ID is only correlation metadata; the existing backend consumes and checks the server-side pending preview before any restart. The submit button stays disabled in the popup until the user checks the explicit approval box. No update/restart is triggered by opening the popup.
+- A direct HTTP POST without JavaScript remains a fully functional, styled confirmation page. Fixes its Content Security Policy to allow only page-local CSS while blocking inline scripts and cross-origin forms, removing the white, unstyled fallback displayed in previous versions.
+- The runtime restart progress page and its exact-version health check, 15-second minimum delay and no-duplicate-update guarantees remain unchanged.
+- New regression coverage validates modal fragment rendering, current/target display, no-JS fallback/CSP, escaping of metadata, cancellation controls and the separate approval boundary.
+- Built and released exclusively through the single `main` trunk. Existing functionality, MCP tools, storage, tasks and Portainer YAML are unchanged.
+
 ## 9.8.10-beta.5 - 2026-11-15
 
 ### Files upload drawer and Chrome-compatible in-browser previews
