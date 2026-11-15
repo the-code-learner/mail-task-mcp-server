@@ -436,7 +436,7 @@ VERSION_CONFIRM_STYLE = r"""
 .pm-vconfirm-kicker{margin:0 0 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:#92b2e8}
 .pm-vconfirm-title{margin:0!important;color:#f0f5fd;font-size:22px!important;line-height:1.2;font-weight:750}
 .pm-vconfirm-sub{margin:8px 0 17px;color:#b3c4da;font-size:13px}
-.pm-vconfirm-close{position:absolute;right:18px;top:18px;width:35px;height:35px;display:grid;place-items:center;background:#253850;color:#c3d5eb;border:1px solid #405773;border-radius:9px;font-size:20px;cursor:pointer}
+.pm-vconfirm-close{text-decoration:none;position:absolute;right:18px;top:18px;width:35px;height:35px;display:grid;place-items:center;background:#253850;color:#c3d5eb;border:1px solid #405773;border-radius:9px;font-size:20px;cursor:pointer}
 .pm-vconfirm-close:hover{background:#364d6b}
 .pm-vconfirm-versions{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(0,1fr);align-items:center;gap:8px;background:#1d2f45;border:1px solid #3a536f;border-radius:12px;padding:17px 15px;margin:14px 0}
 .pm-vconfirm-version-label{display:block;margin-bottom:7px;color:#9db3ce;font-size:11px;font-weight:700}
@@ -484,8 +484,9 @@ def _confirmation_markup(operation: str, info: dict[str, Any],
         '<section class="pm-vconfirm-card" role="dialog" aria-modal="true"'
         ' aria-labelledby="pm-vconfirm-heading" aria-describedby="pm-vconfirm-description"'
         ' data-vconfirm-dialog>'
-        '<button type="button" class="pm-vconfirm-close" data-vconfirm-dismiss'
-        ' aria-label="Close update confirmation">×</button>'
+        '<a href="/?ui_view=system&amp;settings_tab=versions#system"'
+        ' class="pm-vconfirm-close" data-vconfirm-dismiss'
+        ' aria-label="Close update confirmation">×</a>'
         '<div class="pm-vconfirm-head"><div class="pm-vconfirm-icon" aria-hidden="true">↻</div>'
         '<div><p class="pm-vconfirm-kicker">Postmaster MCP · Versions &amp; updates</p>'
         '<h1 class="pm-vconfirm-title" id="pm-vconfirm-heading">Confirm update and restart</h1>'
