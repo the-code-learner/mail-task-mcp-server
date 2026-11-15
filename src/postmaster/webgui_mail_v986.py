@@ -61,7 +61,7 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <label class="v986-toolbar-color" title="Highlight color">Mark <input type="color" data-v986-rich-color="hiliteColor" value="#fff1a8" aria-label="Highlight color"></label>
 <button type="button" data-v986-rich-command="createLink" title="Insert link">Link</button>
 <button type="button" data-v986-rich-insert="table" title="Insert a table">Table</button>
-<button type="button" data-v986-rich-insert="image" title="Insert a hosted image URL">Image</button>
+<button type="button" data-v986-rich-insert="image" title="Insert HTTPS image markup in Code without remote preview">Image</button>
 <button type="button" data-v986-rich-command="removeFormat" title="Clear text formatting">Clear</button></div>
 </div>
 <div class="v986-amp-toolbar" data-v986-amp-toolbar hidden role="toolbar" aria-label="AMP component snippets">
@@ -757,8 +757,8 @@ BETA_MAIL_STYLE = r"""
 MAIL_SCRIPT = r"""<script id="v986-mail-composer">
 (() => {
  'use strict';
- const BAD = new Set(['SCRIPT','STYLE','LINK','META','BASE','IFRAME','OBJECT','EMBED','FORM','SVG','MATH','VIDEO','AUDIO','INPUT','BUTTON']);
- const GOOD = new Set(['P','DIV','BR','B','STRONG','I','EM','U','S','UL','OL','LI','A','BLOCKQUOTE','H1','H2','H3','SPAN','FONT','TABLE','THEAD','TBODY','TR','TD','TH','HR','IMG']);
+ const BAD = new Set(['SCRIPT','STYLE','LINK','META','BASE','IFRAME','OBJECT','EMBED','FORM','IMG','SVG','MATH','VIDEO','AUDIO','INPUT','BUTTON']);
+ const GOOD = new Set(['P','DIV','BR','B','STRONG','I','EM','U','S','UL','OL','LI','A','BLOCKQUOTE','H1','H2','H3','SPAN','FONT','TABLE','THEAD','TBODY','TR','TD','TH','HR']);
  const FONT_FAMILIES = Object.freeze({
    'Arial':'Arial, sans-serif',
    'Verdana':'Verdana, sans-serif',
@@ -823,22 +823,9 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        }
        const css=safeStyle(child.getAttribute('style')||'');
        const href=child.tagName==='A'?(child.getAttribute('href')||'').trim():'';
-       const src=child.tagName==='IMG'?(child.getAttribute('src')||'').trim():'';
-       const alt=child.tagName==='IMG'?(child.getAttribute('alt')||''):'';
-       const width=child.tagName==='IMG'?(child.getAttribute('width')||''):'';
-       const height=child.tagName==='IMG'?(child.getAttribute('height')||''):'';
-       for(const attr of Array.from(child.attributes))child.removeAttribute(attr.name);
+         for(const attr of Array.from(child.attributes))child.removeAttribute(attr.name);
        if(css)child.setAttribute('style',css);
        if(child.tagName==='A' && /^(https?:\/\/|mailto:)/i.test(href))child.setAttribute('href',href);
-       if(child.tagName==='IMG'){
-         if(!/^https:\/\//i.test(src)){child.remove();continue;}
-         child.setAttribute('src',src);
-         child.setAttribute('alt',alt.slice(0,200));
-         if(/^\d{1,4}$/.test(width))child.setAttribute('width',width);
-         if(/^\d{1,4}$/.test(height))child.setAttribute('height',height);
-         child.setAttribute('referrerpolicy','no-referrer');
-         child.setAttribute('loading','lazy');
-       }
        visit(child);
      }
    }
@@ -901,7 +888,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        ampTemplate(safeHTML(escapeText(drafts.plain).replaceAll('\n','<br>'))));
      drafts[format]=value;
      lockedAMP=format==='amp'&&ampComplex(value);
-     lockedHTML=format==='html'&&/<(script|style|iframe|form|svg|video|audio)\b/i.test(value);
+     lockedHTML=format==='html'&&/<(script|style|iframe|form|img|svg|video|audio)\b/i.test(value);
      if(mode==='visual'){
        visual.innerHTML=format==='plain'?safeHTML(escapeText(value).replaceAll('\n','<br>')):
          safeHTML(format==='amp'?getBody(value):value);
@@ -996,10 +983,15 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      if(btn.dataset.v986RichInsert==='table'){
        command('insertHTML','<table><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr><tr><td>Cell 3</td><td>Cell 4</td></tr></tbody></table><p></p>');
      }else if(btn.dataset.v986RichInsert==='image'){
-       const url=window.prompt('Public HTTPS image URL (it will load in Visual preview)','https://');
+       const url=window.prompt('Public HTTPS image URL (inserts code without loading the image)','https://');
        if(!url||!/^https:\/\/[^<>"\s]+$/i.test(url))return;
        const alt=window.prompt('Accessible image description','Image')||'Image';
-       command('insertHTML','<img src="'+escapeText(url)+'" alt="'+escapeText(alt.slice(0,200))+'" width="600">');
+       save();
+       // Email image markup is code-only: an untrusted remote image must never
+       // auto-load in the editor as a side effect of opening Visual.
+       drafts.html+='\n<p><img src="'+escapeText(url)+'" alt="'+escapeText(alt.slice(0,200))+'" width="600"></p>';
+       mode='code';show();save();
+       say('Image code inserted. Visual preview stays read-only to avoid loading remote images.');
      }
    }));
    const ampSnippets={
