@@ -22,15 +22,58 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <label>Message format <select data-v986-format aria-label="Message format">
 <option value="plain">Plain text</option><option value="html">HTML</option>
 <option value="amp">AMP for Email</option></select></label>
+<div class="v986-composer-head-actions"><button type="button" data-v986-upload-image title="Upload PNG, JPEG, GIF or WebP to Postmaster Files" hidden>Upload image</button>
 <div class="v986-composer-modes" role="group" aria-label="Editor mode">
 <button type="button" data-v986-editor-mode="visual" aria-pressed="true" class="active">Visual</button>
-<button type="button" data-v986-editor-mode="code" aria-pressed="false">Code</button></div></div>
-<div class="v986-rich-toolbar" role="toolbar" aria-label="Text formatting">
-<button type="button" data-v986-rich-command="bold" title="Bold"><b>B</b></button>
-<button type="button" data-v986-rich-command="italic" title="Italic"><i>I</i></button>
-<button type="button" data-v986-rich-command="underline" title="Underline"><u>U</u></button>
+<button type="button" data-v986-editor-mode="code" aria-pressed="false">Code</button></div></div></div>
+<div class="v986-rich-toolbar" role="toolbar" aria-label="Text formatting" hidden>
+<div class="v986-toolbar-group v986-typography">
+<select data-v986-rich-font aria-label="Font family" title="Font family">
+<option value="">Font</option>
+<option value="Arial">Arial</option><option value="Verdana">Verdana</option>
+<option value="Georgia">Georgia</option><option value="Tahoma">Tahoma</option>
+<option value="Trebuchet MS">Trebuchet MS</option>
+<option value="Times New Roman">Times New Roman</option>
+<option value="Courier New">Courier New</option></select>
+<select data-v986-rich-size aria-label="Font size" title="Font size">
+<option value="">Size</option><option value="10">10 px</option>
+<option value="12">12 px</option><option value="14">14 px</option>
+<option value="16">16 px</option><option value="18">18 px</option>
+<option value="24">24 px</option><option value="32">32 px</option></select>
+<select data-v986-rich-block aria-label="Paragraph style" title="Paragraph style">
+<option value="">Paragraph</option><option value="P">Normal</option>
+<option value="H1">Heading 1</option><option value="H2">Heading 2</option>
+<option value="H3">Heading 3</option></select></div>
+<div class="v986-toolbar-group">
+<button type="button" data-v986-rich-command="undo" title="Undo" aria-label="Undo">↶</button>
+<button type="button" data-v986-rich-command="redo" title="Redo" aria-label="Redo">↷</button>
+<button type="button" data-v986-rich-command="bold" title="Bold" aria-label="Bold"><b>B</b></button>
+<button type="button" data-v986-rich-command="italic" title="Italic" aria-label="Italic"><i>I</i></button>
+<button type="button" data-v986-rich-command="underline" title="Underline" aria-label="Underline"><u>U</u></button>
+<button type="button" data-v986-rich-command="strikeThrough" title="Strikethrough" aria-label="Strikethrough"><s>S</s></button></div>
+<div class="v986-toolbar-group">
+<button type="button" data-v986-rich-command="justifyLeft" title="Align left" aria-label="Align left">≡</button>
+<button type="button" data-v986-rich-command="justifyCenter" title="Align center" aria-label="Align center">≡</button>
+<button type="button" data-v986-rich-command="justifyRight" title="Align right" aria-label="Align right">≡</button>
 <button type="button" data-v986-rich-command="insertUnorderedList" title="Bullet list">• List</button>
-<button type="button" data-v986-rich-command="createLink" title="Insert URL">Link</button>
+<button type="button" data-v986-rich-command="insertOrderedList" title="Numbered list">1. List</button></div>
+<div class="v986-toolbar-group">
+<label class="v986-toolbar-color" title="Text color">Text <input type="color" data-v986-rich-color="foreColor" value="#202838" aria-label="Text color"></label>
+<label class="v986-toolbar-color" title="Highlight color">Mark <input type="color" data-v986-rich-color="hiliteColor" value="#fff1a8" aria-label="Highlight color"></label>
+<button type="button" data-v986-rich-command="createLink" title="Insert link">Link</button>
+<button type="button" data-v986-rich-insert="table" title="Insert a table">Table</button>
+<button type="button" data-v986-rich-insert="image" title="Upload an image to Postmaster Files">Image</button>
+<button type="button" data-v986-rich-command="removeFormat" title="Clear text formatting">Clear</button></div>
+</div>
+<input type="file" class="v986-image-input" data-v986-rich-image-file accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Upload image into Postmaster Files" hidden>
+<div class="v986-amp-toolbar" data-v986-amp-toolbar hidden role="toolbar" aria-label="AMP component snippets">
+<span>AMP snippets</span>
+<button type="button" data-v986-amp-insert="amp-img">Image</button>
+<button type="button" data-v986-amp-insert="amp-carousel">Carousel</button>
+<button type="button" data-v986-amp-insert="amp-accordion">Accordion</button>
+<button type="button" data-v986-amp-insert="amp-selector">Selector</button>
+<button type="button" data-v986-amp-insert="amp-form">Form</button>
+<button type="button" data-v986-amp-check>Check structure</button>
 </div>
 <div class="v986-rich-surface" data-v986-rich contenteditable="true" role="textbox"
  aria-label="Visual email editor" aria-multiline="true" spellcheck="true"
@@ -40,8 +83,10 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <div class="v986-compose-original" hidden aria-hidden="true">
 <textarea name="body"></textarea><textarea name="body_html"></textarea>
 <textarea name="body_amp"></textarea></div>
-<p class="v986-editor-hint">HTML and AMP are optional formats. Visual editing supports basic safe formatting.
-Use Code for advanced HTML or AMP markup; AMP requires an enabled, capable sender account.</p>
+<p class="v986-editor-status" data-v986-editor-status role="status" aria-live="polite"></p>
+<p class="v986-editor-hint">Fonts are limited to email-safe families with fallbacks.
+Images are stored in Postmaster Files, and may replace the tracking pixel when tracking is on.
+AMP snippets require a compatible sender; structure checks are not full validation.</p>
 </div>"""
 
 
@@ -387,13 +432,31 @@ MAIL_STYLE = r"""
 .v986-composer-editor-head{display:flex;align-items:end;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .v986-composer-editor-head>label{display:flex;flex-direction:column;gap:4px;font-size:11px;font-weight:700}
 .v986-composer-editor-head select{min-width:180px;padding:7px;border-radius:7px}
+.v986-composer-head-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.v986-composer-head-actions [data-v986-upload-image]{min-height:34px;font-size:12px}
+.v986-composer-head-actions [data-v986-upload-image][hidden]{display:none!important}
 .v986-composer-modes{display:flex;gap:3px;border:1px solid var(--v970-line);border-radius:8px;padding:3px}
 .v986-composer-modes button{padding:6px 12px;background:transparent;border:0!important;border-radius:6px!important;
  color:var(--v970-muted)}
 .v986-composer-modes button.active{background:var(--v970-accent-soft)!important;color:var(--v970-accent)!important;font-weight:800}
-.v986-rich-toolbar{display:flex;gap:5px;border-top:1px solid var(--v970-line);padding-top:9px}
-.v986-rich-toolbar button{border:1px solid var(--v970-line);padding:5px 8px!important;min-width:34px;background:var(--v970-surface-2)}
-.v986-rich-toolbar[hidden]{display:none!important}
+.v986-rich-toolbar,.v986-amp-toolbar{display:flex;align-items:center;flex-wrap:wrap;gap:7px;border-top:1px solid var(--v970-line);padding-top:9px}
+.v986-toolbar-group{display:flex;align-items:center;flex-wrap:wrap;gap:4px;padding-right:8px;border-right:1px solid var(--v970-line)}
+.v986-toolbar-group:last-child{border-right:0}
+.v986-rich-toolbar button,.v986-amp-toolbar button{border:1px solid var(--v970-line);padding:5px 8px!important;min-height:33px;min-width:33px;background:var(--v970-surface-2)}
+.v986-rich-toolbar select{max-width:155px;min-height:33px;padding:5px 7px;border:1px solid var(--v970-line);border-radius:6px;background:var(--v970-surface-2);color:var(--v970-text);font-size:12px}
+.v986-rich-toolbar [data-v986-rich-font]{min-width:135px}
+.v986-toolbar-color{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--v970-muted)}
+.v986-toolbar-color input{width:24px;height:27px;padding:1px;border:1px solid var(--v970-line);border-radius:5px;background:transparent;cursor:pointer}
+.v986-amp-toolbar{font-size:12px;color:var(--v970-muted)}
+.v986-rich-toolbar[hidden],.v986-amp-toolbar[hidden]{display:none!important}
+.v986-rich-surface table{border-collapse:collapse;max-width:100%}
+.v986-rich-surface td,.v986-rich-surface th{border:1px solid var(--v970-line);padding:6px}
+.v986-rich-surface img{max-width:100%;height:auto}
+.v986-editor-status{font-size:11px;color:var(--v970-muted);margin:0}
+.v986-editor-status:empty{display:none}
+.v986-image-input{display:none!important}
+.v986-rich-surface[contenteditable="false"]{cursor:not-allowed;opacity:.85}
+@media(max-width:620px){.v986-toolbar-group{border-right:0}.v986-rich-toolbar select{min-width:0}}
 .v986-rich-surface,.v986-code-surface{min-height:175px;width:100%;padding:12px;
  border:1px solid var(--v970-line);border-radius:9px;background:var(--v970-surface);
  color:var(--v970-text);font-size:13px;line-height:1.6;outline:0;overflow:auto}
@@ -701,27 +764,74 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
 (() => {
  'use strict';
  const BAD = new Set(['SCRIPT','STYLE','LINK','META','BASE','IFRAME','OBJECT','EMBED','FORM','IMG','SVG','MATH','VIDEO','AUDIO','INPUT','BUTTON']);
- const GOOD = new Set(['P','DIV','BR','B','STRONG','I','EM','U','S','UL','OL','LI','A','BLOCKQUOTE','H1','H2','H3','SPAN']);
+ const GOOD = new Set(['P','DIV','BR','B','STRONG','I','EM','U','S','UL','OL','LI','A','BLOCKQUOTE','H1','H2','H3','SPAN','FONT','TABLE','THEAD','TBODY','TR','TD','TH','HR']);
+ const FONT_FAMILIES = Object.freeze({
+   'Arial':'Arial, sans-serif',
+   'Verdana':'Verdana, sans-serif',
+   'Georgia':'Georgia, serif',
+   'Tahoma':'Tahoma, sans-serif',
+   'Trebuchet MS':'"Trebuchet MS", sans-serif',
+   'Times New Roman':'"Times New Roman", serif',
+   'Courier New':'"Courier New", monospace'
+ });
+ const FONT_SIZES = new Set(['10','12','14','16','18','24','32']);
  const states = new WeakMap();
- const escapeText = txt => String(txt).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;');
+ const escapeText = txt => String(txt).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+ function safeStyle(raw) {
+   const allowed=[];
+   for(const item of String(raw||'').split(';')) {
+     const colon=item.indexOf(':');
+     if(colon<0)continue;
+     const key=item.slice(0,colon).trim().toLowerCase();
+     const val=item.slice(colon+1).trim();
+     const plain=val.replace(/['"]/g,'').replace(/\s+/g,' ').toLowerCase();
+     if(key==='font-family') {
+       const match=Object.values(FONT_FAMILIES).find(f=>f.replace(/['"]/g,'').toLowerCase()===plain);
+       if(match)allowed.push('font-family: '+match);
+     }else if(key==='font-size' && FONT_SIZES.has(val.replace(/px$/,'')) && /^\d+px$/.test(val)){
+       allowed.push('font-size: '+val);
+     }else if((key==='color'||key==='background-color') &&
+       (/^#[a-f0-9]{3,8}$/i.test(val)||/^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/i.test(val))){
+       allowed.push(key+': '+val);
+     }else if(key==='text-align' && /^(left|center|right)$/.test(val)){
+       allowed.push(key+': '+val);
+     }else if(key==='font-weight' && /^(bold|normal|[1-9]00)$/.test(val)){
+       allowed.push(key+': '+val);
+     }else if(key==='font-style' && /^(italic|normal)$/.test(val)){
+       allowed.push(key+': '+val);
+     }else if(key==='text-decoration' && /^(underline|line-through|none)$/.test(val)){
+       allowed.push(key+': '+val);
+     }
+   }
+   return allowed.join('; ');
+ }
  function safeHTML(source) {
    const doc = new DOMParser().parseFromString('<div>'+String(source || '')+'</div>','text/html');
    const wrapper = doc.body.firstElementChild;
    if(!wrapper)return '';
    function visit(node){
-     for(const child of Array.from(node.children)) {
+     for(const child of Array.from(node.children)){
        if(BAD.has(child.tagName)){child.remove();continue;}
        if(!GOOD.has(child.tagName)){
          const text=doc.createTextNode(child.textContent||'');
          child.replaceWith(text);continue;
        }
-       for(const attr of Array.from(child.attributes)){
-         if(child.tagName==='A' && attr.name.toLowerCase()==='href') {
-           const href=attr.value.trim();
-           if(/^(https?:|mailto:)/i.test(href))continue;
-         }
-         child.removeAttribute(attr.name);
+       // Normalize browser-generated legacy FONT nodes into tightly allowlisted inline CSS.
+       if(child.tagName==='FONT'){
+         const span=doc.createElement('span');
+         const face=child.getAttribute('face')||'';
+         const match=Object.keys(FONT_FAMILIES).find(x=>x.toLowerCase()===face.toLowerCase());
+         if(match)span.style.fontFamily=FONT_FAMILIES[match];
+         const oldStyle=safeStyle(child.getAttribute('style')||'');
+         if(oldStyle)span.setAttribute('style',oldStyle+(match?'; '+span.getAttribute('style'):''));
+         while(child.firstChild)span.appendChild(child.firstChild);
+         child.replaceWith(span);visit(span);continue;
        }
+       const css=safeStyle(child.getAttribute('style')||'');
+       const href=child.tagName==='A'?(child.getAttribute('href')||'').trim():'';
+         for(const attr of Array.from(child.attributes))child.removeAttribute(attr.name);
+       if(css)child.setAttribute('style',css);
+       if(child.tagName==='A' && /^(https?:\/\/|mailto:)/i.test(href))child.setAttribute('href',href);
        visit(child);
      }
    }
@@ -742,6 +852,9 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      +'<style amp4email-boilerplate>body{visibility:hidden}</style>\n'
      +'<\/head>\n<body>\n'+content+'\n<\/body>\n<\/html>';
  }
+ function ampComplex(content){
+   return /<(amp-(?:img|carousel|accordion|selector|form|list|bind|state)|form|template)\b/i.test(getBody(content));
+ }
  function setupEditor(editor){
    if(states.has(editor))return;
    const form=editor.closest('form[data-v960-send]');
@@ -749,19 +862,21 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    const visual=editor.querySelector('[data-v986-rich]');
    const code=editor.querySelector('[data-v986-code]');
    const picker=editor.querySelector('[data-v986-format]');
+   const status=editor.querySelector('[data-v986-editor-status]');
    const body=form.querySelector('textarea[name="body"]');
    const html=form.querySelector('textarea[name="body_html"]');
    const amp=form.querySelector('textarea[name="body_amp"]');
    if(!visual||!code||!picker||!body||!html||!amp)return;
    const drafts={plain:body.value||'',html:html.value||'',amp:amp.value||''};
-   let format='plain',mode='visual',visualDirty=false;
+   let format='plain',mode='visual',visualDirty=false,lockedAMP=false,lockedHTML=false;
+   const say=msg=>{if(status)status.textContent=msg;};
    const read=()=>mode==='code'?code.value:
      format==='plain'?visual.innerText:visual.innerHTML;
    function save(){
      if(mode==='code'){
-       // Code is the authoritative source until the user actually edits Visual.
+       // Preserve source verbatim until Visual is intentionally edited.
        drafts[format]=code.value;
-     }else if(visualDirty){
+     }else if(visualDirty && !lockedAMP){
        const value=read();
        drafts[format]=format==='plain'?value:
          format==='html'?safeHTML(value):ampTemplate(safeHTML(value));
@@ -769,24 +884,35 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      const value=drafts[format];
      body.value=format==='plain'?value:
        plain(format==='amp'?getBody(value):value);
-     html.value=format==='html'?value:'';
+     // AMP must have an HTML fallback for clients that cannot render AMP.
+     html.value=format==='html'?value:format==='amp'?
+       (drafts.html || safeHTML(escapeText(body.value).replaceAll('\n','<br>'))):'';
      amp.value=format==='amp'?value:'';
    }
    function show(){
      const value=drafts[format] || (format==='plain'?'':format==='html'?safeHTML(escapeText(drafts.plain).replaceAll('\n','<br>')):
        ampTemplate(safeHTML(escapeText(drafts.plain).replaceAll('\n','<br>'))));
      drafts[format]=value;
+     lockedAMP=format==='amp'&&ampComplex(value);
+     lockedHTML=format==='html'&&/<(script|style|iframe|form|img|svg|video|audio)\b/i.test(value);
      if(mode==='visual'){
        visual.innerHTML=format==='plain'?safeHTML(escapeText(value).replaceAll('\n','<br>')):
          safeHTML(format==='amp'?getBody(value):value);
-     }else{
-       code.value=value;
-     }
+     }else code.value=value;
      visualDirty=false;
      visual.hidden=mode!=='visual';
+     visual.contentEditable=(lockedAMP||lockedHTML)?'false':'true';
      code.hidden=mode!=='code';
      const tools=editor.querySelector('.v986-rich-toolbar');
-     if(tools)tools.hidden=mode!=='visual'||format==='plain';
+     if(tools)tools.hidden=mode!=='visual'||format==='plain'||lockedAMP||lockedHTML;
+     const uploadAction=editor.querySelector('[data-v986-upload-image]');
+     if(uploadAction)uploadAction.hidden=format==='plain';
+     const ampTools=editor.querySelector('[data-v986-amp-toolbar]');
+     if(ampTools)ampTools.hidden=mode!=='code'||format!=='amp';
+     if(lockedAMP && mode==='visual')say('This AMP document has interactive components: Visual is read-only to protect its source. Use Code to edit.');
+     else if(lockedHTML && mode==='visual')say('Advanced HTML detected: Visual is read-only to protect its source. Use Code to edit.');
+     else if(format==='amp')say('AMP snippets need valid HTTPS URLs and a compatible sender. Structure check is not full AMP validation.');
+     else say('');
      editor.querySelectorAll('[data-v986-editor-mode]').forEach(btn=>{
        const active=btn.dataset.v986EditorMode===mode;
        btn.classList.toggle('active',active);
@@ -794,31 +920,184 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      });
    }
    picker.addEventListener('change',()=>{
-     save();format=picker.value;show();save();
+     save();format=picker.value;
+     if(format==='amp')mode='code';
+     show();save();
    });
    editor.querySelectorAll('[data-v986-editor-mode]').forEach(btn=>btn.addEventListener('click',()=>{
      if(btn.dataset.v986EditorMode===mode)return;
      save();mode=btn.dataset.v986EditorMode;show();save();
    }));
    visual.addEventListener('paste',ev=>{
+     if(lockedAMP||lockedHTML)return;
      ev.preventDefault();
      const txt=ev.clipboardData?.getData('text/plain')||'';
      document.execCommand('insertText',false,txt);
    });
-   visual.addEventListener('input',()=>{visualDirty=true;save();});
+   visual.addEventListener('input',()=>{if(lockedAMP||lockedHTML)return;visualDirty=true;save();});
    code.addEventListener('input',save);
-   editor.querySelectorAll('[data-v986-rich-command]').forEach(btn=>{
-     btn.addEventListener('click',()=>{
-       visual.focus();
-       const cmd=btn.dataset.v986RichCommand;
-       if(cmd==='createLink'){
-         const val=window.prompt('Link URL (https:// or mailto:)','https://');
-         if(!val||!(/^(https?:|mailto:)/i.test(val)))return;
-         document.execCommand(cmd,false,val);
-       }else document.execCommand(cmd,false,null);
-       visualDirty=true;
+   // Preserve editor selection when the user clicks a toolbar button or select.
+   editor.querySelectorAll('.v986-rich-toolbar button').forEach(btn=>btn.addEventListener('mousedown',ev=>ev.preventDefault()));
+   function command(cmd,val=null){
+     if(mode!=='visual'||format==='plain'||lockedAMP||lockedHTML)return;
+     visual.focus();
+     document.execCommand('styleWithCSS',false,true);
+     document.execCommand(cmd,false,val);
+     visualDirty=true;save();
+   }
+   function selectedStyle(property,value){
+     if(mode!=='visual'||format==='plain'||lockedAMP||lockedHTML)return;
+     const sel=window.getSelection();
+     if(!sel||sel.rangeCount===0||sel.isCollapsed||!visual.contains(sel.getRangeAt(0).commonAncestorContainer)){
+       say('Select text inside the editor before changing font or size.');return;
+     }
+     const range=sel.getRangeAt(0);
+     const span=document.createElement('span');
+     span.style[property]=value;
+     try{range.surroundContents(span);}
+     catch(e){const contents=range.extractContents();span.appendChild(contents);range.insertNode(span);}
+     const next=document.createRange();next.selectNodeContents(span);
+     sel.removeAllRanges();sel.addRange(next);
+     visualDirty=true;save();say('');
+   }
+   const font=editor.querySelector('[data-v986-rich-font]');
+   if(font)font.addEventListener('change',()=>{
+     if(FONT_FAMILIES[font.value])selectedStyle('fontFamily',FONT_FAMILIES[font.value]);
+     font.value='';
+   });
+   const size=editor.querySelector('[data-v986-rich-size]');
+   if(size)size.addEventListener('change',()=>{
+     if(FONT_SIZES.has(size.value))selectedStyle('fontSize',size.value+'px');
+     size.value='';
+   });
+   const block=editor.querySelector('[data-v986-rich-block]');
+   if(block)block.addEventListener('change',()=>{
+     if(/^(P|H1|H2|H3)$/.test(block.value))command('formatBlock','<'+block.value+'>');
+     block.value='';
+   });
+   editor.querySelectorAll('[data-v986-rich-color]').forEach(input=>input.addEventListener('change',()=>{
+     if(/^#[0-9a-f]{6}$/i.test(input.value))command(input.dataset.v986RichColor,input.value);
+   }));
+   editor.querySelectorAll('[data-v986-rich-command]').forEach(btn=>btn.addEventListener('click',()=>{
+     const cmd=btn.dataset.v986RichCommand;
+     if(cmd==='createLink'){
+       const val=window.prompt('Link URL (https://, http:// or mailto:)','https://');
+       if(!val||!/^(https?:\/\/|mailto:)/i.test(val))return;
+       command(cmd,val);
+     }else command(cmd);
+   }));
+   const uploadedImages=[];
+   const imagePicker=editor.querySelector('[data-v986-rich-image-file]');
+   const pickImage=()=>{if(format==='plain'){say('Choose HTML or AMP first.');return;}imagePicker?.click();};
+   editor.querySelector('[data-v986-upload-image]')?.addEventListener('click',pickImage);
+   imagePicker?.addEventListener('change',async()=>{
+     const file=imagePicker.files?.[0];
+     imagePicker.value='';
+     if(!file)return;
+     const csrf=form.querySelector('input[name="csrf"]')?.value||'';
+     if(!csrf){say('Composer session expired. Reload the page.');return;}
+     const scope=name=>document.querySelector('[data-v984-scope="'+name+'"]')?.value||'';
+     const params=new URLSearchParams(location.search);
+     const owner=scope('owner_id')||params.get('owner_id')||'';
+     const project=scope('project_id')||params.get('project_id')||params.get('project')||'';
+     const data=new FormData();
+     data.append('csrf',csrf);
+     data.append('file',file,file.name);
+     if(owner)data.append('owner_id',owner);
+     if(project)data.append('project_id',project);
+     const targetFormat=format;
+     const dimensions=async()=>{
+       try{
+         const bitmap=await createImageBitmap(file);
+         const wh=[Math.max(1,bitmap.width),Math.max(1,bitmap.height)];
+         bitmap.close();return wh;
+       }catch(_){return [600,300];}
+     };
+     say('Uploading image to Postmaster Files…');
+     try{
+       const response=await fetch('/dashboard/compose/image/upload',{
+         method:'POST',body:data,credentials:'same-origin',headers:{'Accept':'application/json'}
+       });
+       const result=await response.json();
+       if(!response.ok||!result.ok||!/^https:\/\/[^<>"\s]+$/i.test(result.image_url||'')){
+         throw new Error(String(result.error||'Upload failed'));
+       }
+       const [width,height]=await dimensions();
+       const alt=window.prompt('Accessible description of the image',file.name)||file.name;
+       const url=escapeText(result.image_url);
+       const description=escapeText(alt.slice(0,200));
+       uploadedImages.push({url,width,height,description});
        save();
-     });
+       if(targetFormat==='amp'&&format==='amp'){
+         const fragment='<amp-img src="'+url+'" width="'+width+'" height="'+height+
+           '" layout="responsive" alt="'+description+'"></amp-img>';
+         const source=drafts.amp||ampTemplate('');
+         const closing=source.search(/<\/body>/i);
+         drafts.amp=closing>=0?source.slice(0,closing)+'\n'+fragment+'\n'+source.slice(closing):source+'\n'+fragment;
+         mode='code';show();save();
+       }else{
+         const fragment='<p><img src="'+url+'" width="'+width+'" height="'+height+'" alt="'+description+'"></p>';
+         drafts.html=(drafts.html||'')+'\n'+fragment;
+         format='html';picker.value='html';mode='code';show();save();
+       }
+       say('Stored in Postmaster. If open tracking is enabled, this image replaces the separate pixel.');
+     }catch(error){say('Upload failed: '+String(error?.message||error).slice(0,180));}
+   });
+   editor.querySelectorAll('[data-v986-rich-insert]').forEach(btn=>btn.addEventListener('click',()=>{
+     if(format!=='html'||mode!=='visual')return;
+     if(btn.dataset.v986RichInsert==='table'){
+       command('insertHTML','<table><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr><tr><td>Cell 3</td><td>Cell 4</td></tr></tbody></table><p></p>');
+     }else if(btn.dataset.v986RichInsert==='image')pickImage();
+   }));
+   const ampSnippets={
+     'amp-img':{tag:'',html:''},
+     'amp-carousel':{tag:'amp-carousel',html:''},
+     'amp-accordion':{tag:'amp-accordion',html:'<amp-accordion><section><h2>Section title</h2><p>Section content</p></section></amp-accordion>'},
+     'amp-selector':{tag:'amp-selector',html:'<amp-selector><div option="a">Option A</div><div option="b">Option B</div></amp-selector>'},
+     'amp-form':{tag:'amp-form',html:'<form method="post" action-xhr="https://example.com/endpoint" target="_top"><label>Name <input type="text" name="name" required></label><button type="submit">Submit</button></form>'}
+   };
+   editor.querySelectorAll('[data-v986-amp-insert]').forEach(btn=>btn.addEventListener('click',()=>{
+     if(format!=='amp'||mode!=='code')return;
+     if(btn.dataset.v986AmpInsert==='amp-img'){pickImage();return;}
+     let snippet=ampSnippets[btn.dataset.v986AmpInsert];
+     if(!snippet)return;
+     if(btn.dataset.v986AmpInsert==='amp-carousel'){
+       if(uploadedImages.length<2){
+         say('Upload at least two images to Postmaster Files before inserting an AMP carousel.');return;
+       }
+       const elements=uploadedImages.slice(-2).map(image=>
+         '<amp-img src="'+image.url+'" width="'+image.width+'" height="'+image.height+
+         '" layout="responsive" alt="'+image.description+'"></amp-img>').join('\n');
+       snippet={...snippet,html:'<amp-carousel width="600" height="300" layout="responsive" type="slides">\n'+
+         elements+'\n</amp-carousel>'};
+     }
+     let source=code.value||ampTemplate('');
+     if(snippet.tag && !new RegExp('custom-element=["\\x27]'+snippet.tag+'["\\x27]','i').test(source)){
+       const script='<script async custom-element="'+snippet.tag+'" src="https://cdn.ampproject.org/v0/'+snippet.tag+'-0.1.js"><\/script>\n';
+       source=source.replace(/<\/head>/i,script+'<\/head>');
+     }
+     // Insert inside BODY, never after the closing AMP document tag.
+     const closing=source.search(/<\/body>/i);
+     source=closing>=0?source.slice(0,closing)+'\n'+snippet.html+'\n'+source.slice(closing):source+'\n'+snippet.html;
+     code.value=source;save();
+     say('Snippet inserted. Replace placeholder URLs and verify the AMP document before sending.');
+   }));
+   const ampCheck=editor.querySelector('[data-v986-amp-check]');
+   if(ampCheck)ampCheck.addEventListener('click',()=>{
+     if(format!=='amp'||mode!=='code')return;
+     const source=code.value;
+     const issues=[];
+     if(!/<html\b[^>]*\bamp4email\b/i.test(source))issues.push('missing html amp4email');
+     if(!/cdn\.ampproject\.org\/v0\.js/i.test(source))issues.push('missing AMP runtime script');
+     if(!/<style\s+amp4email-boilerplate\b/i.test(source))issues.push('missing email boilerplate');
+     if(!/<body\b/i.test(source)||!/<\/body>/i.test(source))issues.push('missing body');
+     for(const tag of ['amp-carousel','amp-accordion','amp-selector','amp-form']){
+       if(new RegExp('<'+tag+'[\\s>]','i').test(source) &&
+          !new RegExp('custom-element=["\\x27]'+tag+'["\\x27]','i').test(source))
+         issues.push('missing '+tag+' extension script');
+     }
+     say(issues.length?'Basic AMP structure issues: '+issues.join(', '):
+       'Basic structure checks passed. This is NOT a full AMP validator; validate externally and check sender compatibility before sending.');
    });
    states.set(editor,{save});
    show();
