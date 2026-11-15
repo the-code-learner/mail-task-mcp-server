@@ -346,6 +346,123 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
 </script>"""
 
 
+# Shared confirmation styling is used by the dashboard popup and the
+# full-page no-JavaScript fallback. This does not change the approval protocol.
+VERSION_CONFIRM_STYLE = r"""
+.pm-vconfirm-overlay{position:fixed;inset:0;z-index:30000;background:rgba(6,13,24,.78);display:grid;place-items:center;padding:16px;box-sizing:border-box;overflow-y:auto;color:#eaf1fc;font:14px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.pm-vconfirm-overlay *{box-sizing:border-box}
+.pm-vconfirm-card{display:block;width:min(540px,100%);max-height:calc(100dvh - 32px);overflow-y:auto;background:#172538;border:1px solid #3c526e;box-shadow:0 25px 80px rgba(0,0,0,.55);border-radius:17px;padding:26px;position:relative}
+.pm-vconfirm-head{display:flex;align-items:flex-start;gap:13px;margin:0 36px 18px 0}
+.pm-vconfirm-icon{display:grid;place-items:center;flex:0 0 46px;width:46px;height:46px;border-radius:13px;background:#284878;color:#bbd4ff;font-size:24px}
+.pm-vconfirm-kicker{margin:0 0 3px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:800;color:#92b2e8}
+.pm-vconfirm-title{margin:0!important;color:#f0f5fd;font-size:22px!important;line-height:1.2;font-weight:750}
+.pm-vconfirm-sub{margin:8px 0 17px;color:#b3c4da;font-size:13px}
+.pm-vconfirm-close{position:absolute;right:18px;top:18px;width:35px;height:35px;display:grid;place-items:center;background:#253850;color:#c3d5eb;border:1px solid #405773;border-radius:9px;font-size:20px;cursor:pointer}
+.pm-vconfirm-close:hover{background:#364d6b}
+.pm-vconfirm-versions{display:grid;grid-template-columns:minmax(0,1fr) 34px minmax(0,1fr);align-items:center;gap:8px;background:#1d2f45;border:1px solid #3a536f;border-radius:12px;padding:17px 15px;margin:14px 0}
+.pm-vconfirm-version-label{display:block;margin-bottom:7px;color:#9db3ce;font-size:11px;font-weight:700}
+.pm-vconfirm-version-number{display:block;overflow-wrap:anywhere;color:#f2f6ff;font-weight:800;font-size:17px;line-height:1.3}
+.pm-vconfirm-target .pm-vconfirm-version-number{color:#a7c9ff}
+.pm-vconfirm-arrow{text-align:center;font-size:21px;color:#87a4ca}
+.pm-vconfirm-info{display:flex;gap:10px;align-items:flex-start;background:#203147;border:1px solid #354b64;border-radius:10px;padding:11px 13px;margin:14px 0;color:#cad8ec;font-size:12px}
+.pm-vconfirm-info-icon{font-size:17px;color:#8fb4ed;line-height:1.2}
+.pm-vconfirm-info strong{color:#e9f2ff}
+.pm-vconfirm-details{border:1px solid #344960;border-radius:9px;margin:15px 0;background:#1a2a3e}
+.pm-vconfirm-details summary{cursor:pointer;padding:11px 12px;color:#afc5e1;font-size:12px;font-weight:750}
+.pm-vconfirm-details dl{margin:0;padding:0 12px 10px}
+.pm-vconfirm-details dl div{display:grid;grid-template-columns:115px minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid #344960;font-size:11px;overflow-wrap:anywhere}
+.pm-vconfirm-details dt{color:#9cb3cc}.pm-vconfirm-details dd{margin:0;color:#e3edf9}
+.pm-vconfirm-consent{display:flex;gap:12px;align-items:flex-start;border:1px solid #456187;background:#223a55;border-radius:10px;padding:14px;margin:16px 0;color:#e7f2ff;font-size:13px;font-weight:650;cursor:pointer}
+.pm-vconfirm-consent input{width:18px;height:18px;min-width:18px;accent-color:#8cb6fa;margin:2px 0 0;padding:0}
+.pm-vconfirm-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:10px;margin-top:19px}
+.pm-vconfirm-cancel{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:10px 16px;background:#26384e;border:1px solid #49607a;border-radius:9px;text-decoration:none!important;color:#dce9f9!important;font-weight:750}
+.pm-vconfirm-submit{min-height:42px;padding:10px 16px;border:1px solid #94b6fa;border-radius:9px;background:#82aafb;color:#10213d;font-weight:800;cursor:pointer}
+.pm-vconfirm-submit:hover{background:#a3c3ff}
+.pm-vconfirm-card :is(button,a,input,summary):focus-visible{outline:2px solid #a4c7ff;outline-offset:3px}
+.pm-vconfirm-actions button[disabled]{opacity:.55;cursor:not-allowed}
+@media(max-width:510px){.pm-vconfirm-card{padding:19px}.pm-vconfirm-title{font-size:19px!important}.pm-vconfirm-versions{padding:12px 10px}.pm-vconfirm-version-number{font-size:14px}.pm-vconfirm-actions{flex-direction:column-reverse;align-items:stretch}.pm-vconfirm-actions>*{width:100%;text-align:center}.pm-vconfirm-details dl div{grid-template-columns:85px minmax(0,1fr)}}
+"""
+
+
+def _confirmation_markup(operation: str, info: dict[str, Any],
+                         preview_id: str, csrf: str, ttl: Any) -> str:
+    """Escaped, accessible confirmation. No call to execute occurs here."""
+    exact_target = str(info.get("target_version_ref") or "")
+    current = str(info.get("current_version") or "Unknown")
+    label = {
+        "update-latest": "Install latest eligible release",
+        "switch-version": "Switch to selected release",
+        "pin-version": "Pin selected release",
+        "rollback-version": "Restore previous release",
+    }.get(operation, "Change release")
+    try:
+        seconds = max(0, int(ttl))
+        ttl_text = f"{seconds // 60} min {seconds % 60} sec" if seconds >= 60 else f"{seconds} sec"
+    except (ValueError, TypeError):
+        ttl_text = str(ttl or "Unknown")
+    return (
+        '<div class="pm-vconfirm-overlay" data-vconfirm-overlay>'
+        '<section class="pm-vconfirm-card" role="dialog" aria-modal="true"'
+        ' aria-labelledby="pm-vconfirm-heading" aria-describedby="pm-vconfirm-description"'
+        ' data-vconfirm-dialog>'
+        '<button type="button" class="pm-vconfirm-close" data-vconfirm-dismiss'
+        ' aria-label="Close update confirmation">×</button>'
+        '<div class="pm-vconfirm-head"><div class="pm-vconfirm-icon" aria-hidden="true">↻</div>'
+        '<div><p class="pm-vconfirm-kicker">Postmaster MCP · Versions &amp; updates</p>'
+        '<h1 class="pm-vconfirm-title" id="pm-vconfirm-heading">Confirm update and restart</h1>'
+        '</div></div>'
+        '<p class="pm-vconfirm-sub" id="pm-vconfirm-description">'
+        'Review the selected version. Nothing will change until you explicitly approve.'
+        '</p>'
+        '<div class="pm-vconfirm-versions">'
+        '<div><span class="pm-vconfirm-version-label">Currently installed</span>'
+        f'<strong class="pm-vconfirm-version-number">{_e(current)}</strong></div>'
+        '<span class="pm-vconfirm-arrow" aria-hidden="true">→</span>'
+        '<div class="pm-vconfirm-target"><span class="pm-vconfirm-version-label">Selected release</span>'
+        f'<strong class="pm-vconfirm-version-number">{_e(exact_target)}</strong></div></div>'
+        '<div class="pm-vconfirm-info"><span class="pm-vconfirm-info-icon" aria-hidden="true">ⓘ</span>'
+        '<div><strong>A container restart is required.</strong> '
+        'Postmaster will install the selected release, restart, and verify the running version '
+        'before returning to the dashboard. Scheduled tasks and stored files are not removed.</div></div>'
+        '<details class="pm-vconfirm-details"><summary>Technical details</summary><dl>'
+        f'<div><dt>Operation</dt><dd>{_e(label)}</dd></div>'
+        f'<div><dt>Current build</dt><dd>{_e(info.get("current_build"))}</dd></div>'
+        f'<div><dt>Version selector</dt><dd>{_e(info.get("current_selector"))}</dd></div>'
+        f'<div><dt>Confirmation expires</dt><dd>{_e(ttl_text)}</dd></div>'
+        '</dl></details>'
+        '<form method="post" action="/dashboard/versions/execute" data-vconfirm-execute>'
+        f'<input type="hidden" name="csrf" value="{_e(csrf)}">'
+        f'<input type="hidden" name="operation" value="{_e(operation)}">'
+        f'<input type="hidden" name="target_version" value="{_e(exact_target)}">'
+        f'<input type="hidden" name="preview_id" value="{_e(preview_id)}">'
+        '<label class="pm-vconfirm-consent">'
+        '<input type="checkbox" name="approved" value="yes" required data-vconfirm-consent>'
+        f'<span>I approve installing <strong>{_e(exact_target)}</strong> '
+        'and restarting Postmaster.</span></label>'
+        '<div class="pm-vconfirm-actions">'
+        '<a class="pm-vconfirm-cancel" data-vconfirm-dismiss '
+        'href="/?ui_view=system&amp;settings_tab=versions#system">Cancel</a>'
+        '<button class="pm-vconfirm-submit" type="submit" data-vconfirm-submit>'
+        'Confirm update &amp; restart</button></div></form>'
+        '</section></div>'
+    )
+
+
+def _confirmation_page(markup: str) -> HTMLResponse:
+    """Complete readable fallback if Javascript or fragment fetching is unavailable."""
+    return HTMLResponse(
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Confirm update and restart · Postmaster MCP</title>'
+        '<style>html{color-scheme:dark}body{margin:0;background:#101b2a}'
+        + VERSION_CONFIRM_STYLE + '</style></head><body>'
+        + markup + '</body></html>',
+        headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
+                 "Referrer-Policy":"no-referrer",
+                 "Content-Security-Policy":"default-src 'self'; base-uri 'none'; frame-ancestors 'self'"},
+    )
+
+
 def _response_page(title: str, content: str, status: int = 200) -> HTMLResponse:
     return HTMLResponse(
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -396,7 +513,7 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
         previous_styles = v962._styles
         if not getattr(previous_styles, "_v988_release_styles", False):
             def styles() -> str:
-                return previous_styles() + "\n" + VERSIONS_STYLE
+                return previous_styles() + "\n" + VERSIONS_STYLE + "\n" + VERSION_CONFIRM_STYLE
             styles._v988_release_styles = True
             v962._styles = styles
     if hasattr(v962, "SCRIPT") and 'id="v988-live-updates"' not in v962.SCRIPT:
@@ -464,25 +581,19 @@ def install_versions_webgui_v984(app: Any, base: Any, core: Any,
                 '<p><a href="/?ui_view=system#system">Back to Settings</a></p>',
                 status=400,
             )
-        panel = (
-            '<p>Postmaster will install this version and restart after your confirmation.</p>'
-            f'<p><b>Operation:</b> {_e(info.get("operation"))}<br>'
-            f'<b>Current:</b> {_e(info.get("current_version"))}<br>'
-            f'<b>Build:</b> {_e(info.get("current_build"))}<br>'
-            f'<b>Current selector:</b> {_e(info.get("current_selector"))}<br>'
-            f'<b>Target:</b> {_e(exact_target)}<br>'
-            f'<b>Confirmation TTL:</b> {_e(result.get("confirmation_expires_in_seconds"))} s</p>'
-            '<form action="/dashboard/versions/execute" method="post">'
-            f'<input type="hidden" name="csrf" value="{_e(base._csrf_value())}">'
-            f'<input type="hidden" name="operation" value="{_e(operation)}">'
-            f'<input type="hidden" name="target_version" value="{_e(exact_target)}">'
-            f'<input type="hidden" name="preview_id" value="{_e(preview_id)}">'
-            '<label><input type="checkbox" name="approved" value="yes" required>'
-            'I approve this update and restart.</label>'
-            '<p><button type="submit">Confirm update &amp; restart</button>'
-            ' <a href="/?ui_view=system#system">Cancel</a></p></form>'
+        markup = _confirmation_markup(
+            operation, info, preview_id, base._csrf_value(),
+            result.get("confirmation_expires_in_seconds"),
         )
-        return _response_page("Confirm update and restart", panel)
+        if req.headers.get("X-Postmaster-Preview-Modal") == "1":
+            return HTMLResponse(
+                markup,
+                headers={"Cache-Control": "private, no-store",
+                         "X-Content-Type-Options": "nosniff",
+                         "Referrer-Policy": "no-referrer",
+                         "Vary": "X-Postmaster-Preview-Modal"},
+            )
+        return _confirmation_page(markup)
 
     async def execute(req: Request) -> Response:
         form, error = await base._verified_form(req)
