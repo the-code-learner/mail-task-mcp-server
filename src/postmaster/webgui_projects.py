@@ -12,7 +12,44 @@ from .webgui_helpers import (
 )
 
 
+def _file_size_label(value: Any) -> str:
+    """Display-friendly file sizes, keeping raw bytes in file metadata."""
+    size = max(0, int(value or 0))
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size / (1024 * 1024):.1f} MiB"
+
+
+def _file_type_icon(filename: str, mime: str) -> tuple[str, str]:
+    media = mime.split(";", 1)[0].lower().strip()
+    if media == "application/pdf" or filename.lower().endswith(".pdf"):
+        return "PDF", "pm-drive-pdf"
+    if media.startswith("image/"):
+        return "IMG", "pm-drive-image"
+    if media.startswith("text/") or media in {
+        "application/json", "application/xml", "application/yaml",
+        "application/x-yaml",
+    }:
+        return "TXT", "pm-drive-text"
+    if media.startswith("audio/"):
+        return "AUD", ""
+    if media.startswith("video/"):
+        return "VID", ""
+    return "FILE", ""
+
+
 def files_fragment(base: Any, request: Request) -> str:
+    """Responsive file manager with *inline, authenticated* previews.
+
+    Preview URLs are independent of the download action: opening a file
+    never triggers the browser download route. Store, CRUD and MCP API are
+    preserved, and project scope is still applied on the server.
+    """
+    from urllib.parse import quote
+    from .webgui_files_v984 import preview_supported
+
     project = selected_project(request)
     projects = project_rows(base)
     project_names = {
@@ -30,38 +67,183 @@ def files_fragment(base: Any, request: Request) -> str:
     files = result if isinstance(result, list) else []
     project_meta = next((row for row in projects if str(row.get("id") or "") == project), {})
     selected_owner = str(project_meta.get("owner_id") or os.getenv("DEFAULT_OWNER_ID", ""))
-    rows = []
-    for stored in files:
-        file_id = str(stored.get("id") or "")
-        project_id = str(stored.get("project_id") or "") or None
-        filename = project_label_html(str(stored.get("filename") or ""), project_id)
-        scope = project_label_html(
-            project_names.get(project_id or "", project_id or "global"),
-            project_id,
-            compact=True,
-        )
-        rows.append(
-            f'<tr><td><a href="/dashboard/files/{escape(file_id)}/preview" target="_blank" rel="noopener">{filename}</a><div class="small muted mono">{escape(file_id)}</div><div class="small muted">{escape(str(stored.get("description") or ""))}</div></td>'
-            f'<td>{escape(str(stored.get("owner_id") or ""))}<div class="small muted">{scope}</div></td>'
-            f'<td class="mono small">{escape(str(stored.get("media_type") or "application/octet-stream"))}<div class="muted">{int(stored.get("size_bytes") or 0)} bytes</div></td>'
-            f'<td class="small">{escape(", ".join(stored.get("tags") or []))}</td>'
-            f'<td class="actions"><a href="/dashboard/files/{escape(file_id)}/preview" target="_blank" rel="noopener"><button type="button">Preview</button></a><a href="/dashboard/files/{escape(file_id)}/download"><button type="button">Download</button></a>'
-            f'<form method="post" action="/dashboard/files/delete" onsubmit="return confirm(\'Delete this stored file?\');"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}"><input type="hidden" name="file_id" value="{escape(file_id)}"><button class="danger" type="submit">Delete</button></form></td></tr>'
-        )
+    csrf = escape(str(base._csrf_value()), quote=True)
     total = int(status.get("files", 0)) if isinstance(status, dict) else len(files)
     logical = int(status.get("logical_bytes", 0)) if isinstance(status, dict) else 0
     max_bytes = int(status.get("max_bytes_per_file", 0)) if isinstance(status, dict) else 0
-    filter_html = project_filter_html(request, tab="files", selected=project, projects=projects)
-    legend = project_legend_html(projects, [stored.get("project_id") for stored in files])
-    return f'''<section class="tab-panel" id="panel-files" data-panel="files"><div class="grid">
-<section class="card"><h2>Small-file store</h2><div><strong>{len(files)}</strong> shown · <strong>{total}</strong> stored globally</div><div><strong>{logical}</strong> logical bytes</div><div class="small muted">Per-file limit: {max_bytes} bytes. Project filtering is WebGUI-only.</div></section>
-<section class="card wide"><div class="panel-title"><h2>Upload file</h2><span class="small muted">owner/project scopes reuse the Tasks registry</span></div>{filter_html}
-<form method="post" action="/dashboard/files/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{escape(base._csrf_value())}">
-<div class="row"><div class="field"><label>Owner</label><select name="owner_id" required>{owner_options(owners, selected_owner)}</select></div><div class="field"><label>Project</label><select name="project_id">{project_options(projects, project)}</select></div><div class="field grow"><label>File</label><input type="file" name="file" required></div></div>
-<div class="row" style="margin-top:10px"><div class="field grow"><label>Description</label><input type="text" name="description"></div><div class="field grow"><label>Tags (comma separated)</label><input type="text" name="tags"></div><button class="primary" type="submit">Upload</button></div></form></section>
-<section class="card wide"><div class="panel-title"><h2>Stored files</h2><span class="badge">{len(files)} shown</span></div>{legend}<div class="scroll"><table><thead><tr><th>File</th><th>Owner / project</th><th>Type / size</th><th>Tags</th><th></th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="5" class="muted">No stored files in this project filter</td></tr>'}</tbody></table></div></section>
-</div></section>'''
+    project_options_filter = ['<option value="all">All projects</option>']
+    visible_project_ids = {str(row.get("project_id") or "") for row in files}
+    for row in projects:
+        pid = str(row.get("id") or "")
+        if pid in visible_project_ids:
+            label = str(row.get("name") or pid)
+            project_options_filter.append(
+                f'<option value="{escape(pid, quote=True)}">{escape(label)}</option>'
+            )
+    if "" in visible_project_ids:
+        project_options_filter.append('<option value="__global__">Global / owner-wide</option>')
 
+    rows: list[str] = []
+    for stored in files:
+        file_id = str(stored.get("id") or "")
+        filename = str(stored.get("filename") or file_id or "Untitled file")
+        file_project = str(stored.get("project_id") or "")
+        project_label = project_names.get(file_project, file_project) if file_project else "Global / owner-wide"
+        media = str(stored.get("media_type") or "application/octet-stream")
+        description = str(stored.get("description") or "")
+        tags = ", ".join(str(t) for t in stored.get("tags") or [])
+        created = str(stored.get("created_at") or "")
+        size_bytes = max(0, int(stored.get("size_bytes") or 0))
+        size_label = _file_size_label(size_bytes)
+        icon, icon_class = _file_type_icon(filename, media)
+        filename_safe = escape(filename)
+        file_url_id = quote(file_id, safe="")
+        preview_url = f"/dashboard/files/{file_url_id}/preview"
+        download_url = f"/dashboard/files/{file_url_id}/download"
+        supported = preview_supported(media)
+        searchable = " ".join((filename, description, tags, project_label)).casefold()
+        project_scope = project_label_html(project_label, file_project or None, compact=True)
+        if description:
+            detail = description[:165]
+        else:
+            detail = tags[:120] if tags else media
+        created_label = created[:10] if created else ""
+        subtitle = f"{created_label} · {detail}" if created_label else detail
+        rows.append(
+            f'<tr tabindex="0" class="pm-drive-row"'
+            f' data-pm-file-id="{escape(file_id, quote=True)}"'
+            f' data-pm-name="{escape(filename, quote=True)}"'
+            f' data-pm-project="{escape(file_project or "__global__", quote=True)}"'
+            f' data-pm-project-label="{escape(project_label, quote=True)}"'
+            f' data-pm-media="{escape(media, quote=True)}"'
+            f' data-pm-size="{size_bytes}" data-pm-size-label="{escape(size_label)}"'
+            f' data-pm-created="{escape(created, quote=True)}"'
+            f' data-pm-description="{escape(description[:400], quote=True)}"'
+            f' data-pm-tags="{escape(tags[:400], quote=True)}"'
+            f' data-pm-search="{escape(searchable[:1200], quote=True)}"'
+            f' data-pm-preview="{escape(preview_url, quote=True)}"'
+            f' data-pm-download="{escape(download_url, quote=True)}"'
+            f' data-pm-preview-supported="{"1" if supported else "0"}">'
+            '<td><a class="pm-drive-file-name" data-pm-preview-link'
+            f' href="{escape(preview_url, quote=True)}" target="_blank" rel="noopener"'
+            f' aria-label="Preview {escape(filename, quote=True)}">'
+            f'<span class="pm-drive-file-icon {icon_class}" aria-hidden="true">{icon}</span>'
+            '<span class="pm-drive-file-title-wrap">'
+            f'<span class="pm-drive-title">{filename_safe}</span>'
+            f'<span class="pm-drive-file-sub">{escape(subtitle)}</span>'
+            '</span></a></td>'
+            f'<td class="pm-drive-cell-project"><span class="pm-drive-project">{project_scope}</span></td>'
+            f'<td class="pm-drive-cell-size"><span class="pm-drive-size">{escape(size_label)}</span></td>'
+            '<td class="pm-drive-cell-actions"><div class="pm-drive-actions">'
+            f'<a class="pm-drive-download" href="{escape(download_url, quote=True)}"'
+            f' aria-label="Download {escape(filename, quote=True)}">↓ Download</a>'
+            '<details class="pm-drive-menu"><summary aria-label="More file actions">⋯</summary>'
+            '<div class="pm-drive-menu-inner">'
+            f'<a data-pm-preview-link href="{escape(preview_url, quote=True)}"'
+            ' target="_blank" rel="noopener">Preview</a>'
+            f'<button type="button" data-pm-copy-id="{escape(file_id, quote=True)}">Copy file ID</button>'
+            '<form method="post" action="/dashboard/files/delete"'
+            ' onsubmit="return confirm(\'Delete this stored file?\');">'
+            f'<input type="hidden" name="csrf" value="{csrf}">'
+            f'<input type="hidden" name="file_id" value="{escape(file_id, quote=True)}">'
+            '<button class="pm-drive-delete" type="submit">Delete file</button></form>'
+            '</div></details></div></td></tr>'
+        )
+
+    scope_name = project_names.get(project or "", project or "") if project else ""
+    scope_hint = (
+        f" · Project: {escape(scope_name)}" if project else " · All project scopes"
+    )
+    file_limit = _file_size_label(max_bytes) if max_bytes else "configured store limit"
+    from .webgui_helpers import project_options, owner_options
+    return f'''<section class="tab-panel" id="panel-files" data-panel="files">
+<div class="pm-drive-root">
+  <div class="pm-drive-head">
+    <div>
+      <div class="pm-drive-kicker">Postmaster MCP / Small-file store</div>
+      <h2>Files</h2>
+      <div class="pm-drive-summary"><strong>{total}</strong> stored globally · {_file_size_label(logical)} logical storage{scope_hint}<br>
+      <span class="small muted">{len(files)} loaded for browsing · Per-file limit: {escape(file_limit)}. Project filtering is WebGUI-only.</span></div>
+    </div>
+    <details class="pm-drive-upload">
+      <summary class="pm-drive-primary">＋ Upload file</summary>
+      <div class="pm-drive-upload-shade" data-pm-upload-shade aria-hidden="true"></div>
+      <section class="pm-drive-upload-pane" aria-label="Upload file">
+        <header><h3>Upload file</h3><button type="button" class="pm-drive-close" data-pm-close-upload aria-label="Close upload">✕</button></header>
+        <p class="small muted">The file is saved in Postmaster storage and stays accessible through MCP.</p>
+        <form method="post" action="/dashboard/files/upload" enctype="multipart/form-data">
+          <input type="hidden" name="csrf" value="{csrf}">
+          <div class="pm-drive-drop">
+            <div class="pm-drive-drop-title">Choose a file for storage</div>
+            <div class="small muted">Maximum {escape(file_limit)} per file</div>
+            <input type="file" name="file" required aria-label="File to upload">
+          </div>
+          <div class="pm-drive-field"><label for="pm-drive-owner">Owner</label>
+            <select id="pm-drive-owner" name="owner_id" required>{owner_options(owners, selected_owner)}</select></div>
+          <div class="pm-drive-field"><label for="pm-drive-project">Project</label>
+            <select id="pm-drive-project" name="project_id">{project_options(projects, project)}</select></div>
+          <div class="pm-drive-field"><label for="pm-drive-description">Description (optional)</label>
+            <input id="pm-drive-description" type="text" name="description" maxlength="1000"></div>
+          <div class="pm-drive-field"><label for="pm-drive-tags">Tags (comma separated)</label>
+            <input id="pm-drive-tags" type="text" name="tags" placeholder="cv, outreach, approved"></div>
+          <button class="pm-drive-primary pm-drive-upload-submit" type="submit">Upload to storage</button>
+        </form>
+      </section>
+    </details>
+  </div>
+  <div class="pm-drive-main">
+    <div class="pm-drive-toolbar">
+      <label class="pm-drive-search"><span aria-hidden="true">⌕</span><input type="search" data-pm-search
+        placeholder="Search names, tags and descriptions..." aria-label="Search stored files"></label>
+      <select data-pm-project-filter aria-label="Filter by project">{''.join(project_options_filter)}</select>
+      <select data-pm-sort aria-label="Sort files">
+        <option value="recent">Newest first</option><option value="name">Name A–Z</option>
+        <option value="size">Largest first</option>
+      </select>
+      <button type="button" class="pm-drive-layout" data-pm-layout-toggle aria-pressed="false">▦ Grid</button>
+    </div>
+    <div class="pm-drive-inventory-head"><strong>Stored files</strong>
+      <span data-pm-visible-count>{len(files)} shown of {len(files)} loaded</span></div>
+    <div class="pm-drive-table-wrap" data-pm-table-wrap>
+      <table class="pm-drive-table">
+      <thead><tr><th>File</th><th>Project</th><th>Size</th><th>Actions</th></tr></thead>
+      <tbody data-pm-list>{''.join(rows)}</tbody></table>
+      <div class="pm-drive-empty" data-pm-empty {"hidden" if files else ""}>
+        No matching files. Clear the search or choose another project.
+      </div>
+    </div>
+    <div class="pm-drive-foot"><span>Preview opens here without downloading · Download is separate</span>
+      <span>{len(files)} shown · {total} stored globally</span></div>
+    <p class="pm-drive-status" data-pm-status role="status" aria-live="polite"></p>
+  </div>
+  <div class="pm-drive-preview-shade" data-pm-preview-shade hidden></div>
+  <aside class="pm-drive-preview-pane" data-pm-preview-pane hidden
+    role="dialog" aria-modal="true" aria-label="Stored file preview">
+    <header><h3>File preview</h3><button type="button" class="pm-drive-close"
+      data-pm-close-preview aria-label="Close preview">✕</button></header>
+    <div class="pm-drive-preview-name" data-pm-detail-name></div>
+    <div class="pm-drive-preview-description" data-pm-detail-description></div>
+    <div class="pm-drive-preview-stage">
+      <iframe class="pm-drive-preview-frame" data-pm-preview-frame title="Preview of stored file" sandbox
+        referrerpolicy="no-referrer" loading="lazy" hidden></iframe>
+      <div class="pm-drive-preview-unavailable" data-pm-preview-unavailable hidden>
+        In-browser preview is unavailable for this file type. The file remains
+        stored securely. Use Download to open it in a compatible app.
+      </div>
+    </div>
+    <dl class="pm-drive-preview-meta">
+      <div class="pm-drive-meta-row"><dt>Project</dt><dd data-pm-detail-project></dd></div>
+      <div class="pm-drive-meta-row"><dt>Size</dt><dd data-pm-detail-size></dd></div>
+      <div class="pm-drive-meta-row"><dt>File type</dt><dd data-pm-detail-kind></dd></div>
+      <div class="pm-drive-meta-row"><dt>Tags</dt><dd data-pm-detail-tags></dd></div>
+      <div class="pm-drive-meta-row"><dt>File ID</dt><dd class="mono" data-pm-detail-id></dd></div>
+    </dl>
+    <div class="pm-drive-preview-actions">
+      <a class="pm-drive-download" data-pm-direct-download href="#">↓ Download file</a>
+      <a data-pm-open-tab href="#" target="_blank" rel="noopener">Open preview in new tab</a>
+    </div>
+  </aside>
+</div></section>'''
 
 def project_overview_fragment(base: Any, request: Request) -> str:
     projects = project_rows(base)

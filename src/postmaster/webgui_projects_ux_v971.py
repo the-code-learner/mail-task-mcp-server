@@ -5,6 +5,8 @@ from html import escape
 from typing import Any
 from urllib.parse import urlencode
 
+from .webgui_files_manager_v98104 import STYLE as FILE_MANAGER_STYLE, SCRIPT as FILE_MANAGER_SCRIPT
+
 
 STYLE = r'''
 /* post-v9.7.0 project resource UX */
@@ -164,6 +166,10 @@ def install_projects_ux_v971(webgui_v960: Any, webgui_projects: Any, webgui_v962
 
     def files_v971(base: Any, request: Any) -> str:
         html = original_files(base, request)
+        if 'class="pm-drive-root"' in html:
+            # New manager handles preview clicks and server-side scope itself.
+            # Never apply v9.7 legacy row-to-download rewrite here.
+            return html
         banner = _active_project_banner(base, request)
         if banner:
             marker = '<div class="panel-title"><h2>Stored files</h2>'
@@ -181,6 +187,10 @@ def install_projects_ux_v971(webgui_v960: Any, webgui_projects: Any, webgui_v962
 
     if "post-v9.7.0 project resource UX" not in webgui_v962.BASE_STYLE:
         webgui_v962.BASE_STYLE += STYLE
+    if "v9.8.10 file manager" not in webgui_v962.BASE_STYLE:
+        webgui_v962.BASE_STYLE += FILE_MANAGER_STYLE
+    if "pm-drive-v98104-script" not in webgui_v962.SCRIPT:
+        webgui_v962.SCRIPT += FILE_MANAGER_SCRIPT
     script = r'''
 <script id="v971-file-row-navigation">
 document.addEventListener('click',event=>{const row=event.target.closest('tr[data-v971-file-href]');if(!row||event.target.closest('a,button,input,form,select,textarea'))return;location.assign(row.dataset.v971FileHref);});
