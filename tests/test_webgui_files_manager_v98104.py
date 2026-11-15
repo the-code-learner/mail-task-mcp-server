@@ -172,7 +172,7 @@ class FileManagerV98104Tests(unittest.TestCase):
         self.assertIn("pm-drive-v98104-script", SCRIPT)
         self.assertIn("MutationObserver", SCRIPT)
         self.assertIn("data-pm-preview-link", SCRIPT)
-        self.assertIn("data-pm-download", SCRIPT)
+        self.assertIn("dataset.pmDownload", SCRIPT)
         self.assertIn("data-pm-sort", SCRIPT)
         self.assertIn("data-pm-layout-toggle", SCRIPT)
         self.assertIn(".pm-drive-grid-view", STYLE)
