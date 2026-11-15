@@ -48,6 +48,46 @@ jobs:
           print(f'Prepared {tag}')
           PY
 
+      - name: Require green regression tests for the exact main commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
+            echo "Stable release is stale: main advanced." >&2
+            exit 1
+          }
+          for attempt in $(seq 1 60); do
+            gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > /tmp/stable-checks.json
+            STATUS="$(python - <<'PY'
+          import json
+          checks=json.load(open('/tmp/stable-checks.json', encoding='utf-8'))['check_runs']
+          runs=[x for x in checks if x.get('name')=='v9 runtime tests / test']
+          if any(x.get('conclusion')=='success' for x in runs):
+              print('success')
+          elif any(x.get('conclusion') in ('failure','cancelled','timed_out','action_required') for x in runs):
+              print('failure')
+          else:
+              print('pending')
+          PY
+            )"
+            if [ "$STATUS" = success ]; then
+              echo "Exact main commit passed CI: $GITHUB_SHA"
+              break
+            fi
+            if [ "$STATUS" = failure ] || [ "$attempt" -eq 60 ]; then
+              echo "Refusing stable release: CI failed or timed out" >&2
+              exit 1
+            fi
+            sleep 15
+          done
+          git fetch --no-tags origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA" || {
+            echo "Main advanced during validation; refusing stale release" >&2
+            exit 1
+          }
+
       - name: Create immutable tag and stable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
