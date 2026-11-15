@@ -538,7 +538,7 @@ def _confirmation_page(markup: str) -> HTMLResponse:
         + markup + '</body></html>',
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
                  "Referrer-Policy":"no-referrer",
-                 "Content-Security-Policy":"default-src 'self'; base-uri 'none'; frame-ancestors 'self'"},
+                 "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"},
     )
 
 
@@ -556,7 +556,7 @@ def _response_page(title: str, content: str, status: int = 200) -> HTMLResponse:
         status_code=status,
         headers={"Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff",
                  "Referrer-Policy":"no-referrer","Content-Security-Policy":
-                 "default-src 'self'; base-uri 'none'; frame-ancestors 'self'"},
+                 "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'self'"},
     )
 
 
