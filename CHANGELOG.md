@@ -2,6 +2,15 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.3 - 2026-11-15
+
+### Cleaner calendar outside-month backlog
+- Calendar → **Tasks outside this month** lists only non-completed tasks; completed tasks in other months no longer repeat as a very long history below the calendar.
+- Completed jobs remain visible, faded and selectable on their original scheduled month in the monthly calendar. The Calendar show/hide completed control, weekly view and all existing MCP job/history fields continue unchanged.
+- The out-of-month section is hidden entirely when no unfinished jobs need listing. Tasks that are not completed, including undated jobs, remain accessible.
+- Adds regression tests for excluding outside-month completions, preserving them within their original month, retaining unfinished jobs, and hiding an empty outside section.
+- UI-only change on the single `main` trunk. No change to existing task data, scheduling, automatic email sends, or Portainer YAML.
+
 ## 9.8.10-beta.2 - 2026-11-15
 
 ### Retrocompatible task scheduling/completion timestamps
