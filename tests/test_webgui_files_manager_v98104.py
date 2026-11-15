@@ -91,7 +91,9 @@ class FileManagerV98104Tests(unittest.TestCase):
         self.assertIn('href="/dashboard/files/pdf-1/download"', html)
         self.assertIn('data-pm-preview-pane', html)
         self.assertIn('data-pm-preview-frame', html)
-        self.assertIn('sandbox', html)
+        self.assertNotIn('title="PDF preview" sandbox', html)
+        self.assertIn('data-pm-preview-text', html)
+        self.assertIn('data-pm-upload-pane', html)
         self.assertIn('data-pm-open-tab', html)
         self.assertIn("Preview opens here without downloading", html)
         self.assertNotIn('data-v971-file-href', html)
@@ -102,6 +104,36 @@ class FileManagerV98104Tests(unittest.TestCase):
         transformed = _make_file_rows_clickable(html)
         self.assertEqual(transformed, html)
         self.assertIn('data-pm-preview-link', transformed)
+
+    def test_upload_overlay_is_standalone_and_not_wrapped_by_legacy_section(self):
+        html = files_fragment(self.base, request())
+        self.assertEqual(html.count('data-pm-open-upload'), 1)
+        self.assertEqual(html.count('data-pm-upload-pane'), 1)
+        self.assertIn('class="pm-drive-upload-pane" data-pm-upload-pane', html)
+        self.assertIn('data-pm-upload-shade aria-hidden="true" hidden', html)
+        self.assertNotIn('class="pm-drive-upload"', html)
+        self.assertLess(html.index('class="pm-drive-head"'), html.index('data-pm-open-upload'))
+        self.assertLess(html.index('data-pm-inventory-head') if
+                        'data-pm-inventory-head' in html else html.index('pm-drive-inventory-head'),
+                        html.index('data-pm-upload-pane'))
+        from unittest.mock import patch
+        from postmaster import webgui_v962_views
+        with patch.object(webgui_v962_views, "files_fragment", return_value=html):
+            rendered = webgui_v962_views.render_view(self.base, None, request(), "files")
+        self.assertEqual(rendered, html)
+        self.assertNotIn('data-v962-state-key="files-upload"', rendered)
+
+    def test_upload_and_preview_dialog_js_is_keyboard_usable(self):
+        for token in (
+            "data-pm-open-upload", "data-pm-upload-pane",
+            "data-pm-close-upload", "setUpload(root,true)",
+            "setUpload(root,false)", "event.key==='Escape'",
+            "data-pm-preview-text", "response.text()",
+            "source.textContent=", "AbortController",
+            "data-pm-preview-image", "data-pm-preview-video",
+            "media==='application/pdf'",
+        ):
+            self.assertIn(token, SCRIPT, token)
 
     def test_file_upload_keeps_owner_project_tags_and_safe_crud(self):
         html = files_fragment(self.base, request())
@@ -166,7 +198,8 @@ class FileManagerV98104Tests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("inline", response.headers["content-disposition"])
         self.assertEqual(response.headers["cache-control"], "private, no-store")
-        self.assertIn("sandbox", response.headers["content-security-policy"])
+        self.assertNotIn("sandbox", response.headers["content-security-policy"])
+        self.assertIn("frame-ancestors", response.headers["content-security-policy"])
 
     def test_search_sort_grid_and_drawer_are_wired_for_lazy_fragments(self):
         self.assertIn("pm-drive-v98104-script", SCRIPT)
