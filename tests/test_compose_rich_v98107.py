@@ -106,7 +106,7 @@ class ComposeRichEditorContracts(unittest.TestCase):
 
         page = (
             '<!doctype html><html><head><meta charset="utf-8"></head><body>'
-            '<div class="v970-workspace"><main><section id="panel-inbox">'
+            '<div class="v970-workspace"><main><section id="panel-inbox" class="tab-panel active">'
             '<details class="v971-floating-compose" open><summary>Compose</summary>'
             '<form method="post" data-v960-send="1"><input name="csrf" value="ok">'
             + EDITOR +
