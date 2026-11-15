@@ -224,7 +224,7 @@ def files_fragment(base: Any, request: Request) -> str:
     <div class="pm-drive-preview-name" data-pm-detail-name></div>
     <div class="pm-drive-preview-description" data-pm-detail-description></div>
     <div class="pm-drive-preview-stage">
-      <iframe data-pm-preview-frame title="Preview of stored file" sandbox
+      <iframe class="pm-drive-preview-frame" data-pm-preview-frame title="Preview of stored file" sandbox
         referrerpolicy="no-referrer" loading="lazy" hidden></iframe>
       <div class="pm-drive-preview-unavailable" data-pm-preview-unavailable hidden>
         In-browser preview is unavailable for this file type. The file remains
