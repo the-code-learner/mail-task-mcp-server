@@ -272,6 +272,10 @@ def _calendar_html(
 
     outside_rows: list[str] = []
     for due_local, job in outside:
+        # Historical completions belong on their original month in the grid,
+        # not in the unrelated-month backlog. Keep data/MCP history intact.
+        if str(job.get("status") or "") == "completed":
+            continue
         raw_id = str(job.get("id") or "")
         pid = str(job.get("project_id") or "") or None
         view = escape(
@@ -291,7 +295,7 @@ def _calendar_html(
     if outside_rows:
         outside_html = (
             '<div class="task-calendar-outside-list"><div class="panel-title">'
-            '<h3>Tasks outside this month</h3><span class="small muted">Kept visible so Calendar and Agenda represent the same registry rows.</span>'
+            '<h3>Tasks outside this month</h3><span class="small muted">Only unfinished tasks outside the selected month are listed here.</span>'
             f'</div>{"".join(outside_rows)}</div>'
         )
 
