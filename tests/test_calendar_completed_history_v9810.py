@@ -59,6 +59,50 @@ class CalendarHistoryTests(unittest.TestCase):
         self.assertIn("Completed", html)
         self.assertIn("opacity:.48", html)
 
+    def test_completed_tasks_are_not_repeated_in_outside_month_backlog(self):
+        from postmaster.webgui_tasks import _calendar_html
+        # Both November tasks are outside October; only the unfinished one
+        # belongs in the outside-month backlog.
+        html = _calendar_html(
+            request({"task_view": "calendar", "calendar_month": "2026-10"}),
+            [self.completed, self.pending], [], None, True,
+        )
+        self.assertIn("Tasks outside this month", html)
+        self.assertIn("Future task", html)
+        self.assertNotIn("Sent scheduled email", html)
+        self.assertIn("Only unfinished tasks outside the selected month", html)
+
+        # Opening the month of original execution still shows the completed
+        # item in the day grid with faded styling and its completion label.
+        original_month = _calendar_html(
+            request({"task_view": "calendar", "calendar_month": "2026-11"}),
+            [self.completed, self.pending], [], None, True,
+        )
+        self.assertIn("✓ Sent scheduled email", original_month)
+        self.assertIn("task-calendar-completed", original_month)
+        self.assertNotIn("Tasks outside this month", original_month)
+
+    def test_outside_month_section_disappears_if_only_completed_tasks_exist(self):
+        from postmaster.webgui_tasks import _calendar_html
+        html = _calendar_html(
+            request({"task_view": "calendar", "calendar_month": "2026-10"}),
+            [self.completed], [], None, True,
+        )
+        self.assertNotIn("Tasks outside this month", html)
+        self.assertNotIn("Sent scheduled email", html)
+
+    def test_unfinished_without_a_due_date_remains_in_outside_list(self):
+        from postmaster.webgui_tasks import _calendar_html
+        without_deadline = {**self.pending, "next_run_utc": None}
+        html = _calendar_html(
+            request({"task_view": "calendar", "calendar_month": "2026-11"}),
+            [without_deadline, self.completed], [], None, True,
+        )
+        self.assertIn("Tasks outside this month", html)
+        self.assertIn("Future task", html)
+        self.assertIn("no recorded date", html)
+        self.assertIn("✓ Sent scheduled email", html)
+
     def test_calendar_can_hide_completed_without_hiding_pending(self):
         html = task_fragment(self.base, request({
             "task_view": "calendar", "calendar_month": "2026-11",
