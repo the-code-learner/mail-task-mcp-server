@@ -100,6 +100,67 @@ class ComposeRichEditorContracts(unittest.TestCase):
         self.assertIn("role=\"status\"", EDITOR)
         self.assertIn("aria-live=\"polite\"", EDITOR)
 
+    def test_browser_preserves_selected_fonts_and_amp_code(self):
+        from test_webgui_v970 import _browser_session, _serve_browser_document
+        import time
+
+        page = (
+            '<!doctype html><html><head><meta charset="utf-8"></head><body>'
+            '<form data-v960-send="1"><div class="v986-shell">'
+            + EDITOR +
+            '</div></form>' + MAIL_SCRIPT + '</body></html>'
+        )
+        browser = _browser_session()
+        with _serve_browser_document(page) as url:
+            browser._call("Page.navigate", {"url": url})
+            script = r"""(() => {
+              const ed=document.querySelector('[data-v986-editor]');
+              if(!ed || !ed.querySelector('[data-v986-format]'))return null;
+              const fmt=ed.querySelector('[data-v986-format]');
+              fmt.value='html';fmt.dispatchEvent(new Event('change'));
+              const rich=ed.querySelector('[data-v986-rich]');
+              rich.innerHTML='<p>Hello font</p>';
+              rich.dispatchEvent(new Event('input'));
+              const textNode=rich.querySelector('p').firstChild;
+              const range=document.createRange();
+              range.selectNodeContents(textNode);
+              const sel=getSelection();sel.removeAllRanges();sel.addRange(range);
+              const font=ed.querySelector('[data-v986-rich-font]');
+              font.value='Georgia';font.dispatchEvent(new Event('change'));
+              const styled=ed.querySelector('textarea[name="body_html"]').value;
+              const codeButton=ed.querySelector('[data-v986-editor-mode="code"]');
+              codeButton.click();
+              const code=ed.querySelector('[data-v986-code]').value;
+              ed.querySelector('[data-v986-editor-mode="visual"]').click();
+              codeButton.click();
+              const codeAfter=ed.querySelector('[data-v986-code]').value;
+              fmt.value='amp';fmt.dispatchEvent(new Event('change'));
+              ed.querySelector('[data-v986-amp-insert="amp-accordion"]').click();
+              const ampBefore=ed.querySelector('[data-v986-code]').value;
+              ed.querySelector('[data-v986-editor-mode="visual"]').click();
+              const readOnly=ed.querySelector('[data-v986-rich]').contentEditable;
+              codeButton.click();
+              const ampAfter=ed.querySelector('[data-v986-code]').value;
+              return {styled,code,codeAfter,ampBefore,ampAfter,readOnly};
+            })()"""
+            data = None
+            for _ in range(100):
+                result = browser._call("Runtime.evaluate", {
+                    "expression": script, "returnByValue": True,
+                })
+                data = result.get("result", {}).get("result", {}).get("value")
+                if data is not None:
+                    break
+                time.sleep(.04)
+            self.assertIsNotNone(data)
+            self.assertIn("Georgia, serif", data["styled"])
+            self.assertIn("Hello font", data["code"])
+            self.assertEqual(data["code"], data["codeAfter"])
+            self.assertIn("<amp-accordion>", data["ampBefore"])
+            self.assertIn('custom-element="amp-accordion"', data["ampBefore"])
+            self.assertEqual(data["ampBefore"], data["ampAfter"])
+            self.assertEqual(data["readOnly"], "false")
+
     def test_no_automatic_file_attachment_selection_or_remote_validation(self):
         self.assertIn("for(const option of select.options) option.selected=false", MAIL_SCRIPT)
         self.assertNotIn("window.fetch(", MAIL_SCRIPT)
