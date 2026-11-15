@@ -48,6 +48,7 @@ from .webgui_tracking_v985 import install_tracking_v985
 from .webgui_mail_v986 import install_mail_gui_v986, modern_inbox_markup
 from .scheduled_email_integration_v98919 import install_scheduled_email_runtime_v98919
 from .generic_tracking_v983 import bind_generic_tracked_link_store_v983
+from .inline_images_v9810 import install_compose_images
 from .tracking_telemetry_v971 import (
     install_tracking_telemetry_v971,
     install_tracking_webgui_v971,
@@ -231,6 +232,9 @@ install_geoip_settings(app, _base, _webgui_v962)
 install_catalog_v985(_webgui_v962_views.v951, _webgui_v962, _core)
 install_tracking_v985(_webgui_v962_views, _webgui_v962)
 install_mail_gui_v986(_webgui_v960, _webgui_v962)
+# Postmaster Files-based inline images are delivery-hosted, with per-recipient
+# open telemetry only when tracking is enabled, preserving the no-pixel fallback.
+install_compose_images(app, _base, _v983_store)
 
 # Mail renderer composition contract: the Safe Email renderer supplies mailbox
 # data and the cached safe reader, then the modern UX transforms the resulting
