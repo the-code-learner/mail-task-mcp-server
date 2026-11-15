@@ -315,6 +315,60 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
     if(!select)return;
     select.form.querySelector('button').disabled=!select.value||select.disabled;
   });
+  // The update preview remains a CSRF-verified server-side POST, never an
+  // implicit approval. The modal only presents the pending action; execute
+  // still needs a separate, explicitly checked POST.
+  let versionModalOpener=null,versionModalOverflow=null;
+  function dismissVersionModal(){
+    const overlay=document.querySelector('[data-vconfirm-overlay]');
+    if(!overlay)return;
+    overlay.remove();
+    if(versionModalOverflow!==null){
+      document.body.style.overflow=versionModalOverflow;
+      versionModalOverflow=null;
+    }
+    if(versionModalOpener?.isConnected)versionModalOpener.focus();
+    versionModalOpener=null;
+  }
+  function displayVersionModal(markup,opener){
+    const documentFragment=new DOMParser().parseFromString(markup,'text/html');
+    const overlay=documentFragment.querySelector('[data-vconfirm-overlay]');
+    if(!overlay)throw new Error('Invalid confirmation response');
+    dismissVersionModal();
+    versionModalOpener=opener;
+    versionModalOverflow=document.body.style.overflow;
+    document.body.style.overflow='hidden';
+    document.body.appendChild(overlay);
+    const approve=overlay.querySelector('[data-vconfirm-consent]');
+    const submit=overlay.querySelector('[data-vconfirm-submit]');
+    if(approve&&submit){
+      submit.disabled=true;
+      approve.addEventListener('change',()=>{submit.disabled=!approve.checked;});
+    }
+    overlay.addEventListener('click',ev=>{
+      if(ev.target===overlay||ev.target.closest('[data-vconfirm-dismiss]')){
+        ev.preventDefault();
+        dismissVersionModal();
+      }
+    });
+    overlay.addEventListener('keydown',ev=>{
+      if(ev.key==='Escape'){
+        ev.preventDefault();dismissVersionModal();return;
+      }
+      if(ev.key!=='Tab')return;
+      const items=[...overlay.querySelectorAll(
+        'button:not([disabled]),a[href],input:not([disabled]),summary,[tabindex="0"]'
+      )].filter(el=>el.getClientRects().length);
+      if(!items.length)return;
+      const first=items[0],last=items[items.length-1];
+      if(ev.shiftKey&&document.activeElement===first){
+        ev.preventDefault();last.focus();
+      }else if(!ev.shiftKey&&document.activeElement===last){
+        ev.preventDefault();first.focus();
+      }
+    });
+    overlay.querySelector('[data-vconfirm-dismiss]')?.focus();
+  }
   document.addEventListener('submit',async ev=>{
     const form=ev.target.closest?.('form[data-v988-update],form[data-v988-channel],form[data-v988-pin]');
     if(!form)return;
@@ -339,7 +393,32 @@ VERSIONS_SCRIPT = r"""<script id="v988-live-updates">
       if(feedback)feedback.textContent='The latest release changed. Review the new version and click Update again.';
       return;
     }
-    HTMLFormElement.prototype.submit.call(form);
+    if(!clicked&&!pinning){
+      HTMLFormElement.prototype.submit.call(form);
+      return;
+    }
+    const submitter=ev.submitter||form.querySelector('button[type="submit"]');
+    if(submitter)submitter.disabled=true;
+    try{
+      const response=await fetch(form.action,{
+        method:'POST',credentials:'same-origin',cache:'no-store',
+        headers:{'X-Postmaster-Preview-Modal':'1','Accept':'text/html'},
+        body:new FormData(form)
+      });
+      const markup=await response.text();
+      if(!response.ok){
+        const parsed=new DOMParser().parseFromString(markup,'text/html');
+        const error=(parsed.querySelector('section p')||parsed.querySelector('body'))?.textContent;
+        throw new Error((error||'Preview request was rejected').trim());
+      }
+      displayVersionModal(markup,submitter);
+      if(feedback)feedback.textContent='';
+    }catch(error){
+      if(feedback)feedback.textContent='Unable to review this update: '+error.message+
+        '. No installation or restart was started.';
+    }finally{
+      if(submitter?.isConnected)submitter.disabled=false;
+    }
   },true);
   refresh();
 })();
