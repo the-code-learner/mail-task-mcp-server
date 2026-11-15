@@ -17,6 +17,16 @@ _TEXT_LIKE = {"application/json", "application/xml", "application/x-yaml", "appl
 _CSP = "default-src 'none'; sandbox; frame-ancestors 'self'"
 
 
+def preview_supported(media_type: str) -> bool:
+    """Share the exact preview allowlist with the file manager controls.
+
+    Unknown/unsafe formats get a metadata view and separate download rather
+    than being served inline with a potentially executable content type.
+    """
+    media = str(media_type or "").split(";", 1)[0].strip().lower()
+    return _preview_supported(media) or media in _TEXT_LIKE
+
+
 def preview_file(base: Any, request: Request) -> Response:
     """Inline only for safe MIME; HTML/XML/JSON always served as inert plain text."""
     file_id = str(request.path_params.get("file_id") or "").strip()
@@ -31,7 +41,7 @@ def preview_file(base: Any, request: Request) -> Response:
         media = str(meta.get("media_type") or "application/octet-stream").split(";", 1)[0].strip().lower()
     except Exception:
         return PlainTextResponse("File not found", status_code=404)
-    if not _preview_supported(media) and media not in _TEXT_LIKE:
+    if not preview_supported(media):
         return PlainTextResponse(
             "Preview unavailable for this MIME type. Use Download.",
             status_code=415,
