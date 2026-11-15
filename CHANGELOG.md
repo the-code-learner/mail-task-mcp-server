@@ -2,6 +2,18 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.7 - 2026-11-15
+
+### Rich HTML/AMP compose editor and Postmaster-hosted tracked images
+- Extends the Inbox compose toolbar with seven email-safe system font families (Arial, Verdana, Georgia, Tahoma, Trebuchet MS, Times New Roman and Courier New), fallback CSS, selectable 10–32 px sizes, headings, alignment, numbered lists, colors, highlighting, tables, links, undo/redo and formatting removal.
+- Keeps a single Visual/Code composer and the original plain/HTML/AMP MIME inputs. Visual editing preserves strictly allowlisted inline CSS and protects complex HTML or interactive AMP source from destructive round trips. Advanced AMP code helpers add carousel, accordion, selector, form and basic structure checks; a successful structure check is **not** full AMP validation.
+- HTML and AMP **Image** now upload PNG, JPEG, GIF and WebP raster files into Postmaster's existing owner/project-scoped Files store through CSRF-protected multipart POST. The same upload action remains available in both Visual and Code. AMP carousels use previously uploaded Postmaster images, not external demo URLs. Existing attachment selection remains explicit and off by default.
+- Uploaded raster images are served over HTTPS by immutable exact-incarnation Stored File capability URLs. File deletion, invalid/forged tokens, non-raster media and replaced file incarnations fail closed. No external image retrieval, separate CDN, additional volume or new dependency is required.
+- When **open tracking is enabled**, the first Postmaster image in each delivered HTML/AMP alternative is individualized for its recipient and becomes the open beacon **instead of** a redundant tracking pixel. Other images render untracked. HTML/AMP alternatives without a hosted image retain their existing pixel fallback; tracking-disabled images remain untracked. GET requests record `hosted_image` open events, while HEAD, untracked image fetches and inactive capabilities do not.
+- Retains tracking consent, sent-copy sanitization, idempotency, recipient privacy and existing reporting semantics. Image requests may be performed by mail proxies, security scanners or prefetchers; they are **not proof of human reading**.
+- New browser and end-to-end tests cover formatting, source preservation, file upload, MIME filtering, exact-file validity, tracking-on/off, AMP behavior, pixel fallback and existing attachment safeguards. The complete v9 runtime test workflow passed on the feature-PR head; release candidate still requires its own full CI on `main`.
+- Uses the existing single `main` trunk, leaving `postmaster-mcp.yml`, `requirements.txt`, MCP command count and running production instances unchanged. Beta publication and runtime activation are separate, explicitly controlled steps.
+
 ## 9.8.10-beta.6 - 2026-11-15
 
 ### Safer, clearer update confirmation popup
