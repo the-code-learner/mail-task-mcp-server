@@ -5,6 +5,7 @@ generic tracked-file capability tokens. No remote image URL or pixel is needed.
 """
 from __future__ import annotations
 
+import os
 import re
 from html import escape
 from typing import Any
@@ -22,9 +23,8 @@ _MIME = {
     "image/gif": "gif",
     "image/webp": "webp",
 }
-_TAG = re.compile(r'(<(?:amp-img|img)\b[^>]*?\bsrc\s*=\s*)(["\'])([^"\']+)\2', re.I | re.S)
+_TAG = re.compile(r'(<(?:amp-img|img)\b[^>]*?\s+src\s*=\s*)(["\'])([^"\']+)\2', re.I | re.S)
 _TOKEN = re.compile(r"glnk_[A-Za-z0-9_-]{12,140}\Z")
-_MAX_PIXEL_DIM = 15000
 
 
 def image_media_type(content: bytes) -> str | None:
@@ -41,7 +41,10 @@ def image_media_type(content: bytes) -> str | None:
 
 
 def image_url(tracked_file_url: str) -> str:
-    base = _safe_base_url() + "/t/c/"
+    public_base = _safe_base_url()
+    if not public_base.startswith("https://"):
+        raise ValueError("HTTPS is required for public email images")
+    base = public_base + "/t/c/"
     if not str(tracked_file_url).startswith(base):
         raise ValueError("unexpected public tracked-file origin")
     token = str(tracked_file_url)[len(base):]
@@ -147,7 +150,7 @@ async def upload_compose_image(base: Any, store: Any, request: Request) -> Respo
         return JSONResponse({"ok": False, "error": "Invalid or expired CSRF token"}, status_code=403,
                             headers={"Cache-Control": "no-store"})
     upload = form.get("file")
-    owner = str(form.get("owner_id") or "").strip()
+    owner = str(form.get("owner_id") or os.getenv("DEFAULT_OWNER_ID", "")).strip()
     project = str(form.get("project_id") or "").strip() or None
     if not owner or len(owner) > 160:
         return JSONResponse({"ok": False, "error": "Select an Owner before uploading an image"}, status_code=400)
@@ -158,7 +161,8 @@ async def upload_compose_image(base: Any, store: Any, request: Request) -> Respo
 
     try:
         # Resolve public image delivery before storing any bytes.
-        _safe_base_url()
+        if not _safe_base_url().startswith("https://"):
+            raise ValueError("Public email image hosting requires HTTPS")
         file_store = base.file_store()
         max_bytes = min(file_store.max_bytes, 5_000_000)
         content = await upload.read(max_bytes + 1)
@@ -181,7 +185,7 @@ async def upload_compose_image(base: Any, store: Any, request: Request) -> Respo
             "ok": True, "file_id": str(info["id"]), "image_url": url,
             "media_type": media, "size_bytes": int(info.get("size_bytes") or len(content)),
         }, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
-    except (ValueError, Exception) as exc:
+    except Exception as exc:
         # No secrets / network internals in the error response.
         message = str(exc) if isinstance(exc, ValueError) else "Image could not be stored"
         return JSONResponse({"ok": False, "error": message[:200]}, status_code=400,
