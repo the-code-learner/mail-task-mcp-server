@@ -875,7 +875,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    const amp=form.querySelector('textarea[name="body_amp"]');
    if(!visual||!code||!picker||!body||!html||!amp)return;
    const drafts={plain:body.value||'',html:html.value||'',amp:amp.value||''};
-   let format='plain',mode='visual',visualDirty=false,lockedAMP=false;
+   let format='plain',mode='visual',visualDirty=false,lockedAMP=false,lockedHTML=false;
    const say=msg=>{if(status)status.textContent=msg;};
    const read=()=>mode==='code'?code.value:
      format==='plain'?visual.innerText:visual.innerHTML;
@@ -891,7 +891,9 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      const value=drafts[format];
      body.value=format==='plain'?value:
        plain(format==='amp'?getBody(value):value);
-     html.value=format==='html'?value:'';
+     // AMP must have an HTML fallback for clients that cannot render AMP.
+     html.value=format==='html'?value:format==='amp'?
+       (drafts.html || safeHTML(escapeText(body.value).replaceAll('\n','<br>'))):'';
      amp.value=format==='amp'?value:'';
    }
    function show(){
@@ -899,19 +901,21 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        ampTemplate(safeHTML(escapeText(drafts.plain).replaceAll('\n','<br>'))));
      drafts[format]=value;
      lockedAMP=format==='amp'&&ampComplex(value);
+     lockedHTML=format==='html'&&/<(script|style|iframe|form|svg|video|audio)\b/i.test(value);
      if(mode==='visual'){
        visual.innerHTML=format==='plain'?safeHTML(escapeText(value).replaceAll('\n','<br>')):
          safeHTML(format==='amp'?getBody(value):value);
      }else code.value=value;
      visualDirty=false;
      visual.hidden=mode!=='visual';
-     visual.contentEditable=lockedAMP?'false':'true';
+     visual.contentEditable=(lockedAMP||lockedHTML)?'false':'true';
      code.hidden=mode!=='code';
      const tools=editor.querySelector('.v986-rich-toolbar');
-     if(tools)tools.hidden=mode!=='visual'||format==='plain'||lockedAMP;
+     if(tools)tools.hidden=mode!=='visual'||format==='plain'||lockedAMP||lockedHTML;
      const ampTools=editor.querySelector('[data-v986-amp-toolbar]');
      if(ampTools)ampTools.hidden=mode!=='code'||format!=='amp';
      if(lockedAMP && mode==='visual')say('This AMP document has interactive components: Visual is read-only to protect its source. Use Code to edit.');
+     else if(lockedHTML && mode==='visual')say('Advanced HTML detected: Visual is read-only to protect its source. Use Code to edit.');
      else if(format==='amp')say('AMP snippets need valid HTTPS URLs and a compatible sender. Structure check is not full AMP validation.');
      else say('');
      editor.querySelectorAll('[data-v986-editor-mode]').forEach(btn=>{
@@ -930,24 +934,24 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
      save();mode=btn.dataset.v986EditorMode;show();save();
    }));
    visual.addEventListener('paste',ev=>{
-     if(lockedAMP)return;
+     if(lockedAMP||lockedHTML)return;
      ev.preventDefault();
      const txt=ev.clipboardData?.getData('text/plain')||'';
      document.execCommand('insertText',false,txt);
    });
-   visual.addEventListener('input',()=>{if(lockedAMP)return;visualDirty=true;save();});
+   visual.addEventListener('input',()=>{if(lockedAMP||lockedHTML)return;visualDirty=true;save();});
    code.addEventListener('input',save);
    // Preserve editor selection when the user clicks a toolbar button or select.
    editor.querySelectorAll('.v986-rich-toolbar button').forEach(btn=>btn.addEventListener('mousedown',ev=>ev.preventDefault()));
    function command(cmd,val=null){
-     if(mode!=='visual'||format==='plain'||lockedAMP)return;
+     if(mode!=='visual'||format==='plain'||lockedAMP||lockedHTML)return;
      visual.focus();
      document.execCommand('styleWithCSS',false,true);
      document.execCommand(cmd,false,val);
      visualDirty=true;save();
    }
    function selectedStyle(property,value){
-     if(mode!=='visual'||format==='plain'||lockedAMP)return;
+     if(mode!=='visual'||format==='plain'||lockedAMP||lockedHTML)return;
      const sel=window.getSelection();
      if(!sel||sel.rangeCount===0||sel.isCollapsed||!visual.contains(sel.getRangeAt(0).commonAncestorContainer)){
        say('Select text inside the editor before changing font or size.');return;
