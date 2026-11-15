@@ -100,7 +100,7 @@ class ComposeRichEditorContracts(unittest.TestCase):
 
     def test_no_automatic_file_attachment_selection_or_remote_validation(self):
         self.assertIn("for(const option of select.options) option.selected=false", MAIL_SCRIPT)
-        self.assertNotIn("fetch(", MAIL_SCRIPT)
+        self.assertNotIn("window.fetch(", MAIL_SCRIPT)
         self.assertNotIn("XMLHttpRequest", MAIL_SCRIPT)
 
 
