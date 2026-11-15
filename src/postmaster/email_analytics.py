@@ -447,20 +447,33 @@ class EmailAnalyticsStore:
             if amp is not None:
                 amp = amp.replace(key, escape(value, quote=True))
 
+        # Hosted images serve as the open beacon; a pixel remains as fallback.
+        from .inline_images_v9810 import personalize_images
+        html, hosted_html = personalize_images(
+            html, str(delivery["tracking_token"]), tracking=track_opens,
+        )
+        hosted_amp = False
+        if amp is not None:
+            amp, hosted_amp = personalize_images(
+                amp, str(delivery["tracking_token"]), tracking=track_opens,
+            )
+
         if track_opens:
             pixel = self.tracking_pixel_url(delivery)
             html_fragment = (
                 f'<img src="{escape(pixel, quote=True)}" width="1" height="1" '
                 'alt="" style="display:block;width:1px;height:1px;opacity:0;border:0" />'
             )
-            html = _replace_ci_before_close(html, html_fragment)
+            if not hosted_html:
+                html = _replace_ci_before_close(html, html_fragment)
 
             if amp is not None:
                 amp_fragment = (
                     f'<amp-img src="{escape(pixel, quote=True)}" width="1" height="1" '
                     'alt="" style="opacity:0"></amp-img>'
                 )
-                amp = _replace_ci_before_close(amp, amp_fragment)
+                if not hosted_amp:
+                    amp = _replace_ci_before_close(amp, amp_fragment)
 
         return html, amp
 
@@ -535,6 +548,24 @@ class EmailAnalyticsStore:
         return self._record_delivery_event(
             delivery,
             event_type="pixel",
+            user_agent=user_agent,
+            client_ip=client_ip,
+            country_code=country_code,
+        )
+
+    def record_inline_image_open(
+        self,
+        token: str,
+        *,
+        user_agent: str = "",
+        client_ip: str = "",
+        country_code: str = "",
+    ) -> dict[str, Any]:
+        """Record a hosted, per-recipient image fetch as an open event."""
+        delivery = self.get_delivery_by_tracking_token(token)
+        return self._record_delivery_event(
+            delivery,
+            event_type="hosted_image",
             user_agent=user_agent,
             client_ip=client_ip,
             country_code=country_code,
