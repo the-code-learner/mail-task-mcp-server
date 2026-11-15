@@ -64,10 +64,22 @@ def _parse_utc(value: Any) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _calendar_event_time(job: dict[str, Any]) -> datetime | None:
+    """Completed one-shot tasks lose next_run_utc; use the recorded execution."""
+    if str(job.get("status") or "") == "completed":
+        return _parse_utc(job.get("last_run_utc")) or _parse_utc(job.get("updated_at"))
+    return _parse_utc(job.get("next_run_utc"))
+
+
+def _calendar_event_class(job: dict[str, Any]) -> str:
+    return " task-calendar-completed" if job.get("status") == "completed" else ""
+
+
 def _view_extras(request: Request, show_completed: bool) -> dict[str, str | None]:
     view = _task_view(request)
     return {
-        "show_completed": "1" if show_completed else None,
+        "show_completed": "1" if show_completed and view != "calendar" else None,
+        "hide_completed": "1" if not show_completed and view == "calendar" else None,
         "task_view": "calendar" if view == "calendar" else None,
         "calendar_month": (
             request.query_params.get("calendar_month") if view == "calendar" else None
@@ -170,7 +182,7 @@ def _calendar_html(
     by_day: dict[Any, list[tuple[datetime, dict[str, Any]]]] = {}
     outside: list[tuple[datetime | None, dict[str, Any]]] = []
     for job in jobs:
-        due_utc = _parse_utc(job.get("next_run_utc"))
+        due_utc = _calendar_event_time(job)
         if due_utc is None:
             outside.append((None, job))
             continue
@@ -183,7 +195,10 @@ def _calendar_html(
         rows.sort(key=lambda pair: pair[0])
     outside.sort(key=lambda pair: (pair[0] is None, pair[0] or datetime.max.replace(tzinfo=zone)))
 
-    extras = {"show_completed": "1" if show_completed else None, "task_view": "calendar"}
+    extras = {
+        "show_completed": None, "hide_completed": None if show_completed else "1",
+        "task_view": "calendar",
+    }
     prev_url = escape(
         dashboard_url(request, tab="scheduler", project=project, extra={**extras, "calendar_month": _month_value(year, month, -1)}),
         quote=True,
@@ -201,7 +216,8 @@ def _calendar_html(
     cells: list[str] = []
     weeks = calendar_module.Calendar(firstweekday=0).monthdatescalendar(year, month)
     base_extras = {
-        "show_completed": "1" if show_completed else None,
+        "show_completed": None,
+        "hide_completed": None if show_completed else "1",
         "task_view": "calendar",
         "calendar_month": month_value,
     }
@@ -222,9 +238,15 @@ def _calendar_html(
                 )
                 title = escape(str(job.get("title") or "Untitled task"))
                 project_name = escape(project_names.get(pid or "", pid or "global"))
+                finished = job.get("status") == "completed"
+                mark = "✓ " if finished else ""
+                label = "Completed" if finished else "Scheduled"
                 events.append(
-                    f'<a class="task-calendar-event {project_color_class(pid)}" href="{view}">'
-                    f'{title}<small>{due_local:%H:%M} · {project_name}</small></a>'
+                    f'<a class="task-calendar-event {project_color_class(pid)}{_calendar_event_class(job)}" '
+                    f'data-task-status="{escape(str(job.get("status") or ""), quote=True)}" '
+                    f'aria-label="{escape(label + ": " + str(job.get("title") or "Untitled task"), quote=True)}" '
+                    f'href="{view}">{mark}{title}'
+                    f'<small>{due_local:%H:%M} · {project_name} · {label}</small></a>'
                 )
             date_label = f"{day.day}"
             if day.month != month:
@@ -242,7 +264,8 @@ def _calendar_html(
             quote=True,
         )
         title = project_label_html(str(job.get("title") or "Untitled task"), pid)
-        due_label = due_local.strftime("%Y-%m-%d %H:%M") if due_local else "no next run"
+        finished = job.get("status") == "completed"
+        due_label = (("Completed " if finished else "") + due_local.strftime("%Y-%m-%d %H:%M")) if due_local else "no recorded date"
         outside_rows.append(
             f'<div class="row"><a href="{view}" style="text-decoration:none">{title}</a>'
             f'<span class="small muted mono">{escape(due_label)}</span></div>'
@@ -256,18 +279,22 @@ def _calendar_html(
         )
 
     legend = project_legend_html(projects, [job.get("project_id") for job in jobs])
-    return f'''<div class="task-calendar-toolbar"><div><div class="task-calendar-month">{escape(calendar_module.month_name[month])} {year}</div><div class="small muted">Current registry next-run timestamps · {TASK_CALENDAR_TIMEZONE}</div></div>
+    return f'''<div class="task-calendar-toolbar"><div><div class="task-calendar-month">{escape(calendar_module.month_name[month])} {year}</div><div class="small muted">Scheduled: next run · Completed: last recorded execution · {TASK_CALENDAR_TIMEZONE}</div></div>
 <div class="task-calendar-controls"><a href="{prev_url}"><button type="button">‹</button></a><a href="{today_url}"><button type="button">Today</button></a><a href="{next_url}"><button type="button">›</button></a></div></div>
 <div class="task-calendar-shell"><div class="task-calendar-head">{''.join(f'<div>{name}</div>' for name in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun'))}</div><div class="task-calendar-grid">{''.join(cells)}</div></div>
 {legend}
-<p class="small muted"><strong>Registry only:</strong> Calendar places each task at its stored <code>next_run_utc</code>. It does not synthesize future executions or imply an autonomous worker.</p>
+<p class="small muted"><strong>Registry history:</strong> Upcoming tasks use stored <code>next_run_utc</code>; completed tasks use their recorded last execution. It does not synthesize future executions or imply an autonomous worker.</p>
 {outside_html}'''
 
 
 def task_fragment(base: Any, request: Request) -> str:
     project = selected_project(request)
-    show_completed = request.query_params.get("show_completed") == "1"
     view_mode = _task_view(request)
+    show_completed = (
+        request.query_params.get("hide_completed") != "1"
+        if view_mode == "calendar"
+        else request.query_params.get("show_completed") == "1"
+    )
     result = base._safe_call(base.scheduler().list_jobs, project_id=project, limit=1000)
     all_jobs = result if isinstance(result, list) else []
     visible = all_jobs if show_completed else [job for job in all_jobs if str(job.get("status") or "") != "completed"]
@@ -284,7 +311,11 @@ def task_fragment(base: Any, request: Request) -> str:
     toggle = escape(
         dashboard_url(
             request, tab="scheduler", project=project,
-            extra={**base_extras, "show_completed": None if show_completed else "1"},
+            extra={
+                **base_extras,
+                "show_completed": (None if show_completed else "1") if view_mode != "calendar" else None,
+                "hide_completed": (None if not show_completed else "1") if view_mode == "calendar" else None,
+            },
         ),
         quote=True,
     )
@@ -325,7 +356,7 @@ def task_fragment(base: Any, request: Request) -> str:
     agenda_url = escape(
         dashboard_url(
             request, tab="scheduler", project=project,
-            extra={"show_completed": "1" if show_completed else None},
+            extra={"show_completed": "1" if show_completed and view_mode != "calendar" else None},
         ),
         quote=True,
     )
@@ -334,7 +365,8 @@ def task_fragment(base: Any, request: Request) -> str:
         dashboard_url(
             request, tab="scheduler", project=project,
             extra={
-                "show_completed": "1" if show_completed else None,
+                "show_completed": None,
+                "hide_completed": None if show_completed or view_mode != "calendar" else "1",
                 "task_view": "calendar",
                 "calendar_month": f"{year:04d}-{month:02d}",
             },
@@ -344,7 +376,16 @@ def task_fragment(base: Any, request: Request) -> str:
     legend = project_legend_html(projects, [job.get("project_id") for job in visible])
     agenda = f'''{legend}<div class="scroll"><table><thead><tr><th>Task</th><th>Owner / project</th><th>Type</th><th>Status</th><th>Due / next UTC</th><th></th></tr></thead><tbody>{''.join(rows) or '<tr><td colspan="6" class="muted">No tasks in this view</td></tr>'}</tbody></table></div>'''
     content = _calendar_html(request, visible, projects, project, show_completed) if view_mode == "calendar" else agenda
-    return f'''<section class="tab-panel" id="panel-scheduler" data-panel="scheduler"><div class="grid">
+    return f'''<section class="tab-panel" id="panel-scheduler" data-panel="scheduler">
+<style>
+#panel-scheduler .task-calendar-event.task-calendar-completed {{
+  opacity:.48;filter:saturate(.55);border-style:dashed;
+}}
+#panel-scheduler .task-calendar-event.task-calendar-completed:hover,
+#panel-scheduler .task-calendar-event.task-calendar-completed:focus-visible {{
+  opacity:.85;filter:saturate(.85);
+}}
+</style><div class="grid">
 {_detail(base, request, project, show_completed)}{_editor(base, request, project, show_completed)}
 <section class="card wide"><div class="panel-title"><h2>Task registry</h2><div class="row"><div class="task-view-toggle"><a class="{"active" if view_mode == "agenda" else ""}" href="{agenda_url}">Agenda</a><a class="{"active" if view_mode == "calendar" else ""}" href="{calendar_url}">Calendar</a></div><span class="badge">{escape(count)}</span><a href="{toggle}"><button type="button">{escape(toggle_label)}</button></a></div></div>
 {filter_html}

@@ -33,7 +33,7 @@ def week_calendar_html(tasks: Any, request: Request,
     events: dict[date, list[tuple[datetime, dict[str, Any]]]] = {}
     outside: list[dict[str, Any]] = []
     for job in jobs:
-        utc = tasks._parse_utc(job.get("next_run_utc"))
+        utc = tasks._calendar_event_time(job)
         if utc is None:
             outside.append(job)
             continue
@@ -43,7 +43,7 @@ def week_calendar_html(tasks: Any, request: Request,
         else:
             outside.append(job)
     extras = {
-        "show_completed": "1" if show_completed else None,
+        "show_completed": None, "hide_completed": None if show_completed else "1",
         "task_view": "calendar", "calendar_mode": "week",
     }
     def link(value: date | None) -> str:
@@ -55,7 +55,7 @@ def week_calendar_html(tasks: Any, request: Request,
         return escape(dashboard_url(
             request, tab="scheduler", project=project,
             extra={
-                "show_completed": "1" if show_completed else None,
+                "show_completed": None, "hide_completed": None if show_completed else "1",
                 "task_view": "calendar", "calendar_month": f"{start.year:04d}-{start.month:02d}",
                 "calendar_mode": None, "calendar_week": None,
             },
@@ -73,9 +73,14 @@ def week_calendar_html(tasks: Any, request: Request,
             ),quote=True)
             title = escape(str(item.get("title") or "Untitled task"))
             project_name = escape(proj.get(pid or "",pid or "global"))
+            finished = item.get("status") == "completed"
+            label = "Completed" if finished else "Scheduled"
             item_html.append(
-                f'<a class="task-calendar-event {project_color_class(pid)}" href="{target}">'
-                f'{title}<small>{when:%H:%M} · {project_name}</small></a>'
+                f'<a class="task-calendar-event {project_color_class(pid)}{tasks._calendar_event_class(item)}" '
+                f'data-task-status="{escape(str(item.get("status") or ""), quote=True)}" '
+                f'aria-label="{escape(label + ": " + str(item.get("title") or "Untitled task"), quote=True)}" '
+                f'href="{target}">{"✓ " if finished else ""}{title}'
+                f'<small>{when:%H:%M} · {project_name} · {label}</small></a>'
             )
         classes = "task-calendar-day" + (" today" if day == today else "")
         cells.append(
@@ -86,7 +91,7 @@ def week_calendar_html(tasks: Any, request: Request,
     return (
         '<div class="task-calendar-toolbar"><div>'
         f'<div class="task-calendar-month">{start:%d %b} – {finish:%d %b %Y}</div>'
-        f'<p class="small muted">Real task registry due dates · {escape(tasks.TASK_CALENDAR_TIMEZONE)}</p>'
+        f'<p class="small muted">Scheduled dates and completed executions · {escape(tasks.TASK_CALENDAR_TIMEZONE)}</p>'
         '</div><div class="task-calendar-controls">'
         f'<a href="{month_link()}"><button type="button">Month</button></a>'
         '<button type="button" aria-current="true">Week</button>'
@@ -101,7 +106,7 @@ def week_calendar_html(tasks: Any, request: Request,
         + '</div></div>'
         + project_legend_html(projects,[job.get("project_id") for job in jobs])
         + f'<p class="small muted">{len(outside)} other tasks are outside this week or have no next-run date. '
-        'The calendar never synthesizes autonomous future runs.</p>'
+        'No future task runs are invented.</p>'
     )
 
 
@@ -120,7 +125,8 @@ def install_week_calendar_v984(tasks: Any) -> None:
         extra = {
             "task_view": "calendar", "calendar_mode": "week",
             "calendar_week": date(year,month,1).isoformat(),
-            "show_completed": "1" if show_completed else None,
+            "show_completed": None,
+            "hide_completed": None if show_completed else "1",
             "calendar_month": f"{year:04d}-{month:02d}",
         }
         week_link = escape(dashboard_url(
