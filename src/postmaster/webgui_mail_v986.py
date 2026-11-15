@@ -61,9 +61,10 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <label class="v986-toolbar-color" title="Highlight color">Mark <input type="color" data-v986-rich-color="hiliteColor" value="#fff1a8" aria-label="Highlight color"></label>
 <button type="button" data-v986-rich-command="createLink" title="Insert link">Link</button>
 <button type="button" data-v986-rich-insert="table" title="Insert a table">Table</button>
-<button type="button" data-v986-rich-insert="image" title="Insert HTTPS image markup in Code without remote preview">Image</button>
+<button type="button" data-v986-rich-insert="image" title="Upload an image to Postmaster Files">Image</button>
 <button type="button" data-v986-rich-command="removeFormat" title="Clear text formatting">Clear</button></div>
 </div>
+<input type="file" class="v986-image-input" data-v986-rich-image-file accept="image/png,image/jpeg,image/gif,image/webp" aria-label="Upload image into Postmaster Files" hidden>
 <div class="v986-amp-toolbar" data-v986-amp-toolbar hidden role="toolbar" aria-label="AMP component snippets">
 <span>AMP snippets</span>
 <button type="button" data-v986-amp-insert="amp-img">Image</button>
@@ -83,8 +84,8 @@ EDITOR = """<div class="wide v986-composer-editor" data-v986-editor>
 <textarea name="body_amp"></textarea></div>
 <p class="v986-editor-status" data-v986-editor-status role="status" aria-live="polite"></p>
 <p class="v986-editor-hint">Fonts are limited to email-safe families with fallbacks.
-HTML/AMP code is preserved until Visual is actually edited. AMP snippets require
-valid HTTPS resources and compatible sender accounts; structure checks are not full AMP validation.</p>
+Images are stored in Postmaster Files, and may replace the tracking pixel when tracking is on.
+AMP snippets require a compatible sender; structure checks are not full validation.</p>
 </div>"""
 
 
@@ -449,6 +450,7 @@ MAIL_STYLE = r"""
 .v986-rich-surface img{max-width:100%;height:auto}
 .v986-editor-status{font-size:11px;color:var(--v970-muted);margin:0}
 .v986-editor-status:empty{display:none}
+.v986-image-input{display:none!important}
 .v986-rich-surface[contenteditable="false"]{cursor:not-allowed;opacity:.85}
 @media(max-width:620px){.v986-toolbar-group{border-right:0}.v986-rich-toolbar select{min-width:0}}
 .v986-rich-surface,.v986-code-surface{min-height:175px;width:100%;padding:12px;
@@ -978,21 +980,65 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
        command(cmd,val);
      }else command(cmd);
    }));
+   const imagePicker=editor.querySelector('[data-v986-rich-image-file]');
+   const pickImage=()=>{if(format==='plain'){say('Choose HTML or AMP first.');return;}imagePicker?.click();};
+   imagePicker?.addEventListener('change',async()=>{
+     const file=imagePicker.files?.[0];
+     imagePicker.value='';
+     if(!file)return;
+     const csrf=form.querySelector('input[name="csrf"]')?.value||'';
+     if(!csrf){say('Composer session expired. Reload the page.');return;}
+     const scope=name=>document.querySelector('[data-v984-scope="'+name+'"]')?.value||'';
+     const params=new URLSearchParams(location.search);
+     const owner=scope('owner_id')||params.get('owner_id')||'';
+     const project=scope('project_id')||params.get('project_id')||params.get('project')||'';
+     const data=new FormData();
+     data.append('csrf',csrf);
+     data.append('file',file,file.name);
+     if(owner)data.append('owner_id',owner);
+     if(project)data.append('project_id',project);
+     const targetFormat=format;
+     const dimensions=async()=>{
+       try{
+         const bitmap=await createImageBitmap(file);
+         const wh=[Math.max(1,bitmap.width),Math.max(1,bitmap.height)];
+         bitmap.close();return wh;
+       }catch(_){return [600,300];}
+     };
+     say('Uploading image to Postmaster Files…');
+     try{
+       const response=await fetch('/dashboard/compose/image/upload',{
+         method:'POST',body:data,credentials:'same-origin',headers:{'Accept':'application/json'}
+       });
+       const result=await response.json();
+       if(!response.ok||!result.ok||!/^https:\/\/[^<>"\s]+$/i.test(result.image_url||'')){
+         throw new Error(String(result.error||'Upload failed'));
+       }
+       const [width,height]=await dimensions();
+       const alt=window.prompt('Accessible description of the image',file.name)||file.name;
+       const url=escapeText(result.image_url);
+       const description=escapeText(alt.slice(0,200));
+       save();
+       if(targetFormat==='amp'&&format==='amp'){
+         const fragment='<amp-img src="'+url+'" width="'+width+'" height="'+height+
+           '" layout="responsive" alt="'+description+'"></amp-img>';
+         const source=drafts.amp||ampTemplate('');
+         const closing=source.search(/<\/body>/i);
+         drafts.amp=closing>=0?source.slice(0,closing)+'\n'+fragment+'\n'+source.slice(closing):source+'\n'+fragment;
+         mode='code';show();save();
+       }else{
+         const fragment='<p><img src="'+url+'" width="'+width+'" height="'+height+'" alt="'+description+'"></p>';
+         drafts.html=(drafts.html||'')+'\n'+fragment;
+         format='html';picker.value='html';mode='code';show();save();
+       }
+       say('Stored in Postmaster. If open tracking is enabled, this image replaces the separate pixel.');
+     }catch(error){say('Upload failed: '+String(error?.message||error).slice(0,180));}
+   });
    editor.querySelectorAll('[data-v986-rich-insert]').forEach(btn=>btn.addEventListener('click',()=>{
      if(format!=='html'||mode!=='visual')return;
      if(btn.dataset.v986RichInsert==='table'){
        command('insertHTML','<table><tbody><tr><td>Cell 1</td><td>Cell 2</td></tr><tr><td>Cell 3</td><td>Cell 4</td></tr></tbody></table><p></p>');
-     }else if(btn.dataset.v986RichInsert==='image'){
-       const url=window.prompt('Public HTTPS image URL (inserts code without loading the image)','https://');
-       if(!url||!/^https:\/\/[^<>"\s]+$/i.test(url))return;
-       const alt=window.prompt('Accessible image description','Image')||'Image';
-       save();
-       // Email image markup is code-only: an untrusted remote image must never
-       // auto-load in the editor as a side effect of opening Visual.
-       drafts.html+='\n<p><img src="'+escapeText(url)+'" alt="'+escapeText(alt.slice(0,200))+'" width="600"></p>';
-       mode='code';show();save();
-       say('Image code inserted. Visual preview stays read-only to avoid loading remote images.');
-     }
+     }else if(btn.dataset.v986RichInsert==='image')pickImage();
    }));
    const ampSnippets={
      'amp-img':{tag:'',html:'<amp-img src="https://example.com/image.jpg" width="600" height="300" layout="responsive" alt="Image description"></amp-img>'},
@@ -1003,6 +1049,7 @@ MAIL_SCRIPT = r"""<script id="v986-mail-composer">
    };
    editor.querySelectorAll('[data-v986-amp-insert]').forEach(btn=>btn.addEventListener('click',()=>{
      if(format!=='amp'||mode!=='code')return;
+     if(btn.dataset.v986AmpInsert==='amp-img'){pickImage();return;}
      const snippet=ampSnippets[btn.dataset.v986AmpInsert];
      if(!snippet)return;
      let source=code.value||ampTemplate('');
