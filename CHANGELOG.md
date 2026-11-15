@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.1 - 2026-11-15
+
+### Historical completed tasks visible in the calendar
+- Monthly and weekly task calendars now show completed jobs by default, with faded/desaturated project colors, a checkmark, a Completed label and clickable task details.
+- Completed one-time jobs are placed on the day/time of their recorded last execution (`last_run_utc`), not the cleared `next_run_utc`; when last-run data is unavailable, the last recorded update is used as an approximate fallback.
+- The Calendar offers a show/hide completed toggle. The Agenda view preserves its existing hide-completed default.
+- Changes are display-only: no scheduler data, existing task records, or historical execution dates are rewritten.
+- Adds regression tests for monthly and weekly completed-task rendering, timezone conversion, visibility toggles and existing Agenda behavior.
+- Aligns the release workflows with the single-trunk policy: betas are published only from a green `main` commit; Stable workflow skips beta VERSION values.
+- All application features of v9.8.9 Stable remain present. Portainer YAML unchanged.
+
 ## 9.8.9 - 2026-11-15
 
 ### Stable release — consolidated and verified 9.8.9 beta series

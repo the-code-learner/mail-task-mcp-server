@@ -1,0 +1,87 @@
+name: single-trunk beta auto dispatch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: beta-trunk-dispatch
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Identify explicit prerelease version
+        id: version
+        shell: bash
+        run: |
+          set -eu
+          VERSION="$(cat VERSION)"
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-beta\.[1-9][0-9]*$ ]]; then
+            echo 'is_beta=true' >> "$GITHUB_OUTPUT"
+            echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            grep -q "^## $VERSION - " CHANGELOG.md
+          else
+            echo 'is_beta=false' >> "$GITHUB_OUTPUT"
+            echo "Not a beta VERSION; stable release workflow handles it."
+          fi
+      - name: Wait for matching main commit CI success
+        if: steps.version.outputs.is_beta == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          for n in $(seq 1 70); do
+            CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+            if [ "$CURRENT" != "$GITHUB_SHA" ]; then
+              echo "Main advanced; this beta candidate is stale, refusing dispatch."
+              exit 1
+            fi
+            gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > /tmp/trunk-checks.json
+            CHECK="$(python - <<'PY'
+          import json
+          runs=json.load(open('/tmp/trunk-checks.json',encoding='utf-8')).get('check_runs',[])
+          tests=[r for r in runs if r.get('name')=='v9 runtime tests / test']
+          if any(r.get('conclusion')=='success' for r in tests):
+              print('success')
+          elif any(r.get('conclusion') in ('failure','cancelled','timed_out','action_required') for r in tests):
+              print('failure')
+          else:
+              print('pending')
+          PY
+            )"
+            if [ "$CHECK" = success ]; then
+              echo "Required exact-commit regression CI succeeded."
+              break
+            fi
+            if [ "$CHECK" = failure ] || [ "$n" -eq 70 ]; then
+              echo "CI failed or not completed; refusing beta publication." >&2
+              exit 1
+            fi
+            sleep 15
+          done
+      - name: Dispatch official beta release on current main
+        if: steps.version.outputs.is_beta == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          CURRENT="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq '.object.sha')"
+          test "$CURRENT" = "$GITHUB_SHA"
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION already published; avoiding duplicate."
+            exit 0
+          fi
+          gh workflow run beta-release.yml --ref main -f version="$VERSION"
+          echo "Official beta release requested for v$VERSION on main."
