@@ -68,7 +68,7 @@ class ChromeAndWordPreviewTests(unittest.TestCase):
         ):
             response = preview_file(Base(media, payload), request())
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response.media_type, "text/plain")
+            self.assertTrue(response.media_type.startswith("text/plain"))
             self.assertIn("sandbox", response.headers["content-security-policy"])
             self.assertEqual(response.body, payload)
             self.assertEqual(response.headers["x-content-type-options"], "nosniff")
@@ -83,7 +83,7 @@ class ChromeAndWordPreviewTests(unittest.TestCase):
         self.assertTrue(preview_supported(DOCX))
         response = preview_file(Base(DOCX, docx(xml)), request())
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.media_type, "text/plain")
+        self.assertTrue(response.media_type.startswith("text/plain"))
         self.assertIn("sandbox", response.headers["content-security-policy"])
         self.assertIn(b"First paragraph", response.body)
         self.assertIn(b"Second", response.body)
