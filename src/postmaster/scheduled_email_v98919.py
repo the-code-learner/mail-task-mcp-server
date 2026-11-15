@@ -175,12 +175,12 @@ class ScheduledEmailService:
                 (id,owner_id,project_id,title,description,action_type,
                  execution_profile_id,payload_json,schedule_type,schedule_value,
                  timezone,approval_mode,status,next_run_utc,created_at,updated_at,
-                 last_run_utc,last_error)
-                VALUES (?,?,?,?,?,?,NULL,?,'once',? ,?,'automatic','scheduled',?,?,?,NULL,NULL)""",
+                 last_run_utc,last_error,scheduled_for_utc,completed_at_utc)
+                VALUES (?,?,?,?,?,?,NULL,?,'once',? ,?,'automatic','scheduled',?,?,?,NULL,NULL,?,NULL)""",
                 (job_id, owner, project, "Send email: " + frozen["subject"][:180],
                  "Authorized scheduled email, one attempt only", ACTION,
                  json.dumps(payload, ensure_ascii=False), send_at, timezone_name,
-                 due.isoformat(), now, now),
+                 due.isoformat(), now, now, due.isoformat()),
             )
             self.scheduler._record(conn, job_id, "email_send_scheduled", {
                 "account_id": aid, "next_run_utc": due.isoformat(),
@@ -223,8 +223,11 @@ class ScheduledEmailService:
             conn.execute("BEGIN IMMEDIATE")
             now = datetime.now(timezone.utc).isoformat()
             conn.execute(
-                "UPDATE jobs SET status=?,next_run_utc=NULL,last_error=?,updated_at=? WHERE id=? AND status='sending'",
-                ("completed" if success else "failed", error[:800] or None, now, job_id),
+                "UPDATE jobs SET status=?,next_run_utc=NULL,last_error=?,updated_at=?,"
+                "completed_at_utc=CASE WHEN ? THEN ? ELSE completed_at_utc END "
+                "WHERE id=? AND status='sending'",
+                ("completed" if success else "failed", error[:800] or None, now,
+                 int(success), now, job_id),
             )
             self.scheduler._record(conn, job_id, "email_send_completed" if success else "email_send_failed",
                                    {"at_utc": now, "error": error[:250] if error else None})

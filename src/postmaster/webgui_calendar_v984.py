@@ -75,12 +75,17 @@ def week_calendar_html(tasks: Any, request: Request,
             project_name = escape(proj.get(pid or "",pid or "global"))
             finished = item.get("status") == "completed"
             label = "Completed" if finished else "Scheduled"
+            completed_at = tasks._parse_utc(item.get("completed_at_utc"))
+            completion_note = (
+                f" · done {completed_at.astimezone(zone):%H:%M}"
+                if finished and completed_at else ""
+            )
             item_html.append(
                 f'<a class="task-calendar-event {project_color_class(pid)}{tasks._calendar_event_class(item)}" '
                 f'data-task-status="{escape(str(item.get("status") or ""), quote=True)}" '
                 f'aria-label="{escape(label + ": " + str(item.get("title") or "Untitled task"), quote=True)}" '
                 f'href="{target}">{"✓ " if finished else ""}{title}'
-                f'<small>{when:%H:%M} · {project_name} · {label}</small></a>'
+                f'<small>{when:%H:%M} · {project_name} · {label}{completion_note}</small></a>'
             )
         classes = "task-calendar-day" + (" today" if day == today else "")
         cells.append(

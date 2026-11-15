@@ -23,7 +23,8 @@ from .webgui_helpers import (
 TASK_DETAIL_FIELDS = (
     "id", "owner_id", "project_id", "title", "description", "action_type",
     "execution_profile_id", "schedule_type", "schedule_value", "timezone",
-    "approval_mode", "status", "next_run_utc", "created_at", "updated_at",
+    "approval_mode", "status", "next_run_utc", "scheduled_for_utc",
+    "completed_at_utc", "created_at", "updated_at",
     "last_run_utc", "last_error", "payload",
 )
 TASK_CALENDAR_TIMEZONE = "Europe/Rome"
@@ -65,9 +66,18 @@ def _parse_utc(value: Any) -> datetime | None:
 
 
 def _calendar_event_time(job: dict[str, Any]) -> datetime | None:
-    """Completed one-shot tasks lose next_run_utc; use the recorded execution."""
+    """Use the original planned date for one-shot completions, not a later update.
+
+    Legacy rows without a recoverable original deadline still use the previous
+    calendar's last-run fallback. Updated_at is a final best-effort hint only.
+    """
     if str(job.get("status") or "") == "completed":
-        return _parse_utc(job.get("last_run_utc")) or _parse_utc(job.get("updated_at"))
+        return (
+            _parse_utc(job.get("scheduled_for_utc"))
+            or _parse_utc(job.get("last_run_utc"))
+            or _parse_utc(job.get("completed_at_utc"))
+            or _parse_utc(job.get("updated_at"))
+        )
     return _parse_utc(job.get("next_run_utc"))
 
 
@@ -241,12 +251,17 @@ def _calendar_html(
                 finished = job.get("status") == "completed"
                 mark = "✓ " if finished else ""
                 label = "Completed" if finished else "Scheduled"
+                actually_done = _parse_utc(job.get("completed_at_utc"))
+                completion_note = (
+                    f" · done {actually_done.astimezone(zone):%H:%M}"
+                    if finished and actually_done else ""
+                )
                 events.append(
                     f'<a class="task-calendar-event {project_color_class(pid)}{_calendar_event_class(job)}" '
                     f'data-task-status="{escape(str(job.get("status") or ""), quote=True)}" '
                     f'aria-label="{escape(label + ": " + str(job.get("title") or "Untitled task"), quote=True)}" '
                     f'href="{view}">{mark}{title}'
-                    f'<small>{due_local:%H:%M} · {project_name} · {label}</small></a>'
+                    f'<small>{due_local:%H:%M} · {project_name} · {label}{completion_note}</small></a>'
                 )
             date_label = f"{day.day}"
             if day.month != month:
@@ -265,7 +280,9 @@ def _calendar_html(
         )
         title = project_label_html(str(job.get("title") or "Untitled task"), pid)
         finished = job.get("status") == "completed"
-        due_label = (("Completed " if finished else "") + due_local.strftime("%Y-%m-%d %H:%M")) if due_local else "no recorded date"
+        due_label = (("Scheduled " if finished else "") + due_local.strftime("%Y-%m-%d %H:%M")) if due_local else "no recorded date"
+        if finished and _parse_utc(job.get("completed_at_utc")):
+            due_label += " · Completed " + _parse_utc(job.get("completed_at_utc")).astimezone(zone).strftime("%Y-%m-%d %H:%M")
         outside_rows.append(
             f'<div class="row"><a href="{view}" style="text-decoration:none">{title}</a>'
             f'<span class="small muted mono">{escape(due_label)}</span></div>'
@@ -279,11 +296,11 @@ def _calendar_html(
         )
 
     legend = project_legend_html(projects, [job.get("project_id") for job in jobs])
-    return f'''<div class="task-calendar-toolbar"><div><div class="task-calendar-month">{escape(calendar_module.month_name[month])} {year}</div><div class="small muted">Scheduled: next run · Completed: last recorded execution · {TASK_CALENDAR_TIMEZONE}</div></div>
+    return f'''<div class="task-calendar-toolbar"><div><div class="task-calendar-month">{escape(calendar_module.month_name[month])} {year}</div><div class="small muted">Scheduled: next run · Completed: original scheduled time · {TASK_CALENDAR_TIMEZONE}</div></div>
 <div class="task-calendar-controls"><a href="{prev_url}"><button type="button">‹</button></a><a href="{today_url}"><button type="button">Today</button></a><a href="{next_url}"><button type="button">›</button></a></div></div>
 <div class="task-calendar-shell"><div class="task-calendar-head">{''.join(f'<div>{name}</div>' for name in ('Mon','Tue','Wed','Thu','Fri','Sat','Sun'))}</div><div class="task-calendar-grid">{''.join(cells)}</div></div>
 {legend}
-<p class="small muted"><strong>Registry history:</strong> Upcoming tasks use stored <code>next_run_utc</code>; completed tasks use their recorded last execution. It does not synthesize future executions or imply an autonomous worker.</p>
+<p class="small muted"><strong>Registry history:</strong> Upcoming tasks use stored <code>next_run_utc</code>; completed tasks use their original scheduled time when available. It does not synthesize future executions or imply an autonomous worker.</p>
 {outside_html}'''
 
 
