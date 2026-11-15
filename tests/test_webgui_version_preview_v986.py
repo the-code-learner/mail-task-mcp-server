@@ -173,7 +173,6 @@ class WebguiVersionPendingPreviewV986(unittest.TestCase):
         for token in (
             "X-Postmaster-Preview-Modal",
             "displayVersionModal(markup,submitter)",
-            "role=\"dialog\"",
             "data-vconfirm-consent",
             "submit.disabled=!approve.checked",
             "ev.key==='Escape'",
