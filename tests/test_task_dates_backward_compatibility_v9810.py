@@ -88,7 +88,7 @@ class BackwardCompatibleDates(unittest.TestCase):
             owner_id="tester", project_id="tinkerer", title="Preserve due",
             description="", action_type="reminder", execution_profile_id=None,
             payload={}, schedule_type="once", schedule_value=due,
-            timezone="Europe/Rome", approval_mode="manual",
+            timezone="Europe/Rome", approval_mode="manual_only",
         )
         self.assertEqual(task["scheduled_for_utc"], task["next_run_utc"])
         self.assertIsNone(task["completed_at_utc"])
