@@ -63,12 +63,10 @@ STYLE = r'''
 #panel-files .pm-drive-empty{padding:35px 16px;text-align:center;font-size:12px;color:var(--muted)}
 #panel-files .pm-drive-foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:13px;font-size:11px;color:var(--muted)}
 #panel-files .pm-drive-legend{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0 0 12px}
-#panel-files .pm-drive-upload{position:relative}
-#panel-files .pm-drive-upload summary{list-style:none}
-#panel-files .pm-drive-upload summary::-webkit-details-marker{display:none}
+#panel-files .pm-drive-head [data-pm-open-upload]{flex:0 0 auto}
 #panel-files .pm-drive-upload-shade,#panel-files .pm-drive-preview-shade{position:fixed;inset:0;background:#080f1980;z-index:1150}
 #panel-files .pm-drive-upload-pane,#panel-files .pm-drive-preview-pane{position:fixed;top:0;right:0;height:100vh;height:100dvh;width:min(460px,100vw);overflow-y:auto;background:var(--card);border-left:1px solid var(--line);box-shadow:-12px 0 40px #0006;padding:23px;z-index:1160;color:var(--text)}
-#panel-files .pm-drive-preview-pane{width:min(560px,100vw)}
+#panel-files .pm-drive-preview-pane{width:min(660px,100vw)}
 #panel-files .pm-drive-upload-pane header,#panel-files .pm-drive-preview-pane header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}
 #panel-files .pm-drive-upload-pane h3,#panel-files .pm-drive-preview-pane h3{margin:0;font-size:19px}
 #panel-files .pm-drive-close{border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:8px;min-width:35px;min-height:35px;padding:6px 10px}
@@ -80,10 +78,17 @@ STYLE = r'''
 #panel-files .pm-drive-field label{display:block;margin-bottom:6px;font-size:11px;color:var(--muted);font-weight:650}
 #panel-files .pm-drive-field select,#panel-files .pm-drive-field input{box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:37px;padding:8px 10px;border:1px solid var(--line);background:var(--card2);color:var(--text);border-radius:8px}
 #panel-files .pm-drive-upload-submit{width:100%;margin-top:10px;justify-content:center}
-#panel-files .pm-drive-preview-name{font-size:13px;font-weight:800;overflow-wrap:anywhere;margin:0 0 4px}
-#panel-files .pm-drive-preview-description{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:0 0 14px}
+#panel-files .pm-drive-preview-name{font-size:14px;font-weight:800;overflow-wrap:anywhere;margin:0 0 4px}
+#panel-files .pm-drive-preview-description{font-size:11px;color:var(--muted);overflow-wrap:anywhere;margin:0 0 14px;max-height:5em;overflow-y:auto}
 #panel-files .pm-drive-preview-stage{display:flex;align-items:center;justify-content:center;min-height:285px;background:var(--card2);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin:14px 0}
-#panel-files .pm-drive-preview-frame{width:100%;height:clamp(320px,52vh,650px);border:0;display:block;background:#fff}
+#panel-files .pm-drive-preview-frame{width:100%;height:clamp(340px,63vh,740px);border:0;display:block;background:#fff}
+#panel-files .pm-drive-preview-text{display:block;box-sizing:border-box;width:100%;height:clamp(280px,53vh,650px);overflow:auto;padding:16px;margin:0;background:var(--card2);color:var(--text);font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2;user-select:text}
+#panel-files .pm-drive-preview-image{max-width:100%;max-height:65vh;object-fit:contain;margin:auto}
+#panel-files .pm-drive-preview-video{max-width:100%;max-height:60vh;width:100%;display:block}
+#panel-files .pm-drive-preview-audio{width:95%;max-width:100%;margin:20px auto}
+#panel-files .pm-drive-preview-loading{padding:30px;text-align:center;font-size:12px;color:var(--muted)}
+#panel-files .pm-drive-preview-pane .pm-drive-preview-stage:has(.pm-drive-preview-text:not([hidden])){background:var(--card2)}
+#panel-files .pm-drive-preview-pane .pm-drive-preview-stage:has(.pm-drive-preview-frame:not([hidden])){background:#fff}
 #panel-files .pm-drive-preview-unavailable{padding:24px;text-align:center;color:var(--muted);font-size:12px}
 #panel-files .pm-drive-preview-meta{display:grid;gap:7px;margin-bottom:18px}
 #panel-files .pm-drive-meta-row{display:grid;grid-template-columns:96px minmax(0,1fr);gap:7px;font-size:11px;padding:8px 0;border-bottom:1px solid var(--line)}
