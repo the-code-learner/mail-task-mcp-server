@@ -69,9 +69,9 @@ class ComposeRichEditorContracts(unittest.TestCase):
         self.assertIn("key==='background-color'", MAIL_SCRIPT)
         self.assertNotIn("new Function(", MAIL_SCRIPT)
         self.assertNotIn("eval(", MAIL_SCRIPT)
-        self.assertIn("if(!url||!/^https:", MAIL_SCRIPT)
+        self.assertIn("imagePicker?.addEventListener", MAIL_SCRIPT)
         self.assertIn("'FORM','IMG','SVG'", MAIL_SCRIPT)
-        self.assertIn("Visual preview stays read-only", MAIL_SCRIPT)
+        self.assertIn("Stored in Postmaster.", MAIL_SCRIPT)
         self.assertIn("if(!GOOD.has(child.tagName))", MAIL_SCRIPT)
 
     def test_amp_components_are_code_only_and_source_is_preserved(self):
@@ -106,9 +106,11 @@ class ComposeRichEditorContracts(unittest.TestCase):
 
         page = (
             '<!doctype html><html><head><meta charset="utf-8"></head><body>'
-            '<form data-v960-send="1"><div class="v986-shell">'
+            '<div class="v970-workspace"><main><section id="panel-inbox">'
+            '<details class="v971-floating-compose" open><summary>Compose</summary>'
+            '<form method="post" data-v960-send="1"><input name="csrf" value="ok">'
             + EDITOR +
-            '</div></form>' + MAIL_SCRIPT + '</body></html>'
+            '</form></details></section></main></div>' + MAIL_SCRIPT + '</body></html>'
         )
         browser = _browser_session()
         with _serve_browser_document(page) as url:
