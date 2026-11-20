@@ -37,6 +37,8 @@ _WORKER_REASONS = {
     "decoy_target_scope_violation": "policy_denied",
     "content_type_not_allowed": "content_type_rejected",
     "response_too_large": "resource_size_limit",
+    "origin_fetch_failed": "origin_network_failed",
+    "origin_timeout": "origin_timeout",
 }
 
 _ALLOWED_STATES = frozenset({
@@ -45,6 +47,7 @@ _ALLOWED_STATES = frozenset({
     "proxy_auth_failed", "proxy_worker_failure", "proxy_policy_rejected",
     "proxy_invalid_request", "proxy_rate_limited", "proxy_http_error",
     "proxy_timeout", "proxy_transport_error", "proxy_error",
+    "origin_network_failed", "origin_timeout",
     "origin_http_error", "origin_redirect", "origin_missing_status",
     "resource_size_limit", "resource_content_type_rejected",
     "nested_resource_size_limit", "nested_resource_content_type_rejected",
