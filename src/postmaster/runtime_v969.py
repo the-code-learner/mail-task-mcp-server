@@ -14,6 +14,7 @@ from .privacy_cache_v969 import (
     install_hashed_resource_keys,
     rewrite_full_html_v969,
 )
+from .privacy_diagnostics_v98101 import RemoteMessageLoadFailure
 from .privacy_css_cache_v969 import CacheAwareBoundedPassiveContentService
 from .privacy_css_v969 import BoundedPassiveContentService
 from .webgui_v969 import _install_webgui_v969
@@ -155,7 +156,9 @@ def install_runtime_v969_mcp(
                     "bounded_css_nested_resources": True,
                 },
             }
-        except Exception as exc:
+        except RemoteMessageLoadFailure:
+            # ensure_body failed before any proxy requests were started. Do not
+            # report the original IMAP error text, which may contain secrets.
             return {
                 "ok": False,
                 "approval_required": False,
@@ -165,7 +168,30 @@ def install_runtime_v969_mcp(
                 "full_html_available": False,
                 "rendered_html": "",
                 "cache_only": bool(cache_only),
-                "error": type(exc).__name__,
+                "error": "message_body_unavailable",
+                "error_category": "message_load_failed",
+                "failure_stage": "message_load",
+                "retry_hint": (
+                    "Verify the message remains available in the selected account and "
+                    "mailbox, synchronize its body, then retry with explicit authorization."
+                ),
+            }
+        except Exception:
+            # Unhandled failures may occur after a proxy request has started:
+            # never invent a zero-request count or echo raw exception details.
+            return {
+                "ok": False,
+                "approval_required": False,
+                "remote_fetch_performed": False,
+                "network_requests_performed": None,
+                "render_state": "failure",
+                "full_html_available": False,
+                "rendered_html": "",
+                "cache_only": bool(cache_only),
+                "error": "full_html_pipeline_failed",
+                "error_category": "pipeline_error",
+                "failure_stage": "unknown",
+                "network_request_count_known": False,
             }
 
     core.mcp.remove_tool("fetch_email_remote_content")
