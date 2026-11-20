@@ -51,7 +51,7 @@ _ALLOWED_STATES = frozenset({
     "origin_http_error", "origin_redirect", "origin_missing_status",
     "resource_size_limit", "resource_content_type_rejected",
     "nested_resource_size_limit", "nested_resource_content_type_rejected",
-    "nested_cumulative_size_limit",
+    "nested_cumulative_size_limit", "nested_timeout", "stylesheet_size_limit",
 })
 
 
@@ -86,7 +86,13 @@ def safe_exception_state(exc: BaseException) -> str:
 
 
 def safe_worker_response_error(value: Any) -> str:
-    return _WORKER_REASONS.get(str(value or ""), "proxy_error") if value else ""
+    code = str(value or "")
+    if not code:
+        return ""
+    # The local client may have already classified a Worker error.
+    if code in _ALLOWED_STATES:
+        return code
+    return _WORKER_REASONS.get(code, "proxy_error")
 
 
 def failure_category(row: dict[str, Any]) -> str:
