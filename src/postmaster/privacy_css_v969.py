@@ -14,6 +14,9 @@ from .email_privacy_v963 import (
     _classification,
 )
 from .privacy_cache_v969 import PassiveContentService, _passive_allowed
+from .privacy_diagnostics_v98101 import (
+    failure_category, safe_exception_state, safe_worker_response_error,
+)
 
 
 MAX_STYLESHEET_BYTES = 512_000
@@ -116,7 +119,7 @@ class BoundedPassiveContentService(PassiveContentService):
                 "content_type": content_type,
                 "body": body,
                 "redirect_location": str(fetched.get("redirect_location") or ""),
-                "error_state": "proxy_error" if str(fetched.get("error") or "") else "",
+                "error_state": safe_worker_response_error(fetched.get("error")),
             }
         except Exception as exc:
             return {
@@ -124,7 +127,7 @@ class BoundedPassiveContentService(PassiveContentService):
                 "content_type": "",
                 "body": None,
                 "redirect_location": "",
-                "error_state": type(exc).__name__,
+                "error_state": safe_exception_state(exc),
             }
 
     def _store_nested(
@@ -185,7 +188,7 @@ class BoundedPassiveContentService(PassiveContentService):
         filtered, _ = self._filtered_inventory(inventory)
         top_level = self._candidates(filtered)
         remaining_global = max(0, MAX_TOTAL_RESOURCES_PER_MESSAGE_CYCLE - len(top_level))
-        stats: dict[str, int | float] = {
+        stats: dict[str, Any] = {
             "stylesheets_processed": 0,
             "stylesheets_rewritten": 0,
             "stylesheet_failures": 0,
@@ -193,6 +196,7 @@ class BoundedPassiveContentService(PassiveContentService):
             "nested_attempted": 0,
             "nested_succeeded": 0,
             "nested_failed": 0,
+            "nested_failure_categories": {},
             "nested_cache_hits": 0,
             "nested_negative_cache_hits": 0,
             "imports_stripped": 0,
@@ -201,6 +205,12 @@ class BoundedPassiveContentService(PassiveContentService):
             "nested_ms": 0.0,
         }
         started = time.perf_counter()
+
+        def add_nested_failure(row: dict[str, Any]) -> None:
+            category = failure_category(row)
+            category = category or "unknown_failure"
+            groups = stats["nested_failure_categories"]
+            groups[category] = int(groups.get(category) or 0) + 1
 
         for top in top_level:
             if str(top.get("source_type") or "").casefold() != "link href":
@@ -352,10 +362,11 @@ class BoundedPassiveContentService(PassiveContentService):
                         stats["nested_succeeded"] += 1
                     else:
                         stats["nested_failed"] += 1
+                        add_nested_failure(row)
                 for future in pending:
                     spec = futures[future]
                     future.cancel()
-                    self._store_nested(
+                    stored, _ = self._store_nested(
                         spec=spec,
                         fetched={
                             "status": None,
@@ -370,10 +381,11 @@ class BoundedPassiveContentService(PassiveContentService):
                         cumulative_remaining=cumulative_remaining,
                     )
                     stats["nested_failed"] += 1
+                    add_nested_failure(stored)
                 pool.shutdown(wait=False, cancel_futures=True)
             elif work:
                 for spec in work:
-                    self._store_nested(
+                    stored, _ = self._store_nested(
                         spec=spec,
                         fetched={
                             "status": None,
@@ -387,6 +399,7 @@ class BoundedPassiveContentService(PassiveContentService):
                         uid=uid,
                         cumulative_remaining=0,
                     )
+                    add_nested_failure(stored)
                 stats["nested_failed"] += len(work)
 
             def rewrite_url(match: re.Match[str]) -> str:
@@ -451,6 +464,9 @@ class BoundedPassiveContentService(PassiveContentService):
         nested_negative = int(nested.get("nested_negative_cache_hits") or 0)
         stylesheet_failures = int(nested.get("stylesheet_failures") or 0)
         diag.update(nested)
+        failure_groups = dict(diag.get("failure_categories") or {})
+        failure_groups["nested_attempted"] = dict(nested.get("nested_failure_categories") or {})
+        diag["failure_categories"] = failure_groups
         diag["genuine_attempted"] = int(diag.get("genuine_attempted") or 0) + nested_attempted
         diag["genuine_succeeded"] = int(diag.get("genuine_succeeded") or 0) + nested_succeeded
         diag["genuine_failed"] = int(diag.get("genuine_failed") or 0) + nested_failed + stylesheet_failures
