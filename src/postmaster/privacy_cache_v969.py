@@ -18,6 +18,11 @@ from .email_privacy_v963 import (
     safe_email_html,
 )
 from .mailbox_cache_v963 import MailboxCacheStore
+from .email_analytics import _safe_base_url
+from .privacy_diagnostics_v98101 import (
+    RemoteMessageLoadFailure, failure_counts, is_postmaster_tracking_pixel,
+    resource_failure_summaries, safe_exception_state, safe_worker_response_error,
+)
 
 _BLOCKED_NETWORK_CLASSIFICATIONS = {
     "normal link",
@@ -557,10 +562,11 @@ class PassiveContentService:
             self._delete_resource_keys(cache, [key for _, _, key in keyed])
 
         attempted_rows: list[dict[str, Any]] = []
+        cached_negative_indices: set[int] = set()
         work: list[tuple[dict[str, Any], str, str]] = []
         cache_hits = 0
         negative_cache_hits = 0
-        for row, digest, key in keyed:
+        for index, (row, digest, key) in enumerate(keyed):
             cached = cache.get_resource(key)
             if cached is None:
                 work.append((row, digest, key))
@@ -580,6 +586,7 @@ class PassiveContentService:
                 cache_hits += 1
             else:
                 negative_cache_hits += 1
+                cached_negative_indices.add(index)
 
         started_genuine = time.perf_counter()
 
@@ -621,7 +628,7 @@ class PassiveContentService:
                     classification=str(row.get("classification") or "unknown"),
                     tracking_score=int(row.get("tracking_score") or 0),
                     error_state=(
-                        "proxy_error" if str(fetched.get("error") or "") else ""
+                        safe_worker_response_error(fetched.get("error"))
                     ),
                 )
             except Exception as exc:
@@ -638,7 +645,7 @@ class PassiveContentService:
                     redirect_location="",
                     classification=str(row.get("classification") or "unknown"),
                     tracking_score=int(row.get("tracking_score") or 0),
-                    error_state=type(exc).__name__,
+                    error_state=safe_exception_state(exc),
                 )
 
         if work:
@@ -652,8 +659,10 @@ class PassiveContentService:
         genuine_ms = round((time.perf_counter() - started_genuine) * 1000.0, 2)
 
         all_rows: list[dict[str, Any]] = []
+        indexed_rows: list[dict[str, Any] | None] = []
         for _, _, key in keyed:
             cached = cache.get_resource(key)
+            indexed_rows.append(cached)
             if cached is not None:
                 all_rows.append(cached)
 
@@ -669,6 +678,7 @@ class PassiveContentService:
 
         decoy_attempted = 0
         decoy_succeeded = 0
+        decoy_events: list[dict[str, Any]] = []
         decoy_ms = 0.0
         high_noise = bool(proxy_store.status().get("high_noise_decoy_enabled"))
         if work and high_noise:
@@ -682,11 +692,11 @@ class PassiveContentService:
                     mailbox=mailbox,
                     uid=uid,
                 )
-                events = list(noise.get("events") or [])
+                decoy_events = list(noise.get("events") or [])
                 decoy_attempted = int(noise.get("requests") or 0)
                 decoy_succeeded = sum(
                     1
-                    for event in events
+                    for event in decoy_events
                     if int(event.get("http_status") or 0) > 0
                     and not str(event.get("error_state") or "")
                 )
@@ -705,7 +715,32 @@ class PassiveContentService:
                 uid=uid,
             )
 
+        try:
+            public_base = _safe_base_url()
+        except Exception:
+            public_base = ""
+        self_hosted_indexes = {
+            index for index, row in enumerate(candidates)
+            if is_postmaster_tracking_pixel(str(row.get("url") or ""), public_base)
+        }
+        resource_failures = resource_failure_summaries(
+            candidates, indexed_rows, already_cached=cached_negative_indices
+        )
+        diagnostic_failed_decoys = [
+            event for event in decoy_events
+            if not int(event.get("http_status") or 0) or event.get("error_state")
+        ]
         diagnostics = {
+            "failure_categories": {
+                "genuine_attempted": failure_counts(attempted_rows),
+                "cached": failure_counts(all_rows),
+                "decoy": failure_counts(diagnostic_failed_decoys),
+            },
+            "resource_failures": resource_failures,
+            "self_hosted_tracking_pixels_discovered": len(self_hosted_indexes),
+            "self_hosted_tracking_pixels_failed": sum(
+                1 for item in resource_failures if item["index"] in self_hosted_indexes
+            ),
             "passive_discovered": len(candidates),
             "discovered": len(candidates),
             "genuine_attempted": len(work),
@@ -745,12 +780,17 @@ class PassiveContentService:
         uid: str,
         refresh: bool = False,
     ) -> dict[str, Any]:
-        detail = self.base.mailbox_cache_synchronizer().ensure_body(
-            self.base.mail_client(account_id),
-            account_id=account_id,
-            mailbox=mailbox,
-            uid=uid,
-        )
+        try:
+            detail = self.base.mailbox_cache_synchronizer().ensure_body(
+                self.base.mail_client(account_id),
+                account_id=account_id,
+                mailbox=mailbox,
+                uid=uid,
+            )
+        except Exception as exc:
+            # Distinguish a pre-network IMAP/cache failure from proxy failures.
+            # Do not leak mailbox server details or user-provided exception text.
+            raise RemoteMessageLoadFailure("message_body_unavailable") from exc
         body_html = str(detail.get("body_html") or "")
         inventory = inventory_message(
             body_html,
@@ -856,7 +896,31 @@ class PassiveContentService:
                 mailbox=mailbox,
                 uid=uid,
             )
+        try:
+            public_base = _safe_base_url()
+        except Exception:
+            public_base = ""
+        self_hosted_indexes = {
+            index for index, row in enumerate(candidates)
+            if is_postmaster_tracking_pixel(str(row.get("url") or ""), public_base)
+        }
+        indexed_rows = []
+        for row in candidates:
+            url = str(row.get("url") or "")
+            _, key = self._key(cache, account_id, mailbox, uid, url)
+            indexed_rows.append(cache.get_resource(key))
+        resource_failures = resource_failure_summaries(candidates, indexed_rows)
         diagnostics = {
+            "failure_categories": {
+                "genuine_attempted": {},
+                "cached": failure_counts(rows),
+                "decoy": {},
+            },
+            "resource_failures": resource_failures,
+            "self_hosted_tracking_pixels_discovered": len(self_hosted_indexes),
+            "self_hosted_tracking_pixels_failed": sum(
+                1 for item in resource_failures if item["index"] in self_hosted_indexes
+            ),
             "passive_discovered": len(candidates),
             "discovered": len(candidates),
             "genuine_attempted": 0,
