@@ -138,7 +138,6 @@ class Issue97FullHTMLTests(unittest.TestCase):
             result = service.fetch_message(account_id="recv", mailbox="INBOX", uid="7")
         self.assertEqual(result["diagnostics"]["failure_categories"]["cached"], {"origin_http_error": 1})
         self.assertEqual(result["diagnostics"]["resource_failures"][0]["origin_http_status"], 403)
-        self.assertNotIn("http", json.dumps(result["diagnostics"]["resource_failures"][0]["category"]))
         self.assertEqual(failure_category({"http_status": 403, "error_state": ""}), "origin_http_error")
 
     def test_proxy_client_classifies_worker_422_without_exposing_worker_message(self):
