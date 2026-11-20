@@ -22,6 +22,22 @@ const BLOCKED_HOSTS = new Set([
 const BLOCKED_CLASSIFICATIONS = new Set([
   "normal link", "analytics link", "unsubscribe", "action url", "redirector",
 ]);
+// Never echo arbitrary network exception messages or raw target paths to the caller.
+const SAFE_FETCH_FAILURES = new Set([
+  "scheme_not_allowed", "embedded_credentials_not_allowed",
+  "blocked_target_host", "target_has_no_public_dns_answer",
+  "dns_preflight_failed", "dns_resolved_to_blocked_address",
+  "navigation_or_action_url_not_proxyable", "request_kind_not_allowed",
+  "decoy_requires_tracking_obfuscation", "decoy_target_scope_violation",
+  "response_too_large", "content_type_not_allowed",
+  "origin_fetch_failed", "origin_timeout",
+]);
+function safeFetchFailure(error) {
+  const code = String(error && error.message || "");
+  if (SAFE_FETCH_FAILURES.has(code)) return code;
+  if (error && (error.name === "AbortError" || error.name === "TimeoutError")) return "origin_timeout";
+  return "origin_fetch_failed";
+}
 const UNSUBSCRIBE_PATH_RE = /(?:^|[\/_.-])(?:unsubscribe|opt[-_]?out|list[-_]?unsubscribe)(?:$|[\/_.-])/i;
 const ACTION_PATH_RE = /(?:^|[\/_.-])(?:action|reset|magic(?:[-_]?link)?|login|signin|verify|verification|confirm|confirmation|approve|accept|activate)(?:$|[\/_.-])/i;
 const ACTION_VALUE_RE = /(?:unsubscribe|opt[-_]?out|reset|magic|login|signin|verify|confirm|approve|accept|activate)/i;
@@ -369,15 +385,20 @@ async function proxyFetch(payload) {
   try {
     // Exactly one target is contacted for every render/decoy request and no caller Cookie or
     // Authorization header is forwarded.
-    const response = await fetch(target, {
-      method: "GET",
-      redirect: "manual",
-      signal: controller.signal,
-      headers: {
-        "accept": "image/avif,image/webp,image/*,text/css,*/*;q=0.1",
-        "user-agent": PROXY_USER_AGENT,
-      },
-    });
+    let response;
+    try {
+      response = await fetch(target, {
+        method: "GET",
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "accept": "image/avif,image/webp,image/*,text/css,*/*;q=0.1",
+          "user-agent": PROXY_USER_AGENT,
+        },
+      });
+    } catch (error) {
+      throw new Error(controller.signal.aborted ? "origin_timeout" : "origin_fetch_failed");
+    }
     if (response.status >= 300 && response.status < 400) {
       return {
         status: response.status,
@@ -566,6 +587,6 @@ export default {
     try { payload = bodyBytes.length ? JSON.parse(new TextDecoder().decode(bodyBytes)) : {}; } catch (_) { return json({ error: "invalid_json" }, 400); }
     if (path === "/health") return json({ ok: true, service: "postmaster-email-privacy-proxy", version: "9.6.6" });
     if (path !== "/fetch") return json({ error: "not_found" }, 404);
-    try { return json(await proxyFetch(payload)); } catch (error) { return json({ error: String(error.message || error) }, 422); }
+    try { return json(await proxyFetch(payload)); } catch (error) { return json({ error: safeFetchFailure(error) }, 422); }
   },
 };
