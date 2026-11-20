@@ -62,6 +62,12 @@ class Issue97FullHTMLTests(unittest.TestCase):
         base = _Base(self.cache, proxy, high_noise=True)
         base.proxy_store.events = []
         base.proxy_store.record_decoy_event = lambda **kw: base.proxy_store.events.append(kw)
+        base.mailbox_cache_synchronizer = lambda: SimpleNamespace(
+            ensure_body=lambda *args, **kwargs: {
+                "body_html": HTML, "body": "Plain text",
+            },
+        )
+        base.mail_client = lambda account: object()
         return install_full_html_partial_success_v971(PassiveContentService(base))
 
     def test_same_postmaster_pixel_is_not_unconditionally_blocked(self):
