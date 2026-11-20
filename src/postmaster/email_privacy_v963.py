@@ -24,6 +24,10 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from .inbound_inspection_urls import inspect_url
 from .mailbox_cache_v963 import MailboxCacheStore
+from .privacy_diagnostics_v98101 import (
+    PrivacyFetchFailure, safe_exception_state, safe_worker_response_error,
+    worker_failure_category,
+)
 
 
 _CSS_URL_RE = re.compile(r'''(?is)url\(\s*(['"]?)(.*?)\1\s*\)''')
@@ -624,10 +628,25 @@ class PrivacyProxyClient:
         }
         response = self._post("/fetch", payload, timeout_seconds=timeout_seconds)
         if response.status_code != 200:
-            raise RuntimeError(f"Privacy Proxy request failed with HTTP {response.status_code}")
-        data = response.json()
+            # The Worker returns fixed machine error codes on 422. Never surface
+            # arbitrary response bodies, credentials, URLs or exception messages.
+            worker_code = ""
+            if response.status_code == 422:
+                try:
+                    payload = response.json()
+                    if isinstance(payload, dict):
+                        worker_code = str(payload.get("error") or "")
+                except (ValueError, TypeError):
+                    pass
+            raise PrivacyFetchFailure(
+                worker_failure_category(response.status_code, worker_code)
+            )
+        try:
+            data = response.json()
+        except (ValueError, TypeError) as exc:
+            raise PrivacyFetchFailure("proxy_worker_failure") from exc
         if not isinstance(data, dict):
-            raise RuntimeError("Privacy Proxy returned an invalid response")
+            raise PrivacyFetchFailure("proxy_worker_failure")
         content_type = str(data.get("content_type") or "").split(";", 1)[0].strip().casefold()
         body = b""
         encoded = data.get("body_base64")
@@ -644,7 +663,7 @@ class PrivacyProxyClient:
             "content_type": content_type,
             "body": body,
             "redirect_location": str(data.get("redirect_location") or ""),
-            "error": str(data.get("error") or ""),
+            "error": safe_worker_response_error(data.get("error")),
         }
 
 
@@ -852,9 +871,9 @@ def fetch_high_noise_decoys(
             event["http_status"] = int(fetched.get("status") or 0)
             event["response_bytes"] = min(len(bytes(fetched.get("body") or b"")), _MAX_DECOY_RESPONSE_BYTES)
             event["redirect_location"] = str(fetched.get("redirect_location") or "")[:1000]
-            event["error_state"] = str(fetched.get("error") or "")[:500]
+            event["error_state"] = safe_worker_response_error(fetched.get("error"))
         except Exception as exc:
-            event["error_state"] = f"{type(exc).__name__}: {exc}"[:500]
+            event["error_state"] = safe_exception_state(exc)
         store.record_decoy_event(
             account_id=account_id,
             mailbox=mailbox,
