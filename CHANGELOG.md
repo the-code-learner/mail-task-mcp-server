@@ -2,6 +2,17 @@
 
 Postmaster MCP follows Semantic Versioning for stable releases. Every stable release should update `VERSION`, this changelog, and publish an immutable Git tag/release named `vX.Y.Z`.
 
+## 9.8.10-beta.8 - 2026-11-20
+
+### Full HTML remote content diagnostic fix (issue #97)
+- Fixes the uninformative `MailBridgeError`/zero-network response when an explicitly authorized Full HTML fetch cannot prepare the message body. A confirmed pre-proxy failure is now `message_load_failed` with an actionable retry hint and a truthful zero-request count; an unexpected later pipeline error reports its request count as unknown rather than inventing zero.
+- Exposes bounded, sanitized failure classifications for each passive resource by ordinal index (no original URLs, pixel tokens, credentials or mail contents), alongside counters for genuine fetches, cached failures, CSS nested resources and High Noise decoys. Separates origin HTTP statuses, timeouts/network errors, Worker failures, DNS/SSRF denials, MIME/size and policy restrictions.
+- Detects how many requested passive resources are Postmaster's own tracking images without treating those origins as automatically blocked. Existing signed/public-DNS, anti-SSRF, action-link and redirect safety gates remain enforced; no bypass or automatic remote fetch is introduced.
+- The Cloudflare Privacy Proxy Worker source now emits only allowlisted failure codes, distinguishing public origin transport failure from timeout and SSRF. An already-deployed Worker must be reconciled explicitly through its existing authenticated provisioning flow to receive this Worker-side improvement. A successful Worker `/health` response does not imply all `/fetch` requests succeed.
+- Adds end-to-end regressions for a self-hosted `/track/open/*.gif` resource with High Noise enabled, negative cache/cache-only reads, explicit refresh and recovery, origin HTTP 403, Worker HTTP 422, and pre-proxy IMAP/cache errors. All 724 runtime tests passed on the feature PR.
+- The observed external proxy/origin cause of issue #97 cannot be conclusively identified without running the updated diagnostics against the affected installation. This release makes blocked or failed fetches actionable; it does not claim that the live pixel will necessarily load.
+- Existing MCP tool count, owner/account privacy boundaries, tracking permissions, mail sending, stored files, deployment YAML and Python dependencies are unchanged. Release publication does not restart or update running installations.
+
 ## 9.8.10-beta.7 - 2026-11-15
 
 ### Rich HTML/AMP compose editor and Postmaster-hosted tracked images
